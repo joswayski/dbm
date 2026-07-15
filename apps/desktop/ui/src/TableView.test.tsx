@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { TableView } from "./TableView";
 
 describe("TableView", () => {
-  it("keeps pending cell edits when the result set is sorted", async () => {
+  it("keeps pending cell edits when sorted and can discard one row from its full diff", async () => {
     render(<TableView profileId="preview" schema="public" table="users" />);
 
     const email = await screen.findByText("person1@example.com");
@@ -21,26 +21,74 @@ describe("TableView", () => {
     expect(row).toHaveClass("staged-row");
     expect(screen.getByRole("button", { name: "Save changes (1)" })).toBeInTheDocument();
     fireEvent.mouseEnter(row!);
-    expect(screen.getByText("Pending edits")).toBeInTheDocument();
+    expect(screen.getByText("Pending edit")).toBeInTheDocument();
+    expect(screen.getByText("Before").nextElementSibling).toHaveTextContent("person1@example.com");
+    expect(screen.getByText("After").nextElementSibling).toHaveTextContent("updated@example.com");
+    fireEvent.mouseLeave(row!);
 
     fireEvent.click(screen.getByRole("button", { name: "Sort by id" }));
 
     const updatedEmail = await screen.findByText("updated@example.com");
-    await waitFor(() => expect(updatedEmail.closest("tr")).toHaveClass("staged-row"));
-    expect(screen.getByRole("button", { name: "Save changes (1)" })).toBeInTheDocument();
+    const updatedRow = updatedEmail.closest("tr");
+    await waitFor(() => expect(updatedRow).toHaveClass("staged-row"));
+    fireEvent.mouseEnter(updatedRow!);
+    fireEvent.click(screen.getByRole("button", { name: "Discard row edit" }));
+
+    expect(await screen.findByText("person1@example.com")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save changes (1)" })).not.toBeInTheDocument();
   });
 
-  it("selects a range and stages multiple rows for deletion", async () => {
+  it("selects a range by clicking rows and stages multiple deletions without checkboxes", async () => {
     const { container } = render(<TableView profileId="preview" schema="public" table="users" />);
     await screen.findByText("person1@example.com");
 
-    const checkboxes = screen.getAllByRole("checkbox");
-    fireEvent.click(checkboxes[1]);
-    fireEvent.click(checkboxes[2], { shiftKey: true });
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    const rows = container.querySelectorAll("tbody tr");
+    fireEvent.click(rows[0]);
+    fireEvent.click(rows[1], { shiftKey: true });
 
+    expect(rows[0]).toHaveAttribute("aria-selected", "true");
+    expect(rows[1]).toHaveAttribute("aria-selected", "true");
     fireEvent.click(screen.getByRole("button", { name: "Delete selected (2)" }));
 
     expect(container.querySelectorAll("tr.deleted-row")).toHaveLength(2);
-    expect(screen.getByRole("button", { name: "Save changes (2)" })).toBeInTheDocument();
+    expect(screen.getByText("2 pending changes")).toBeInTheDocument();
+    expect(screen.getByText("2 deletions")).toBeInTheDocument();
+    fireEvent.mouseEnter(rows[0]);
+    expect(screen.getByText("Pending delete")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Undo delete" }));
+
+    expect(container.querySelectorAll("tr.deleted-row")).toHaveLength(1);
+    expect(screen.getByText("1 deletion")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save changes (1)" })).toBeInTheDocument();
+  });
+
+  it("keeps the filter list empty after applying an intentionally empty filter set", async () => {
+    render(<TableView profileId="preview" schema="public" table="users" />);
+    await screen.findByText("person1@example.com");
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove filter" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
+
+    await waitFor(() => expect(screen.getByRole("button", { name: /Copy visible/ })).not.toBeDisabled());
+    expect(screen.queryByRole("button", { name: "Remove filter" })).not.toBeInTheDocument();
+  });
+
+  it("shows the collapsed column name and focuses the target column immediately", async () => {
+    render(<TableView profileId="preview" schema="public" table="users" />);
+    await screen.findByText("person1@example.com");
+
+    const collapse = screen.getByRole("button", { name: "Collapse email" });
+    expect(collapse).not.toHaveAttribute("title");
+    expect(collapse).toHaveAttribute("data-tooltip", "Collapse email");
+    fireEvent.mouseEnter(collapse);
+    expect(collapse.closest("th")).toHaveClass("column-action-target");
+    expect(screen.getByRole("button", { name: "Sort by id" }).closest("th")).toHaveClass("column-action-dimmed");
+
+    fireEvent.click(collapse);
+    const expand = screen.getByRole("button", { name: "Expand email" });
+    expect(expand).toHaveTextContent("email");
+    expect(expand).not.toHaveAttribute("title");
+    expect(expand).toHaveAttribute("data-tooltip", "Expand email");
   });
 });

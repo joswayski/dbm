@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from "react";
 
 import * as commands from "./commands";
 import type {
@@ -15,8 +15,7 @@ import type {
 const MAX_PREVIEW_ROWS = 200;
 const EXPORT_PAGE_SIZE = 1_000;
 const LARGE_EXPORT_WARNING_ROWS = 100_000;
-const SELECTION_COLUMN_WIDTH = 42;
-const COLLAPSED_COLUMN_WIDTH = 42;
+const COLLAPSED_COLUMN_WIDTH = 76;
 
 const FILTER_OPERATORS: Array<{ value: FilterOperator; label: string }> = [
   { value: "equals", label: "Equals" },
@@ -73,6 +72,7 @@ export function TableView({ profileId, schema, table }: { profileId: string; sch
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});
   const [collapsedColumns, setCollapsedColumns] = useState<Set<string>>(new Set());
+  const [hoveredColumnAction, setHoveredColumnAction] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [showLoadingOverlay, setShowLoadingOverlay] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -80,6 +80,7 @@ export function TableView({ profileId, schema, table }: { profileId: string; sch
   const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
+  const filtersInitialized = useRef(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -101,8 +102,9 @@ export function TableView({ profileId, schema, table }: { profileId: string; sch
       setSelectedRows(new Set());
       setSelectionAnchor(null);
       setContextMenu(null);
-      if (nextPage.metadata.columns[0]) {
-        setFilterDrafts((current) => current.length > 0 ? current : [createFilterDraft(nextPage.metadata.columns[0].name)]);
+      if (!filtersInitialized.current && nextPage.metadata.columns[0]) {
+        filtersInitialized.current = true;
+        setFilterDrafts([createFilterDraft(nextPage.metadata.columns[0].name)]);
       }
     } catch (reason) {
       setError(errorMessage(reason));
@@ -145,6 +147,8 @@ export function TableView({ profileId, schema, table }: { profileId: string; sch
   const displayRows = page?.rows ?? [];
   const editable = Boolean(page?.metadata.primaryKey.length);
   const pendingCount = Object.keys(pendingRows).length;
+  const pendingDeleteCount = Object.values(pendingRows).filter((pending) => pending.deleted).length;
+  const pendingEditCount = pendingCount - pendingDeleteCount;
   const rowEntries: RowEntry[] = page ? displayRows.map((row, rowIndex) => {
     const key = tableRowKey(page.metadata, row, page.offset + rowIndex);
     const pending = pendingRows[key];
@@ -157,7 +161,6 @@ export function TableView({ profileId, schema, table }: { profileId: string; sch
     };
   }) : [];
   const selectedEntries = rowEntries.filter((entry) => selectedRows.has(entry.key));
-  const allVisibleSelected = rowEntries.length > 0 && rowEntries.every((entry) => selectedRows.has(entry.key));
   const allSelectedDeleted = selectedEntries.length > 0 && selectedEntries.every((entry) => entry.pending?.deleted);
   const copyableEntries = rowEntries.filter((entry) => !entry.pending?.deleted);
 
@@ -165,7 +168,7 @@ export function TableView({ profileId, schema, table }: { profileId: string; sch
     if (collapsedColumns.has(column.name)) return COLLAPSED_COLUMN_WIDTH;
     return columnWidths[column.name] ?? defaultColumnWidth(column);
   };
-  const gridWidth = SELECTION_COLUMN_WIDTH + visibleColumns.reduce((total, column) => total + columnWidth(column), 0);
+  const gridWidth = visibleColumns.reduce((total, column) => total + columnWidth(column), 0);
 
   const pendingFromRow = (row: JsonValue[]): PendingRow => {
     if (!page) throw new Error("Table metadata is unavailable");
@@ -328,7 +331,7 @@ export function TableView({ profileId, schema, table }: { profileId: string; sch
     setPageIndex(0);
   };
 
-  const selectRow = (event: ReactMouseEvent, rowIndex: number, key: string, toggle = false) => {
+  const selectRow = (event: ReactMouseEvent, rowIndex: number, key: string) => {
     setSelectedRows((current) => {
       if (event.shiftKey && selectionAnchor !== null) {
         const next = event.metaKey || event.ctrlKey ? new Set(current) : new Set<string>();
@@ -337,7 +340,7 @@ export function TableView({ profileId, schema, table }: { profileId: string; sch
         rowEntries.slice(start, end + 1).forEach((entry) => next.add(entry.key));
         return next;
       }
-      if (toggle || event.metaKey || event.ctrlKey) {
+      if (event.metaKey || event.ctrlKey) {
         const next = new Set(current);
         if (next.has(key)) next.delete(key);
         else next.add(key);
@@ -349,9 +352,20 @@ export function TableView({ profileId, schema, table }: { profileId: string; sch
     setContextMenu(null);
   };
 
-  const toggleSelectAll = () => {
-    setSelectedRows(allVisibleSelected ? new Set() : new Set(rowEntries.map((entry) => entry.key)));
-    setSelectionAnchor(null);
+  const discardPendingRow = (rowKey: string) => {
+    setPendingRows((current) => {
+      const pending = current[rowKey];
+      if (!pending) return current;
+      const next = { ...current };
+      if (pending.deleted && !rowsEqual(pending.changes, pending.original)) {
+        next[rowKey] = { ...pending, deleted: false };
+      } else {
+        delete next[rowKey];
+      }
+      return next;
+    });
+    setEditing((current) => current?.rowKey === rowKey ? null : current);
+    setNotice(null);
   };
 
   const stageDeleteForSelected = () => {
@@ -384,6 +398,7 @@ export function TableView({ profileId, schema, table }: { profileId: string; sch
   };
 
   const toggleColumn = (column: string) => {
+    setHoveredColumnAction(null);
     setCollapsedColumns((current) => {
       const next = new Set(current);
       if (next.has(column)) next.delete(column);
@@ -486,27 +501,49 @@ export function TableView({ profileId, schema, table }: { profileId: string; sch
 
       {error ? <DismissibleMessage className="inline-error" message={error} onDismiss={() => setError(null)} /> : null}
       {notice ? <DismissibleMessage className="inline-notice" message={notice} onDismiss={() => setNotice(null)} /> : null}
-      {pendingCount > 0 ? <div className="pending-changes">{pendingCount} pending {pendingCount === 1 ? "change" : "changes"}. Orange rows contain edits; red rows are staged for deletion. Sorting and filtering keep these changes until you save or discard them.</div> : null}
+      {pendingCount > 0 ? <div className="pending-changes">
+        <strong>{pendingCount} pending {pendingCount === 1 ? "change" : "changes"}</strong>
+        {pendingEditCount > 0 ? <span className="pending-edit-count">{pendingEditCount} {pendingEditCount === 1 ? "edited row" : "edited rows"}</span> : null}
+        {pendingDeleteCount > 0 ? <span className="pending-delete-count">{pendingDeleteCount} {pendingDeleteCount === 1 ? "deletion" : "deletions"}</span> : null}
+      </div> : null}
 
       <div className="grid-wrap">
-        {loading && !page ? <div className="loading-state">Loading rows…</div> : page && rowEntries.length > 0 ? (
-          <table className="data-grid resizable-grid" style={{ width: `${gridWidth}px`, minWidth: "100%" }}>
+        {loading && !page ? <div className="initial-grid-skeleton" aria-label="Loading rows">
+          <div className="skeleton-header" />
+          {Array.from({ length: 5 }, (_, index) => <div className="skeleton-row" key={index} />)}
+        </div> : page && rowEntries.length > 0 ? (
+          <table className={`data-grid resizable-grid ${hoveredColumnAction ? "column-action-active" : ""}`} style={{ width: `${gridWidth}px`, minWidth: "100%" }}>
             <colgroup>
-              <col style={{ width: `${SELECTION_COLUMN_WIDTH}px` }} />
               {visibleColumns.map((column) => <col key={column.name} style={{ width: `${columnWidth(column)}px` }} />)}
             </colgroup>
             <thead><tr>
-              <th className="selection-header"><input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAll} aria-label="Select all visible rows" /></th>
               {visibleColumns.map((column) => {
                 const sorted = orderBy?.column === column.name;
                 const collapsed = collapsedColumns.has(column.name);
-                return <th key={column.name} className={sorted ? "sorted-column resizable-header" : "resizable-header"}>
-                  {collapsed ? <button className="expand-column" onClick={() => toggleColumn(column.name)} title={`Expand ${column.name}`} aria-label={`Expand ${column.name}`}>▶</button> : <div className="column-header-content">
+                const focusClass = hoveredColumnAction
+                  ? hoveredColumnAction === column.name ? "column-action-target" : "column-action-dimmed"
+                  : "";
+                return <th key={column.name} className={[sorted ? "sorted-column" : "", "resizable-header", focusClass].filter(Boolean).join(" ")}>
+                  {collapsed ? <button
+                    className="expand-column column-action-button"
+                    onClick={() => toggleColumn(column.name)}
+                    onMouseEnter={() => setHoveredColumnAction(column.name)}
+                    onMouseLeave={() => setHoveredColumnAction(null)}
+                    data-tooltip={`Expand ${column.name}`}
+                    aria-label={`Expand ${column.name}`}
+                  ><span className="column-action-glyph" aria-hidden="true">↦</span><span className="collapsed-column-name">{column.name}</span></button> : <div className="column-header-content">
                     <button className="column-sort" onClick={() => toggleSort(column.name)} aria-label={`Sort by ${column.name}`}>
                       <span>{column.name}<small>{column.dataType}</small></span>
                       <span className={`sort-indicator ${sorted ? "active" : ""}`}>{sorted ? orderBy.descending ? "↓" : "↑" : "↕"}</span>
                     </button>
-                    <button className="collapse-column" onClick={() => toggleColumn(column.name)} title={`Collapse ${column.name}`} aria-label={`Collapse ${column.name}`}>◀</button>
+                    <button
+                      className="collapse-column column-action-button"
+                      onClick={() => toggleColumn(column.name)}
+                      onMouseEnter={() => setHoveredColumnAction(column.name)}
+                      onMouseLeave={() => setHoveredColumnAction(null)}
+                      data-tooltip={`Collapse ${column.name}`}
+                      aria-label={`Collapse ${column.name}`}
+                    ><span className="column-action-glyph" aria-hidden="true">↤</span></button>
                   </div>}
                   {!collapsed ? <div className="column-resize-handle" onMouseDown={(event) => startColumnResize(event, column)} /> : null}
                 </th>;
@@ -523,17 +560,22 @@ export function TableView({ profileId, schema, table }: { profileId: string; sch
                 onContextMenu={(event) => openContextMenu(event, entry)}
                 onMouseEnter={() => setHoveredRowKey(entry.key)}
                 onMouseLeave={() => setHoveredRowKey(null)}
+                aria-selected={selectedRows.has(entry.key)}
               >
-                <td className="selection-cell">
-                  <input type="checkbox" checked={selectedRows.has(entry.key)} onClick={(event) => { event.stopPropagation(); selectRow(event, entry.rowIndex, entry.key, true); }} onChange={() => undefined} aria-label={`Select row ${entry.rowIndex + 1}`} />
-                  {hoveredRowKey === entry.key && entry.pending ? <ChangePreview pending={entry.pending} columns={visibleColumns} /> : null}
-                </td>
                 {visibleColumns.map((column, columnIndex) => {
                   const collapsed = collapsedColumns.has(column.name);
                   const isEditing = editing?.rowKey === entry.key && editing.column === columnIndex;
                   const isPrimaryKey = page.metadata.primaryKey.includes(column.name);
                   const displayValue = commands.toDisplayValue(entry.values[columnIndex]);
-                  return <td key={column.name} title={collapsed ? displayValue : undefined} onDoubleClick={() => editable && !collapsed && !isPrimaryKey && !deleted && setEditing({ rowKey: entry.key, column: columnIndex })}>
+                  const focusClass = hoveredColumnAction
+                    ? hoveredColumnAction === column.name ? "column-action-target" : "column-action-dimmed"
+                    : "";
+                  return <td
+                    key={column.name}
+                    className={[columnIndex === 0 ? "row-preview-anchor" : "", collapsed ? "collapsed-data-cell" : "", focusClass].filter(Boolean).join(" ")}
+                    onDoubleClick={() => editable && !collapsed && !isPrimaryKey && !deleted && setEditing({ rowKey: entry.key, column: columnIndex })}
+                  >
+                    {columnIndex === 0 && hoveredRowKey === entry.key && entry.pending ? <ChangePreview pending={entry.pending} columns={visibleColumns} onDiscard={() => discardPendingRow(entry.key)} /> : null}
                     {collapsed ? <span className="collapsed-cell">…</span> : isEditing ? <input
                       autoFocus
                       className="cell-input"
@@ -570,17 +612,29 @@ function DismissibleMessage({ className, message, onDismiss }: { className: stri
   return <div className={`${className} dismissible-message`}><span>{message}</span><button onClick={onDismiss} aria-label="Dismiss message">×</button></div>;
 }
 
-function ChangePreview({ pending, columns }: { pending: PendingRow; columns: TableColumn[] }) {
-  if (pending.deleted) return <div className="change-preview"><strong>Pending delete</strong><span>This row will be deleted when changes are saved.</span></div>;
+function ChangePreview({ pending, columns, onDiscard }: { pending: PendingRow; columns: TableColumn[]; onDiscard: () => void }) {
+  const stopPropagation = (event: ReactMouseEvent) => event.stopPropagation();
+  if (pending.deleted) return <div className="change-preview delete-preview" onMouseDown={stopPropagation} onClick={stopPropagation}>
+    <div className="change-preview-header"><strong>Pending delete</strong><button onClick={(event) => { event.stopPropagation(); onDiscard(); }}>Undo delete</button></div>
+    <p>This row will be deleted when changes are saved.</p>
+  </div>;
   const changes = columns.flatMap((column, index) => rowsEqual([pending.original[index]], [pending.changes[index]]) ? [] : [{
     column: column.name,
     before: commands.toDisplayValue(pending.original[index]),
     after: commands.toDisplayValue(pending.changes[index]),
   }]);
-  return <div className="change-preview">
-    <strong>Pending edits</strong>
-    {changes.slice(0, 4).map((change) => <span key={change.column}><b>{change.column}</b> {change.before} → {change.after}</span>)}
-    {changes.length > 4 ? <span>and {changes.length - 4} more…</span> : null}
+  return <div className="change-preview edit-preview" onMouseDown={stopPropagation} onClick={stopPropagation}>
+    <div className="change-preview-header"><strong>Pending edit</strong><button onClick={(event) => { event.stopPropagation(); onDiscard(); }}>Discard row edit</button></div>
+    <div className="change-diff-list">
+      {changes.map((change) => <div className="change-diff" key={change.column}>
+        <b>{change.column}</b>
+        <div className="change-diff-values">
+          <div><span>Before</span><pre>{change.before}</pre></div>
+          <span className="change-arrow" aria-hidden="true">→</span>
+          <div><span>After</span><pre>{change.after}</pre></div>
+        </div>
+      </div>)}
+    </div>
   </div>;
 }
 

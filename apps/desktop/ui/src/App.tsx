@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from "react";
-import CodeMirror from "@uiw/react-codemirror";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from "react";
+import CodeMirror, { keymap, type EditorView, type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import { sql } from "@codemirror/lang-sql";
 
 import * as commands from "./commands";
 import { parsePostgresConnectionUrl } from "./connectionUrl";
+import { sqlToRun } from "./sqlSelection";
 import { useDbvStore } from "./store";
 import { TableView } from "./TableView";
 import type {
@@ -64,6 +65,7 @@ export default function App() {
     return Number.isFinite(saved) ? Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, saved)) : DEFAULT_SIDEBAR_WIDTH;
   });
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem("dbv.sidebarCollapsed") === "true");
+  const [mountedTabIds, setMountedTabIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     void loadProfiles().catch((reason: unknown) => setError(errorMessage(reason)));
@@ -137,6 +139,39 @@ export default function App() {
     window.addEventListener("mouseup", stop);
   };
 
+  const rememberActiveTab = () => {
+    if (!activeTabId) return;
+    setMountedTabIds((current) => {
+      if (current.has(activeTabId)) return current;
+      return new Set(current).add(activeTabId);
+    });
+  };
+
+  const handleOpenTable = (profileId: string, schema: string, table: string) => {
+    rememberActiveTab();
+    openTable(profileId, schema, table);
+  };
+
+  const handleOpenQuery = (profileId: string) => {
+    rememberActiveTab();
+    openQuery(profileId);
+  };
+
+  const handleSetActiveTab = (tabId: string) => {
+    rememberActiveTab();
+    setActiveTab(tabId);
+  };
+
+  const handleCloseTab = (tabId: string) => {
+    setMountedTabIds((current) => {
+      if (!current.has(tabId)) return current;
+      const next = new Set(current);
+      next.delete(tabId);
+      return next;
+    });
+    closeTab(tabId);
+  };
+
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? null;
   const activeWorkspace = activeProfileId ? workspaces[activeProfileId] : undefined;
   const activeViewProfile = (activeTab
@@ -190,7 +225,7 @@ export default function App() {
             <div className="workspace-heading">
               <span className="status-dot" />
               <span className="truncate">{activeWorkspace.profile.name}</span>
-              <button className="icon-button subtle" title="New query" onClick={() => openQuery(activeProfileId)}>＋</button>
+              <button className="icon-button subtle" title="New query" onClick={() => handleOpenQuery(activeProfileId)}>＋</button>
             </div>
             <label className="field-label" htmlFor="database-select">Database</label>
             <select id="database-select" className="select-input" value={activeWorkspace.profile.defaultDatabase} onChange={(event) => void handleDatabaseChange(event.target.value)}>
@@ -202,7 +237,7 @@ export default function App() {
             </div>
             <div className="schema-tree">
               {(schemas[activeProfileId] ?? []).map((node) => (
-                <SchemaBranch key={`${node.kind}-${node.name}`} node={node} onTable={(schema, table) => openTable(activeProfileId, schema, table)} />
+                <SchemaBranch key={`${node.kind}-${node.name}`} node={node} onTable={(schema, table) => handleOpenTable(activeProfileId, schema, table)} />
               ))}
             </div>
           </div>
@@ -242,7 +277,7 @@ export default function App() {
             </div>
           ) : <div className="breadcrumb">No active connection</div>}
           <div className="topbar-actions">
-            {activeProfileId ? <button className="secondary-button" onClick={() => openQuery(activeProfileId)}>New query</button> : null}
+            {activeProfileId ? <button className="secondary-button" onClick={() => handleOpenQuery(activeProfileId)}>New query</button> : null}
           </div>
         </header>
         {error ? <div className="error-banner"><span>{error}</span><button onClick={() => setError(null)}>×</button></div> : null}
@@ -256,19 +291,22 @@ export default function App() {
               } as CSSProperties}
             >
               <span className="tab-color" />
-              <button onClick={() => setActiveTab(tab.id)}>{tab.kind === "table" ? "▦" : "⌘"} {tab.title}</button>
-              <button className="tab-close" onClick={() => closeTab(tab.id)} aria-label={`Close ${tab.title}`}>×</button>
+              <button onClick={() => handleSetActiveTab(tab.id)}>{tab.kind === "table" ? "▦" : "⌘"} {tab.title}</button>
+              <button className="tab-close" onClick={() => handleCloseTab(tab.id)} aria-label={`Close ${tab.title}`}>×</button>
             </div>
           ))}
         </div>
         <section className="content-pane">
-          {activeTab?.kind === "table" && activeTab.schema && activeTab.table ? (
-            <TableView key={activeTab.id} profileId={activeTab.profileId} schema={activeTab.schema} table={activeTab.table} />
-          ) : activeTab?.kind === "query" ? (
-            <QueryView key={activeTab.id} profileId={activeTab.profileId} initialSql={activeTab.sql ?? "SELECT now();"} />
-          ) : (
-            <Welcome hasProfiles={profiles.length > 0} />
-          )}
+          {activeTab ? tabs.map((tab) => {
+            const shouldMount = tab.id === activeTabId || mountedTabIds.has(tab.id);
+            return <div className={`tab-pane ${tab.id === activeTabId ? "active" : ""}`} key={tab.id} aria-hidden={tab.id !== activeTabId}>
+              {shouldMount && tab.kind === "table" && tab.schema && tab.table ? (
+                <TableView profileId={tab.profileId} schema={tab.schema} table={tab.table} />
+              ) : shouldMount && tab.kind === "query" ? (
+                <QueryView profileId={tab.profileId} initialSql={tab.sql ?? "SELECT now();"} />
+              ) : null}
+            </div>;
+          }) : <Welcome hasProfiles={profiles.length > 0} />}
         </section>
       </main>
       {modalProfile !== undefined ? (
@@ -362,6 +400,7 @@ function QueryView({ profileId, initialSql }: { profileId: string; initialSql: s
   const [history, setHistory] = useState<QueryHistoryEntry[]>([]);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const editorRef = useRef<ReactCodeMirrorRef>(null);
 
   useEffect(() => {
     void commands.listQueryHistory(profileId).then(setHistory).catch((reason: unknown) => setError(errorMessage(reason)));
@@ -373,12 +412,15 @@ function QueryView({ profileId, initialSql }: { profileId: string; initialSql: s
     return () => window.clearTimeout(timer);
   }, [error]);
 
-  const run = async () => {
-    if (requiresConfirmation(sqlText) && !window.confirm("This query may change or remove many rows. Run it anyway?")) return;
+  const run = useCallback(async (statement?: string) => {
+    if (running) return;
+    const executableSql = (statement ?? sqlText).trim();
+    if (!executableSql) return;
+    if (requiresConfirmation(executableSql) && !window.confirm("This query may change or remove many rows. Run it anyway?")) return;
     setRunning(true);
     setError(null);
     try {
-      const next = await commands.runQuery({ profileId, sql: sqlText, maxRows: 10_000 });
+      const next = await commands.runQuery({ profileId, sql: executableSql, maxRows: 10_000 });
       setResponse(next);
       setHistory(await commands.listQueryHistory(profileId));
     } catch (reason) {
@@ -386,13 +428,30 @@ function QueryView({ profileId, initialSql }: { profileId: string; initialSql: s
     } finally {
       setRunning(false);
     }
+  }, [profileId, running, sqlText]);
+
+  const selectedOrCurrentStatement = useCallback((view?: EditorView) => {
+    if (!view) return sqlText.trim();
+    const selection = view.state.selection.main;
+    return sqlToRun(view.state.doc.toString(), selection.from, selection.to);
+  }, [sqlText]);
+
+  const runFromKeymap = useCallback((view: EditorView) => {
+    void run(selectedOrCurrentStatement(view));
+    return true;
+  }, [run, selectedOrCurrentStatement]);
+
+  const editorExtensions = useMemo(() => [sql(), keymap.of([{ key: "Mod-Enter", run: runFromKeymap }])], [runFromKeymap]);
+
+  const runFromEditor = () => {
+    void run(selectedOrCurrentStatement(editorRef.current?.view));
   };
 
   return (
     <div className="query-view">
-      <div className="view-toolbar"><div><span className="eyebrow">SQL WORKBENCH</span><h2>Query</h2></div><div className="toolbar-actions"><button className="secondary-button" onClick={() => void commands.cancelQuery().catch((reason: unknown) => setError(errorMessage(reason)))} disabled={!running}>Cancel</button><button className="primary-button" onClick={() => void run()} disabled={running}>{running ? "Running…" : "Run query"}<kbd>⌘↵</kbd></button></div></div>
+      <div className="view-toolbar"><div><span className="eyebrow">SQL WORKBENCH</span><h2>Query</h2></div><div className="toolbar-actions"><button className="secondary-button" onClick={() => void commands.cancelQuery().catch((reason: unknown) => setError(errorMessage(reason)))} disabled={!running}>Cancel</button><button className="primary-button" onClick={runFromEditor} disabled={running || !sqlText.trim()}>{running ? "Running…" : "Run current"}<kbd>⌘↵</kbd></button></div></div>
       <div className="query-layout">
-        <div className="editor-panel"><CodeMirror value={sqlText} height="260px" theme="dark" extensions={[sql()]} onChange={setSqlText} basicSetup={{ lineNumbers: true, foldGutter: false }} /><div className="editor-hint">Dedicated session · results capped at 10,000 rows · writes are enabled</div></div>
+        <div className="editor-panel"><CodeMirror ref={editorRef} value={sqlText} height="260px" theme="dark" extensions={editorExtensions} onChange={setSqlText} basicSetup={{ lineNumbers: true, foldGutter: false }} /><div className="editor-hint">Select SQL to run it, or place the cursor in a statement · Command/Ctrl+Enter · results capped at 10,000 rows</div></div>
         <aside className="history-panel"><div className="panel-title">History</div>{history.length === 0 ? <p className="muted">Run a query to start history.</p> : history.slice(0, 12).map((entry) => <button className="history-item" key={entry.id} onClick={() => setSqlText(entry.sql)}><span>{entry.success ? "✓" : "!"}</span><span className="history-sql">{entry.sql.replace(/\s+/g, " ").slice(0, 70)}</span><small>{new Date(entry.executedAt).toLocaleTimeString()}</small></button>)}</aside>
       </div>
       {error ? <div className="inline-error dismissible-message"><span>{error}</span><button onClick={() => setError(null)} aria-label="Dismiss message">×</button></div> : null}
