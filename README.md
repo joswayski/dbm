@@ -30,8 +30,11 @@ Passwords are stored in the operating system credential store when available.
 - Local connection profiles and query history in an application SQLite database.
 - Passwords through the macOS Keychain, Windows Credential Manager, or Linux
   secret service via `keyring`.
-- Database list, schemas, tables/views, 200-row pages, server-side text filters,
-  ordering, CSV export, and TSV copy.
+- Database list, schemas, tables/views, configurable previews up to 200 rows,
+  structured multi-filtering, ordering, visible-page CSV copy, and full filtered
+  CSV export.
+- Resizable sidebars and columns, collapsible wide fields, and multi-row
+  selection for staged edits and deletes.
 - Inline edits and staged deletes for primary-key-backed tables, guarded by
   PostgreSQL `xmin` optimistic concurrency checks and a read-only profile mode.
 - SQL tabs using CodeMirror, query result grids, a 10,000-row safety cap, and
