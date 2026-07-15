@@ -41,21 +41,12 @@ impl AppState {
     }
 
     pub fn profile_summaries(&self) -> AppResult<Vec<ProfileSummary>> {
-        self.store
+        Ok(self
+            .store
             .list_profiles()?
             .into_iter()
-            .map(|profile| {
-                let has_password = self
-                    .credentials
-                    .get_password(profile.id)
-                    .unwrap_or_default()
-                    .is_some();
-                Ok(ProfileSummary {
-                    profile,
-                    has_password,
-                })
-            })
-            .collect()
+            .map(|profile| ProfileSummary { profile })
+            .collect())
     }
 
     pub async fn connect(&self, profile: ConnectionProfile) -> AppResult<Arc<PgSession>> {

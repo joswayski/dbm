@@ -64,7 +64,6 @@ pub struct SaveProfileInput {
 #[serde(rename_all = "camelCase")]
 pub struct ProfileSummary {
     pub profile: ConnectionProfile,
-    pub has_password: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -120,6 +119,12 @@ pub enum FilterOperator {
     Contains,
     StartsWith,
     EndsWith,
+    GreaterThan,
+    GreaterThanOrEqual,
+    LessThan,
+    LessThanOrEqual,
+    In,
+    NotIn,
     IsNull,
     IsNotNull,
 }
@@ -149,6 +154,7 @@ pub struct TablePageRequest {
     pub limit: u32,
     pub filters: Vec<FilterCondition>,
     pub order_by: Option<OrderSpec>,
+    pub include_total: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

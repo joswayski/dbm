@@ -198,14 +198,17 @@ impl PgSession {
                     .collect::<Vec<_>>()
             })
             .collect::<Vec<_>>();
-        let count_sql = format!("SELECT COUNT(*)::bigint FROM {table_name}{predicate}");
-        let total_rows = self
-            .client
-            .query_one(&count_sql, &[])
-            .await
-            .ok()
-            .and_then(|row| row.try_get::<_, i64>(0).ok())
-            .and_then(|count| u64::try_from(count).ok());
+        let total_rows = if request.include_total.unwrap_or(true) {
+            let count_sql = format!("SELECT COUNT(*)::bigint FROM {table_name}{predicate}");
+            self.client
+                .query_one(&count_sql, &[])
+                .await
+                .ok()
+                .and_then(|row| row.try_get::<_, i64>(0).ok())
+                .and_then(|count| u64::try_from(count).ok())
+        } else {
+            None
+        };
         let columns = metadata
             .columns
             .iter()
@@ -481,35 +484,40 @@ fn build_predicate(metadata: &TableMetadata, filters: &[FilterCondition]) -> App
                 filter.column
             )));
         }
-        let column = format!("{}::text", quote_identifier(&filter.column));
+        let column = quote_identifier(&filter.column);
+        let text_column = format!("{column}::text");
+        let value = filter.value.as_deref().unwrap_or_default();
         let clause = match filter.operator {
-            FilterOperator::Equals => format!(
-                "{column} = {}",
-                quote_literal(filter.value.as_deref().unwrap_or_default())
-            ),
-            FilterOperator::NotEquals => format!(
-                "{column} <> {}",
-                quote_literal(filter.value.as_deref().unwrap_or_default())
-            ),
+            FilterOperator::Equals => {
+                format!("{column} IS NOT DISTINCT FROM {}", quote_literal(value))
+            }
+            FilterOperator::NotEquals => {
+                format!("{column} IS DISTINCT FROM {}", quote_literal(value))
+            }
             FilterOperator::Contains => format!(
-                "{column} ILIKE {}",
-                quote_literal(&format!(
-                    "%{}%",
-                    filter.value.as_deref().unwrap_or_default()
-                ))
+                "{text_column} ILIKE {}",
+                quote_literal(&format!("%{value}%"))
             ),
             FilterOperator::StartsWith => format!(
-                "{column} ILIKE {}",
-                quote_literal(&format!("{}%", filter.value.as_deref().unwrap_or_default()))
+                "{text_column} ILIKE {}",
+                quote_literal(&format!("{value}%"))
             ),
             FilterOperator::EndsWith => format!(
-                "{column} ILIKE {}",
-                quote_literal(&format!("%{}", filter.value.as_deref().unwrap_or_default()))
+                "{text_column} ILIKE {}",
+                quote_literal(&format!("%{value}"))
             ),
-            FilterOperator::IsNull => format!("{} IS NULL", quote_identifier(&filter.column)),
-            FilterOperator::IsNotNull => {
-                format!("{} IS NOT NULL", quote_identifier(&filter.column))
+            FilterOperator::GreaterThan => format!("{column} > {}", quote_literal(value)),
+            FilterOperator::GreaterThanOrEqual => {
+                format!("{column} >= {}", quote_literal(value))
             }
+            FilterOperator::LessThan => format!("{column} < {}", quote_literal(value)),
+            FilterOperator::LessThanOrEqual => {
+                format!("{column} <= {}", quote_literal(value))
+            }
+            FilterOperator::In => format!("{column} IN ({})", filter_list(value)?),
+            FilterOperator::NotIn => format!("{column} NOT IN ({})", filter_list(value)?),
+            FilterOperator::IsNull => format!("{column} IS NULL"),
+            FilterOperator::IsNotNull => format!("{column} IS NOT NULL"),
         };
         clauses.push(clause);
     }
@@ -517,29 +525,54 @@ fn build_predicate(metadata: &TableMetadata, filters: &[FilterCondition]) -> App
 }
 
 fn build_order_by(metadata: &TableMetadata, order_by: Option<&OrderSpec>) -> AppResult<String> {
-    let fallback = metadata.primary_key.first().map(|column| OrderSpec {
-        column: column.clone(),
-        descending: false,
-    });
-    let order_by = order_by.or(fallback.as_ref());
-    let Some(order_by) = order_by else {
-        return Ok(String::new());
-    };
-    if !metadata
-        .columns
-        .iter()
-        .any(|column| column.name == order_by.column)
-    {
-        return Err(AppError::InvalidInput(format!(
-            "unknown order column {}",
-            order_by.column
-        )));
+    let mut clauses = Vec::new();
+    if let Some(order_by) = order_by {
+        if !metadata
+            .columns
+            .iter()
+            .any(|column| column.name == order_by.column)
+        {
+            return Err(AppError::InvalidInput(format!(
+                "unknown order column {}",
+                order_by.column
+            )));
+        }
+        clauses.push(format!(
+            "{} {}",
+            quote_identifier(&order_by.column),
+            if order_by.descending { "DESC" } else { "ASC" }
+        ));
     }
-    Ok(format!(
-        " ORDER BY {} {}",
-        quote_identifier(&order_by.column),
-        if order_by.descending { "DESC" } else { "ASC" }
-    ))
+    clauses.extend(
+        metadata
+            .primary_key
+            .iter()
+            .filter(|column| match order_by {
+                Some(order) => order.column.as_str() != column.as_str(),
+                None => true,
+            })
+            .map(|column| format!("{} ASC", quote_identifier(column))),
+    );
+    if clauses.is_empty() {
+        Ok(String::new())
+    } else {
+        Ok(format!(" ORDER BY {}", clauses.join(", ")))
+    }
+}
+
+fn filter_list(value: &str) -> AppResult<String> {
+    let values = value
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(quote_literal)
+        .collect::<Vec<_>>();
+    if values.is_empty() {
+        return Err(AppError::InvalidInput(
+            "IN filters require one or more comma-separated values".into(),
+        ));
+    }
+    Ok(values.join(", "))
 }
 
 fn mutation_predicate(metadata: &TableMetadata, mutation: &RowMutation) -> AppResult<String> {
@@ -696,6 +729,89 @@ mod tests {
             }],
         );
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn predicates_support_comparisons_and_lists() {
+        let metadata = TableMetadata {
+            schema: "public".into(),
+            table: "users".into(),
+            columns: vec![
+                TableColumn {
+                    name: "id".into(),
+                    data_type: "integer".into(),
+                    nullable: false,
+                    default_value: None,
+                    ordinal: 1,
+                },
+                TableColumn {
+                    name: "status".into(),
+                    data_type: "text".into(),
+                    nullable: false,
+                    default_value: None,
+                    ordinal: 2,
+                },
+            ],
+            primary_key: vec!["id".into()],
+            has_xmin: true,
+        };
+        let predicate = build_predicate(
+            &metadata,
+            &[
+                FilterCondition {
+                    column: "id".into(),
+                    operator: FilterOperator::GreaterThanOrEqual,
+                    value: Some("10".into()),
+                },
+                FilterCondition {
+                    column: "status".into(),
+                    operator: FilterOperator::In,
+                    value: Some("active, pending".into()),
+                },
+            ],
+        )
+        .expect("predicate");
+
+        assert_eq!(
+            predicate,
+            " WHERE \"id\" >= '10' AND \"status\" IN ('active', 'pending')"
+        );
+    }
+
+    #[test]
+    fn ordering_uses_primary_keys_as_stable_tiebreakers() {
+        let metadata = TableMetadata {
+            schema: "public".into(),
+            table: "users".into(),
+            columns: vec![
+                TableColumn {
+                    name: "id".into(),
+                    data_type: "integer".into(),
+                    nullable: false,
+                    default_value: None,
+                    ordinal: 1,
+                },
+                TableColumn {
+                    name: "status".into(),
+                    data_type: "text".into(),
+                    nullable: false,
+                    default_value: None,
+                    ordinal: 2,
+                },
+            ],
+            primary_key: vec!["id".into()],
+            has_xmin: true,
+        };
+        let order = build_order_by(
+            &metadata,
+            Some(&OrderSpec {
+                column: "status".into(),
+                descending: true,
+            }),
+        )
+        .expect("order");
+
+        assert_eq!(order, " ORDER BY \"status\" DESC, \"id\" ASC");
     }
 
     #[test]

@@ -50,7 +50,6 @@ export type SaveProfileInput = {
 
 export type ProfileSummary = {
   profile: ConnectionProfile;
-  hasPassword: boolean;
 };
 
 export type DatabaseRef = {
@@ -94,6 +93,12 @@ export type FilterOperator =
   | "contains"
   | "startsWith"
   | "endsWith"
+  | "greaterThan"
+  | "greaterThanOrEqual"
+  | "lessThan"
+  | "lessThanOrEqual"
+  | "in"
+  | "notIn"
   | "isNull"
   | "isNotNull";
 
@@ -116,6 +121,7 @@ export type TablePageRequest = {
   limit: number;
   filters: FilterCondition[];
   orderBy: OrderSpec | null;
+  includeTotal?: boolean;
 };
 
 export type TablePage = {
