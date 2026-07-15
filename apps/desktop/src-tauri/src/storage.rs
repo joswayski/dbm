@@ -130,6 +130,11 @@ impl LocalStore {
         if profile.default_database.is_empty() {
             return Err(AppError::InvalidInput("database is required".into()));
         }
+        if profile.port == 0 {
+            return Err(AppError::InvalidInput(
+                "port must be between 1 and 65535".into(),
+            ));
+        }
 
         let ssh_json = profile
             .ssh

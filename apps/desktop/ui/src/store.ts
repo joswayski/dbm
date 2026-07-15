@@ -1,7 +1,7 @@
 import { create } from "zustand";
 
 import * as commands from "./commands";
-import type { ProfileSummary, Tab, WorkspaceInfo } from "./types";
+import type { ConnectionProfile, ProfileSummary, Tab, WorkspaceInfo } from "./types";
 
 type DbvStore = {
   profiles: ProfileSummary[];
@@ -10,7 +10,7 @@ type DbvStore = {
   tabs: Tab[];
   activeTabId: string | null;
   loadProfiles: () => Promise<void>;
-  saveProfile: (input: Parameters<typeof commands.saveProfile>[0]) => Promise<void>;
+  saveProfile: (input: Parameters<typeof commands.saveProfile>[0]) => Promise<ConnectionProfile>;
   removeProfile: (profileId: string) => Promise<void>;
   connect: (profileId: string) => Promise<void>;
   switchDatabase: (profileId: string, database: string) => Promise<void>;
@@ -31,8 +31,22 @@ export const useDbvStore = create<DbvStore>((set, get) => ({
     set({ profiles: await commands.listProfiles() });
   },
   saveProfile: async (input) => {
-    await commands.saveProfile(input);
-    set({ profiles: await commands.listProfiles() });
+    const saved = await commands.saveProfile(input);
+    const profiles = await commands.listProfiles();
+    set((state) => {
+      const workspaces = { ...state.workspaces };
+      delete workspaces[saved.id];
+      const tabs = state.tabs.filter((tab) => tab.profileId !== saved.id);
+      const activeTabRemoved = state.tabs.some((tab) => tab.id === state.activeTabId && tab.profileId === saved.id);
+      return {
+        profiles,
+        workspaces,
+        tabs,
+        activeProfileId: state.activeProfileId === saved.id ? null : state.activeProfileId,
+        activeTabId: activeTabRemoved ? null : state.activeTabId,
+      };
+    });
+    return saved;
   },
   removeProfile: async (profileId) => {
     await commands.deleteProfile(profileId);
@@ -71,21 +85,29 @@ export const useDbvStore = create<DbvStore>((set, get) => ({
   openTable: (profileId, schema, table) => {
     const existing = get().tabs.find((tab) => tab.kind === "table" && tab.profileId === profileId && tab.schema === schema && tab.table === table);
     if (existing) {
-      set({ activeTabId: existing.id });
+      set({ activeTabId: existing.id, activeProfileId: profileId });
       return;
     }
     const tab: Tab = { id: crypto.randomUUID(), title: `${schema}.${table}`, kind: "table", profileId, schema, table };
-    set((state) => ({ tabs: [...state.tabs, tab], activeTabId: tab.id }));
+    set((state) => ({ tabs: [...state.tabs, tab], activeTabId: tab.id, activeProfileId: profileId }));
   },
   openQuery: (profileId) => {
     const tab: Tab = { id: crypto.randomUUID(), title: "Query", kind: "query", profileId, sql: "SELECT now();" };
-    set((state) => ({ tabs: [...state.tabs, tab], activeTabId: tab.id }));
+    set((state) => ({ tabs: [...state.tabs, tab], activeTabId: tab.id, activeProfileId: profileId }));
   },
   closeTab: (tabId) => {
     const { tabs, activeTabId } = get();
     const index = tabs.findIndex((tab) => tab.id === tabId);
     const nextTabs = tabs.filter((tab) => tab.id !== tabId);
-    set({ tabs: nextTabs, activeTabId: activeTabId === tabId ? nextTabs[Math.max(index - 1, 0)]?.id ?? null : activeTabId });
+    const nextActiveTab = activeTabId === tabId ? nextTabs[Math.max(index - 1, 0)] ?? null : null;
+    set((state) => ({
+      tabs: nextTabs,
+      activeTabId: activeTabId === tabId ? nextActiveTab?.id ?? null : activeTabId,
+      activeProfileId: nextActiveTab?.profileId ?? state.activeProfileId,
+    }));
   },
-  setActiveTab: (tabId) => set({ activeTabId: tabId }),
+  setActiveTab: (tabId) => {
+    const tab = get().tabs.find((candidate) => candidate.id === tabId);
+    if (tab) set({ activeTabId: tabId, activeProfileId: tab.profileId });
+  },
 }));

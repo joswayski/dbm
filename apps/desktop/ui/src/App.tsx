@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type CSSProperties } from "react";
 import CodeMirror from "@uiw/react-codemirror";
 import { sql } from "@codemirror/lang-sql";
 
 import * as commands from "./commands";
+import { parsePostgresConnectionUrl } from "./connectionUrl";
 import { useDbvStore } from "./store";
 import type {
   ConnectionProfile,
@@ -17,12 +18,14 @@ import type {
 } from "./types";
 
 const PAGE_SIZE = 200;
+const DEFAULT_CONNECTION_COLOR = "#38bdf8";
+const CONNECTION_COLORS = ["#38bdf8", "#22c55e", "#a78bfa", "#f59e0b", "#ef4444", "#64748b"];
 
 function defaultProfile(profile?: ConnectionProfile): SaveProfileInput {
   return {
     id: profile?.id,
     name: profile?.name ?? "Local PostgreSQL",
-    color: profile?.color ?? "#38bdf8",
+    color: profile?.color ?? DEFAULT_CONNECTION_COLOR,
     host: profile?.host ?? "localhost",
     port: profile?.port ?? 5432,
     username: profile?.username ?? "postgres",
@@ -91,16 +94,19 @@ export default function App() {
   }, [activeProfileId, switchDatabase]);
 
   const handleSaveProfile = useCallback(async (input: SaveProfileInput) => {
-    try {
-      await saveProfile(input);
-      setModalProfile(undefined);
-    } catch (reason) {
-      setError(errorMessage(reason));
-    }
-  }, [saveProfile]);
+    const saved = await saveProfile(input);
+    setModalProfile(undefined);
+    await handleConnect(saved.id);
+  }, [handleConnect, saveProfile]);
 
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? null;
   const activeWorkspace = activeProfileId ? workspaces[activeProfileId] : undefined;
+  const activeViewProfile = (activeTab
+    ? profiles.find((summary) => summary.profile.id === activeTab.profileId)?.profile
+    : undefined) ?? activeWorkspace?.profile;
+  const connectionStyle = activeViewProfile
+    ? ({ "--connection-color": activeViewProfile.color ?? DEFAULT_CONNECTION_COLOR } as CSSProperties)
+    : undefined;
 
   return (
     <div className="app-shell">
@@ -111,15 +117,14 @@ export default function App() {
             <strong>DBV</strong>
             <span>database viewer</span>
           </div>
-          <button className="icon-button" title="Add connection" onClick={() => setModalProfile(null)}>＋</button>
         </div>
         <div className="sidebar-section-title">
           <span>Connections</span>
-          <button className="text-button" onClick={() => setModalProfile(null)}>New</button>
+          <button className="sidebar-new-button" onClick={() => setModalProfile(null)}>New connection</button>
         </div>
         <div className="connection-list">
           {profiles.length === 0 ? (
-            <div className="empty-sidebar">No connections yet.<br /><button className="link-button" onClick={() => setModalProfile(null)}>Add your first PostgreSQL profile</button></div>
+            <div className="empty-sidebar">No saved connections.</div>
           ) : profiles.map((summary) => (
             <ConnectionItem
               key={summary.profile.id}
@@ -156,22 +161,35 @@ export default function App() {
         ) : null}
         <div className="sidebar-footer">
           <span className="privacy-chip">LOCAL ONLY</span>
-          <span className="muted">PostgreSQL first · Redis next</span>
         </div>
       </aside>
 
-      <main className="main-pane">
+      <main className={`main-pane ${activeViewProfile ? "connection-themed" : ""}`} style={connectionStyle}>
         <header className="topbar">
-          <div className="breadcrumb">{activeWorkspace ? `${activeWorkspace.profile.host}:${activeWorkspace.profile.port}` : "No active connection"}</div>
+          {activeViewProfile ? (
+            <div className="connection-identity">
+              <span className="connection-identity-dot" />
+              <span>
+                <strong>{activeViewProfile.name}</strong>
+                <small>{activeViewProfile.username}@{activeViewProfile.host}:{activeViewProfile.port}/{activeViewProfile.defaultDatabase}</small>
+              </span>
+            </div>
+          ) : <div className="breadcrumb">No active connection</div>}
           <div className="topbar-actions">
             {activeProfileId ? <button className="secondary-button" onClick={() => openQuery(activeProfileId)}>New query</button> : null}
-            <button className="primary-button" onClick={() => setModalProfile(null)}>Add connection</button>
           </div>
         </header>
         {error ? <div className="error-banner"><span>{error}</span><button onClick={() => setError(null)}>×</button></div> : null}
         <div className="tab-strip">
           {tabs.map((tab) => (
-            <div className={`tab ${tab.id === activeTabId ? "active" : ""}`} key={tab.id}>
+            <div
+              className={`tab ${tab.id === activeTabId ? "active" : ""}`}
+              key={tab.id}
+              style={{
+                "--tab-color": profiles.find((summary) => summary.profile.id === tab.profileId)?.profile.color ?? DEFAULT_CONNECTION_COLOR,
+              } as CSSProperties}
+            >
+              <span className="tab-color" />
               <button onClick={() => setActiveTab(tab.id)}>{tab.kind === "table" ? "▦" : "⌘"} {tab.title}</button>
               <button className="tab-close" onClick={() => closeTab(tab.id)} aria-label={`Close ${tab.title}`}>×</button>
             </div>
@@ -183,7 +201,7 @@ export default function App() {
           ) : activeTab?.kind === "query" ? (
             <QueryView key={activeTab.id} profileId={activeTab.profileId} initialSql={activeTab.sql ?? "SELECT now();"} />
           ) : (
-            <Welcome onAdd={() => setModalProfile(null)} />
+            <Welcome hasProfiles={profiles.length > 0} />
           )}
         </section>
       </main>
@@ -201,7 +219,6 @@ export default function App() {
               setError(errorMessage(reason));
             }
           } : undefined}
-          onError={setError}
         />
       ) : null}
     </div>
@@ -226,7 +243,7 @@ function ConnectionItem({
   return (
     <div className={`connection-item ${active ? "active" : ""}`}>
       <button className="connection-main" onClick={connected ? undefined : onConnect}>
-        <span className="connection-color" style={{ background: summary.profile.color ?? "#38bdf8" }} />
+        <span className="connection-color" style={{ background: summary.profile.color ?? DEFAULT_CONNECTION_COLOR, color: summary.profile.color ?? DEFAULT_CONNECTION_COLOR }} />
         <span className="connection-copy">
           <strong>{summary.profile.name}</strong>
           <small>{summary.profile.username}@{summary.profile.host}</small>
@@ -261,18 +278,14 @@ function SchemaBranch({ node, onTable, depth = 0 }: { node: SchemaNode; onTable:
   );
 }
 
-function Welcome({ onAdd }: { onAdd: () => void }) {
+function Welcome({ hasProfiles }: { hasProfiles: boolean }) {
   return (
     <div className="welcome">
       <div className="welcome-mark">DB<span>V</span></div>
-      <h1>Explore without the subscription.</h1>
-      <p>Connect a PostgreSQL database, inspect its schema, edit safe rows, or open a query tab. Profiles and history stay on this computer.</p>
-      <button className="primary-button" onClick={onAdd}>Add PostgreSQL connection</button>
-      <div className="welcome-grid">
-        <div><strong>200-row pages</strong><span>Server-side filters and sort</span></div>
-        <div><strong>Safe editing</strong><span>Primary keys + xmin conflicts</span></div>
-        <div><strong>SQL workbench</strong><span>CodeMirror tabs and history</span></div>
-      </div>
+      <h1>No connection selected</h1>
+      <p>{hasProfiles
+        ? "Select a saved connection from the sidebar to browse its data."
+        : "Create a connection from the sidebar to get started."}</p>
     </div>
   );
 }
@@ -469,29 +482,165 @@ function ProfileModal({
   onClose,
   onSave,
   onDelete,
-  onError,
 }: {
   profile: ConnectionProfile | null;
   onClose: () => void;
   onSave: (input: SaveProfileInput) => Promise<void>;
   onDelete?: () => Promise<void>;
-  onError: (message: string) => void;
 }) {
   const [form, setForm] = useState<SaveProfileInput>(() => defaultProfile(profile ?? undefined));
+  const [connectionUrl, setConnectionUrl] = useState("");
   const [testing, setTesting] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [feedback, setFeedback] = useState<{ kind: "success" | "error" | "info"; message: string } | null>(null);
   const update = <K extends keyof SaveProfileInput>(key: K, value: SaveProfileInput[K]) => setForm((current) => ({ ...current, [key]: value }));
+
+  const importConnectionUrl = (value: string) => {
+    try {
+      const imported = parsePostgresConnectionUrl(value);
+      setForm((current) => ({
+        ...current,
+        name: !profile && (!current.name.trim() || current.name === "Local PostgreSQL")
+          ? imported.suggestedName
+          : current.name,
+        host: imported.host,
+        port: imported.port,
+        username: imported.username,
+        defaultDatabase: imported.defaultDatabase,
+        tlsMode: imported.tlsMode,
+        password: imported.password ?? current.password,
+      }));
+      setFeedback({ kind: "info", message: "Connection URL imported. Review the details, then save and connect." });
+    } catch (reason) {
+      setFeedback({ kind: "error", message: errorMessage(reason) });
+    }
+  };
+
   const test = async () => {
     setTesting(true);
+    setFeedback(null);
     try {
       await commands.testProfile(form);
-      onError("Connection succeeded.");
+      setFeedback({ kind: "success", message: "Connection successful." });
     } catch (reason) {
-      onError(errorMessage(reason));
+      setFeedback({ kind: "error", message: errorMessage(reason) });
     } finally {
       setTesting(false);
     }
   };
-  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="modal-card"><div className="modal-header"><div><span className="eyebrow">POSTGRESQL</span><h2>{profile ? "Edit connection" : "New connection"}</h2></div><button className="icon-button" onClick={onClose}>×</button></div><div className="form-grid"><label className="form-field full"><span>Name</span><input className="text-input" value={form.name} onChange={(event) => update("name", event.target.value)} placeholder="Local PostgreSQL" /></label><label className="form-field"><span>Host</span><input className="text-input" value={form.host} onChange={(event) => update("host", event.target.value)} /></label><label className="form-field"><span>Port</span><input className="text-input" type="number" value={form.port} onChange={(event) => update("port", Number(event.target.value))} /></label><label className="form-field"><span>Username</span><input className="text-input" value={form.username} onChange={(event) => update("username", event.target.value)} /></label><label className="form-field"><span>Database</span><input className="text-input" value={form.defaultDatabase} onChange={(event) => update("defaultDatabase", event.target.value)} /></label><label className="form-field"><span>Password</span><input className="text-input" type="password" value={form.password ?? ""} onChange={(event) => update("password", event.target.value || undefined)} placeholder={profile ? "Leave blank to keep saved password" : "Stored in OS keychain"} /></label><label className="form-field"><span>TLS</span><select className="select-input" value={form.tlsMode} onChange={(event) => update("tlsMode", event.target.value as SaveProfileInput["tlsMode"])}><option value="preferred">Preferred</option><option value="required">Required</option><option value="disabled">Disabled</option></select></label><label className="form-field full"><span>CA certificate path (optional)</span><input className="text-input" value={form.caCertPath ?? ""} onChange={(event) => update("caCertPath", event.target.value || null)} placeholder="/path/to/root-ca.pem" /></label><label className="checkbox-field full"><input type="checkbox" checked={form.readOnly} onChange={(event) => update("readOnly", event.target.checked)} /><span>Read-only profile (blocks GUI edits and mutations)</span></label></div><div className="modal-note">Passwords never enter SQLite. SSH jump-host fields are reserved for the next transport milestone; direct PostgreSQL is live now.</div><div className="modal-actions">{onDelete ? <button className="danger-button" onClick={() => void onDelete()}>Delete</button> : null}<div className="modal-actions-right"><button className="secondary-button" onClick={() => void test()} disabled={testing}>{testing ? "Testing…" : "Test connection"}</button><button className="primary-button" onClick={() => void onSave(form)}>Save connection</button></div></div></div></div>;
+
+  const save = async () => {
+    setSaving(true);
+    setFeedback(null);
+    try {
+      await onSave(form);
+    } catch (reason) {
+      setFeedback({ kind: "error", message: errorMessage(reason) });
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <div className="modal-card">
+        <div className="modal-header">
+          <div><span className="eyebrow">POSTGRESQL</span><h2>{profile ? "Edit connection" : "New connection"}</h2></div>
+          <button className="icon-button" onClick={onClose} aria-label="Close">×</button>
+        </div>
+        <div className="form-grid">
+          <label className="form-field full">
+            <span>Connection URL</span>
+            <div className="url-field">
+              <input
+                className="text-input"
+                type="password"
+                value={connectionUrl}
+                onChange={(event) => setConnectionUrl(event.target.value)}
+                onPaste={(event) => {
+                  const pasted = event.clipboardData.getData("text");
+                  event.preventDefault();
+                  setConnectionUrl(pasted);
+                  importConnectionUrl(pasted);
+                }}
+                autoComplete="off"
+                autoCapitalize="none"
+                spellCheck={false}
+                placeholder="postgresql://user:password@host:5432/database"
+              />
+              <button className="secondary-button" onClick={() => importConnectionUrl(connectionUrl)} disabled={!connectionUrl.trim()}>Import URL</button>
+            </div>
+          </label>
+          <label className="form-field full">
+            <span>Name</span>
+            <input className="text-input" value={form.name} onChange={(event) => update("name", event.target.value)} placeholder="Local PostgreSQL" />
+          </label>
+          <div className="form-field full">
+            <span>Connection color</span>
+            <div className="color-picker">
+              {CONNECTION_COLORS.map((color) => (
+                <button
+                  key={color}
+                  className={`color-swatch ${form.color === color ? "selected" : ""}`}
+                  style={{ background: color }}
+                  onClick={() => update("color", color)}
+                  aria-label={`Use connection color ${color}`}
+                />
+              ))}
+              <label className="custom-color" title="Choose a custom color">
+                <input type="color" value={form.color ?? DEFAULT_CONNECTION_COLOR} onChange={(event) => update("color", event.target.value)} />
+                <span>Custom</span>
+              </label>
+            </div>
+          </div>
+          <label className="form-field">
+            <span>Host</span>
+            <input className="text-input" value={form.host} onChange={(event) => update("host", event.target.value)} />
+          </label>
+          <label className="form-field">
+            <span>Port</span>
+            <input className="text-input" type="number" value={form.port} onChange={(event) => update("port", Number(event.target.value))} />
+          </label>
+          <label className="form-field">
+            <span>Username</span>
+            <input className="text-input" value={form.username} onChange={(event) => update("username", event.target.value)} />
+          </label>
+          <label className="form-field">
+            <span>Database</span>
+            <input className="text-input" value={form.defaultDatabase} onChange={(event) => update("defaultDatabase", event.target.value)} />
+          </label>
+          <label className="form-field">
+            <span>Password</span>
+            <input className="text-input" type="password" value={form.password ?? ""} onChange={(event) => update("password", event.target.value || undefined)} placeholder={profile ? "Leave blank to keep saved password" : "Stored in OS keychain"} />
+          </label>
+          <label className="form-field">
+            <span>TLS</span>
+            <select className="select-input" value={form.tlsMode} onChange={(event) => update("tlsMode", event.target.value as SaveProfileInput["tlsMode"])}>
+              <option value="preferred">Preferred</option>
+              <option value="required">Required</option>
+              <option value="disabled">Disabled</option>
+            </select>
+          </label>
+          <label className="form-field full">
+            <span>CA certificate path (optional)</span>
+            <input className="text-input" value={form.caCertPath ?? ""} onChange={(event) => update("caCertPath", event.target.value || null)} placeholder="/path/to/root-ca.pem" />
+          </label>
+          <label className="checkbox-field full">
+            <input type="checkbox" checked={form.readOnly} onChange={(event) => update("readOnly", event.target.checked)} />
+            <span>Read-only profile (blocks GUI edits and mutations)</span>
+          </label>
+        </div>
+        {feedback ? <div className={`modal-feedback ${feedback.kind}`} role="status">{feedback.message}</div> : null}
+        <div className="modal-note">Passwords are stored in your operating system credential manager and are never written to DBV's profile database.</div>
+        <div className="modal-actions">
+          {onDelete ? <button className="danger-button" onClick={() => void onDelete()} disabled={testing || saving}>Delete</button> : <span />}
+          <div className="modal-actions-right">
+            <button className="secondary-button" onClick={() => void test()} disabled={testing || saving}>{testing ? "Testing…" : "Test connection"}</button>
+            <button className="primary-button" onClick={() => void save()} disabled={testing || saving}>{saving ? "Connecting…" : "Save & connect"}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function parseCell(value: string): JsonValue {

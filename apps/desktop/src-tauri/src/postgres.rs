@@ -23,7 +23,7 @@ impl PgSession {
     pub async fn connect(profile: ConnectionProfile, password: Option<String>) -> AppResult<Self> {
         if profile.ssh.is_some() {
             return Err(AppError::Unsupported(
-                "SSH tunneling is modeled in profiles but not enabled in this build".into(),
+                "SSH tunneling is not supported for this connection".into(),
             ));
         }
         let client = connect_client(&profile, password.as_deref()).await?;
@@ -377,7 +377,7 @@ async fn connect_client(profile: &ConnectionProfile, password: Option<&str>) -> 
     }
     let connector = connector
         .build()
-        .map_err(|error| AppError::Database(error.to_string()))?;
+        .map_err(|error| AppError::database(&error))?;
     let mut config = base_config(profile, password);
     let make_connector = postgres_native_tls::MakeTlsConnector::new(connector);
     match config.connect(make_connector).await {
@@ -399,7 +399,7 @@ async fn connect_client(profile: &ConnectionProfile, password: Option<&str>) -> 
             });
             Ok(client)
         }
-        Err(error) => Err(AppError::Database(error.to_string())),
+        Err(error) => Err(AppError::from(error)),
     }
 }
 

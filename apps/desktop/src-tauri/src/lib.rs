@@ -8,15 +8,50 @@ mod state;
 mod storage;
 
 use chrono::Utc;
+use error::{AppError, AppResult};
 use models::{
-    MutationBatch, ProfileSummary, QueryHistoryEntry, QueryRequest, SaveProfileInput,
-    TablePageRequest, WorkspaceInfo,
+    ConnectionProfile, MutationBatch, ProfileSummary, QueryHistoryEntry, QueryRequest,
+    SaveProfileInput, TablePageRequest, WorkspaceInfo,
 };
 use state::AppState;
 use uuid::Uuid;
 
 fn command_error(error: impl std::fmt::Display) -> String {
     error.to_string()
+}
+
+fn profile_for_test(state: &AppState, input: &SaveProfileInput) -> AppResult<ConnectionProfile> {
+    let existing = input.id.map(|id| state.profile(id)).transpose()?;
+    let now = Utc::now();
+    let profile = ConnectionProfile {
+        id: input.id.unwrap_or_else(Uuid::new_v4),
+        name: input.name.trim().to_owned(),
+        color: input.color.clone(),
+        host: input.host.trim().to_owned(),
+        port: input.port,
+        username: input.username.trim().to_owned(),
+        default_database: input.default_database.trim().to_owned(),
+        tls_mode: input.tls_mode.clone(),
+        ca_cert_path: input.ca_cert_path.clone(),
+        ssh: input.ssh.clone(),
+        read_only: input.read_only,
+        created_at: existing.as_ref().map_or(now, |profile| profile.created_at),
+        updated_at: now,
+    };
+    if profile.name.is_empty() || profile.host.is_empty() || profile.username.is_empty() {
+        return Err(AppError::InvalidInput(
+            "name, host, and username are required".into(),
+        ));
+    }
+    if profile.default_database.is_empty() {
+        return Err(AppError::InvalidInput("database is required".into()));
+    }
+    if profile.port == 0 {
+        return Err(AppError::InvalidInput(
+            "port must be between 1 and 65535".into(),
+        ));
+    }
+    Ok(profile)
 }
 
 #[tauri::command]
@@ -65,19 +100,19 @@ async fn test_profile(
     state: tauri::State<'_, AppState>,
     input: SaveProfileInput,
 ) -> Result<(), String> {
-    let temporary = input.id.is_none();
-    let profile = state.save_profile(input.clone()).map_err(command_error)?;
+    let profile = profile_for_test(&state, &input).map_err(command_error)?;
     let password = input
         .password
-        .or_else(|| state.credentials.get_password(profile.id).ok().flatten());
-    let result = postgres::PgSession::connect(profile.clone(), password)
+        .filter(|password| !password.is_empty())
+        .or_else(|| {
+            input
+                .id
+                .and_then(|id| state.credentials.get_password(id).ok().flatten())
+        });
+    postgres::PgSession::connect(profile, password)
         .await
         .map(|_| ())
-        .map_err(command_error);
-    if temporary {
-        let _ = state.store.delete_profile(profile.id);
-    }
-    result
+        .map_err(command_error)
 }
 
 #[tauri::command]
@@ -202,7 +237,7 @@ async fn run_query(
 
 #[tauri::command]
 async fn cancel_query() -> Result<(), String> {
-    Err("query cancellation will be enabled with dedicated PostgreSQL sessions".into())
+    Err("query cancellation is not available for this connection".into())
 }
 
 #[tauri::command]
