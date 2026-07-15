@@ -36,14 +36,9 @@ export const useDbvStore = create<DbvStore>((set, get) => ({
     set((state) => {
       const workspaces = { ...state.workspaces };
       delete workspaces[saved.id];
-      const tabs = state.tabs.filter((tab) => tab.profileId !== saved.id);
-      const activeTabRemoved = state.tabs.some((tab) => tab.id === state.activeTabId && tab.profileId === saved.id);
       return {
         profiles,
         workspaces,
-        tabs,
-        activeProfileId: state.activeProfileId === saved.id ? null : state.activeProfileId,
-        activeTabId: activeTabRemoved ? null : state.activeTabId,
       };
     });
     return saved;

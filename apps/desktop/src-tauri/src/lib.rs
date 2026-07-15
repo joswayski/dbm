@@ -278,6 +278,8 @@ pub fn run() {
 
     let state = AppState::new().expect("DBV local storage must initialize");
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
         .manage(state)
         .invoke_handler(tauri::generate_handler![
             list_profiles,

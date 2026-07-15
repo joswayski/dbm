@@ -1,0 +1,641 @@
+import { useCallback, useEffect, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from "react";
+
+import * as commands from "./commands";
+import type {
+  FilterCondition,
+  FilterOperator,
+  JsonValue,
+  MutationBatch,
+  OrderSpec,
+  TableColumn,
+  TableMetadata,
+  TablePage,
+} from "./types";
+
+const MAX_PREVIEW_ROWS = 200;
+const EXPORT_PAGE_SIZE = 1_000;
+const LARGE_EXPORT_WARNING_ROWS = 100_000;
+const SELECTION_COLUMN_WIDTH = 42;
+const COLLAPSED_COLUMN_WIDTH = 42;
+
+const FILTER_OPERATORS: Array<{ value: FilterOperator; label: string }> = [
+  { value: "equals", label: "Equals" },
+  { value: "notEquals", label: "Does not equal" },
+  { value: "contains", label: "Contains" },
+  { value: "startsWith", label: "Starts with" },
+  { value: "endsWith", label: "Ends with" },
+  { value: "greaterThan", label: "Greater than" },
+  { value: "greaterThanOrEqual", label: "Greater than or equal" },
+  { value: "lessThan", label: "Less than" },
+  { value: "lessThanOrEqual", label: "Less than or equal" },
+  { value: "in", label: "In list" },
+  { value: "notIn", label: "Not in list" },
+  { value: "isNull", label: "Is null" },
+  { value: "isNotNull", label: "Is not null" },
+];
+
+type FilterDraft = {
+  id: string;
+  column: string;
+  operator: FilterOperator;
+  value: string;
+};
+
+type PendingRow = {
+  original: JsonValue[];
+  changes: JsonValue[];
+  primaryKey: JsonValue[];
+  xmin: string | null;
+  deleted: boolean;
+};
+
+type RowEntry = {
+  key: string;
+  row: JsonValue[];
+  rowIndex: number;
+  pending?: PendingRow;
+  values: JsonValue[];
+};
+
+export function TableView({ profileId, schema, table }: { profileId: string; schema: string; table: string }) {
+  const [page, setPage] = useState<TablePage | null>(null);
+  const [pageIndex, setPageIndex] = useState(0);
+  const [previewLimit, setPreviewLimit] = useState(MAX_PREVIEW_ROWS);
+  const [limitInput, setLimitInput] = useState(String(MAX_PREVIEW_ROWS));
+  const [filterDrafts, setFilterDrafts] = useState<FilterDraft[]>([]);
+  const [appliedFilters, setAppliedFilters] = useState<FilterCondition[]>([]);
+  const [orderBy, setOrderBy] = useState<OrderSpec | null>(null);
+  const [pendingRows, setPendingRows] = useState<Record<string, PendingRow>>({});
+  const [editing, setEditing] = useState<{ rowKey: string; column: number } | null>(null);
+  const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
+  const [selectionAnchor, setSelectionAnchor] = useState<number | null>(null);
+  const [hoveredRowKey, setHoveredRowKey] = useState<string | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});
+  const [collapsedColumns, setCollapsedColumns] = useState<Set<string>>(new Set());
+  const [loading, setLoading] = useState(true);
+  const [showLoadingOverlay, setShowLoadingOverlay] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [exportProgress, setExportProgress] = useState(0);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setShowLoadingOverlay(false);
+    setError(null);
+    const overlayTimer = window.setTimeout(() => setShowLoadingOverlay(true), 120);
+    try {
+      const nextPage = await commands.loadTablePage({
+        profileId,
+        schema,
+        table,
+        offset: pageIndex * previewLimit,
+        limit: previewLimit,
+        filters: appliedFilters,
+        orderBy,
+      });
+      setPage(nextPage);
+      setEditing(null);
+      setSelectedRows(new Set());
+      setSelectionAnchor(null);
+      setContextMenu(null);
+      if (nextPage.metadata.columns[0]) {
+        setFilterDrafts((current) => current.length > 0 ? current : [createFilterDraft(nextPage.metadata.columns[0].name)]);
+      }
+    } catch (reason) {
+      setError(errorMessage(reason));
+    } finally {
+      window.clearTimeout(overlayTimer);
+      setShowLoadingOverlay(false);
+      setLoading(false);
+    }
+  }, [appliedFilters, orderBy, pageIndex, previewLimit, profileId, schema, table]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void load(); }, 0);
+    return () => window.clearTimeout(timer);
+  }, [load]);
+
+  useEffect(() => {
+    if (!error) return;
+    const timer = window.setTimeout(() => setError(null), 10_000);
+    return () => window.clearTimeout(timer);
+  }, [error]);
+
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(null), 6_000);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const close = () => setContextMenu(null);
+    window.addEventListener("click", close);
+    window.addEventListener("blur", close);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("blur", close);
+    };
+  }, [contextMenu]);
+
+  const visibleColumns = page?.metadata.columns ?? [];
+  const displayRows = page?.rows ?? [];
+  const editable = Boolean(page?.metadata.primaryKey.length);
+  const pendingCount = Object.keys(pendingRows).length;
+  const rowEntries: RowEntry[] = page ? displayRows.map((row, rowIndex) => {
+    const key = tableRowKey(page.metadata, row, page.offset + rowIndex);
+    const pending = pendingRows[key];
+    return {
+      key,
+      row,
+      rowIndex,
+      pending,
+      values: pending?.changes ?? row.slice(0, visibleColumns.length),
+    };
+  }) : [];
+  const selectedEntries = rowEntries.filter((entry) => selectedRows.has(entry.key));
+  const allVisibleSelected = rowEntries.length > 0 && rowEntries.every((entry) => selectedRows.has(entry.key));
+  const allSelectedDeleted = selectedEntries.length > 0 && selectedEntries.every((entry) => entry.pending?.deleted);
+  const copyableEntries = rowEntries.filter((entry) => !entry.pending?.deleted);
+
+  const columnWidth = (column: TableColumn) => {
+    if (collapsedColumns.has(column.name)) return COLLAPSED_COLUMN_WIDTH;
+    return columnWidths[column.name] ?? defaultColumnWidth(column);
+  };
+  const gridWidth = SELECTION_COLUMN_WIDTH + visibleColumns.reduce((total, column) => total + columnWidth(column), 0);
+
+  const pendingFromRow = (row: JsonValue[]): PendingRow => {
+    if (!page) throw new Error("Table metadata is unavailable");
+    const original = row.slice(0, visibleColumns.length);
+    return {
+      original,
+      changes: [...original],
+      primaryKey: page.metadata.primaryKey.map((key) => original[visibleColumns.findIndex((column) => column.name === key)]),
+      xmin: toStringValue(row[visibleColumns.length]),
+      deleted: false,
+    };
+  };
+
+  const setCell = (entry: RowEntry, columnIndex: number, value: string) => {
+    setPendingRows((current) => {
+      const pending = current[entry.key] ?? pendingFromRow(entry.row);
+      const changes = [...pending.changes];
+      changes[columnIndex] = parseCell(value);
+      const next = { ...current };
+      if (!pending.deleted && rowsEqual(changes, pending.original)) delete next[entry.key];
+      else next[entry.key] = { ...pending, changes };
+      return next;
+    });
+    setNotice(null);
+  };
+
+  const saveChanges = async () => {
+    const mutations: MutationBatch["mutations"] = Object.values(pendingRows).map((pending) => ({
+      original: pending.original,
+      changes: pending.changes,
+      primaryKey: pending.primaryKey,
+      xmin: pending.xmin,
+      deleted: pending.deleted,
+    }));
+    if (mutations.length === 0) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const result = await commands.applyTableMutations({ profileId, schema, table, mutations });
+      setPendingRows({});
+      setSelectedRows(new Set());
+      await load();
+      if (result.conflicts.length > 0) {
+        setError(`${result.conflicts.length} row conflict(s); the table was refreshed.`);
+      } else {
+        setNotice(`${result.applied} ${result.applied === 1 ? "change" : "changes"} saved.`);
+      }
+    } catch (reason) {
+      setError(errorMessage(reason));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const copyEntries = async (entries: RowEntry[], label: string) => {
+    try {
+      const rows = entries.filter((entry) => !entry.pending?.deleted).map((entry) => entry.values);
+      await navigator.clipboard.writeText(csvDocument(visibleColumns.map((column) => column.name), rows));
+      setNotice(`Copied ${rows.length} ${label} ${rows.length === 1 ? "row" : "rows"} as CSV.`);
+    } catch (reason) {
+      setError(errorMessage(reason));
+    }
+  };
+
+  const exportAllRows = async () => {
+    if (!page || exporting) return;
+    if (pendingCount > 0) {
+      setError("Save or discard pending row changes before exporting.");
+      return;
+    }
+    if (page.totalRows !== null && page.totalRows > LARGE_EXPORT_WARNING_ROWS && !window.confirm(
+      `This export contains ${page.totalRows.toLocaleString()} rows and may take a while. Continue?`,
+    )) return;
+
+    setExporting(true);
+    setExportProgress(0);
+    setError(null);
+    setNotice(null);
+    let writer: commands.CsvExportWriter | null = null;
+    try {
+      const suggestedName = `${safeFileName(schema)}.${safeFileName(table)}.csv`;
+      writer = await commands.createCsvExportWriter(suggestedName);
+      if (!writer) {
+        setNotice("Export canceled.");
+        return;
+      }
+      await writer.write(`\uFEFF${csvLine(visibleColumns.map((column) => column.name))}`);
+      let offset = 0;
+      let hasMore = true;
+      while (hasMore) {
+        const batch = await commands.loadTablePage({
+          profileId,
+          schema,
+          table,
+          offset,
+          limit: EXPORT_PAGE_SIZE,
+          filters: appliedFilters,
+          orderBy,
+          includeTotal: false,
+        });
+        const rows = batch.rows.map((row) => row.slice(0, visibleColumns.length));
+        if (rows.length > 0) await writer.write(`\n${rows.map(csvLine).join("\n")}`);
+        offset += rows.length;
+        setExportProgress(offset);
+        hasMore = batch.hasMore && rows.length > 0;
+      }
+      const path = writer.path;
+      await writer.close();
+      writer = null;
+      setNotice(`Exported ${offset.toLocaleString()} filtered ${offset === 1 ? "row" : "rows"} to ${path}.`);
+    } catch (reason) {
+      await writer?.abort().catch(() => undefined);
+      setError(errorMessage(reason));
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const updateFilter = (id: string, patch: Partial<FilterDraft>) => {
+    setFilterDrafts((current) => current.map((filter) => filter.id === id ? { ...filter, ...patch } : filter));
+  };
+
+  const applyFilters = () => {
+    const filters = filterDrafts.flatMap<FilterCondition>((filter) => {
+      if (!filter.column) return [];
+      if (filterNeedsValue(filter.operator) && !filter.value.trim()) return [];
+      return [{
+        column: filter.column,
+        operator: filter.operator,
+        value: filterNeedsValue(filter.operator) ? filter.value.trim() : null,
+      }];
+    });
+    setAppliedFilters(filters);
+    setPageIndex(0);
+    setNotice(null);
+  };
+
+  const clearFilters = () => {
+    setFilterDrafts(visibleColumns[0] ? [createFilterDraft(visibleColumns[0].name)] : []);
+    setAppliedFilters([]);
+    setPageIndex(0);
+    setNotice(null);
+  };
+
+  const toggleSort = (column: string) => {
+    setOrderBy((current) => {
+      if (current?.column !== column) return { column, descending: false };
+      if (!current.descending) return { column, descending: true };
+      return null;
+    });
+    setPageIndex(0);
+    setNotice(null);
+  };
+
+  const applyPreviewLimit = () => {
+    const parsed = Number(limitInput);
+    const next = Number.isFinite(parsed) ? Math.min(MAX_PREVIEW_ROWS, Math.max(1, Math.floor(parsed))) : previewLimit;
+    setLimitInput(String(next));
+    setPreviewLimit(next);
+    setPageIndex(0);
+  };
+
+  const selectRow = (event: ReactMouseEvent, rowIndex: number, key: string, toggle = false) => {
+    setSelectedRows((current) => {
+      if (event.shiftKey && selectionAnchor !== null) {
+        const next = event.metaKey || event.ctrlKey ? new Set(current) : new Set<string>();
+        const start = Math.min(selectionAnchor, rowIndex);
+        const end = Math.max(selectionAnchor, rowIndex);
+        rowEntries.slice(start, end + 1).forEach((entry) => next.add(entry.key));
+        return next;
+      }
+      if (toggle || event.metaKey || event.ctrlKey) {
+        const next = new Set(current);
+        if (next.has(key)) next.delete(key);
+        else next.add(key);
+        return next;
+      }
+      return new Set([key]);
+    });
+    setSelectionAnchor(rowIndex);
+    setContextMenu(null);
+  };
+
+  const toggleSelectAll = () => {
+    setSelectedRows(allVisibleSelected ? new Set() : new Set(rowEntries.map((entry) => entry.key)));
+    setSelectionAnchor(null);
+  };
+
+  const stageDeleteForSelected = () => {
+    if (!editable || selectedEntries.length === 0) return;
+    const deleteRows = !allSelectedDeleted;
+    setPendingRows((current) => {
+      const next = { ...current };
+      for (const entry of selectedEntries) {
+        const pending = next[entry.key] ?? pendingFromRow(entry.row);
+        if (deleteRows) next[entry.key] = { ...pending, deleted: true };
+        else if (rowsEqual(pending.changes, pending.original)) delete next[entry.key];
+        else next[entry.key] = { ...pending, deleted: false };
+      }
+      return next;
+    });
+    setNotice(null);
+    setContextMenu(null);
+  };
+
+  const openContextMenu = (event: ReactMouseEvent, entry: RowEntry) => {
+    event.preventDefault();
+    if (!selectedRows.has(entry.key)) {
+      setSelectedRows(new Set([entry.key]));
+      setSelectionAnchor(entry.rowIndex);
+    }
+    setContextMenu({
+      x: Math.min(event.clientX, window.innerWidth - 190),
+      y: Math.min(event.clientY, window.innerHeight - 110),
+    });
+  };
+
+  const toggleColumn = (column: string) => {
+    setCollapsedColumns((current) => {
+      const next = new Set(current);
+      if (next.has(column)) next.delete(column);
+      else next.add(column);
+      return next;
+    });
+  };
+
+  const startColumnResize = (event: ReactMouseEvent<HTMLDivElement>, column: TableColumn) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const startX = event.clientX;
+    const startWidth = columnWidth(column);
+    setCollapsedColumns((current) => {
+      const next = new Set(current);
+      next.delete(column.name);
+      return next;
+    });
+    const move = (moveEvent: MouseEvent) => {
+      const width = Math.min(800, Math.max(70, startWidth + moveEvent.clientX - startX));
+      setColumnWidths((current) => ({ ...current, [column.name]: width }));
+    };
+    const stop = () => {
+      document.body.classList.remove("resizing-column");
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", stop);
+    };
+    document.body.classList.add("resizing-column");
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", stop);
+  };
+
+  const exportLabel = exporting
+    ? `Exporting ${exportProgress.toLocaleString()}${page?.totalRows != null ? ` / ${page.totalRows.toLocaleString()}` : ""}…`
+    : `Export all${page?.totalRows != null ? ` (${page.totalRows.toLocaleString()})` : ""}`;
+
+  return (
+    <div className="table-view">
+      <div className="view-toolbar">
+        <div><span className="eyebrow">TABLE</span><h2>{schema}.{table}</h2></div>
+        <div className="toolbar-actions">
+          <button className="secondary-button" onClick={() => void copyEntries(copyableEntries, "visible")} disabled={!page || loading} title="Copies only the current preview page">Copy visible ({copyableEntries.length})</button>
+          <button className="secondary-button" onClick={() => void exportAllRows()} disabled={!page || loading || exporting} title="Prompts for a location and exports every filtered row">{exportLabel}</button>
+          {editable && selectedEntries.length > 0 ? <button className="danger-button" onClick={stageDeleteForSelected}>{allSelectedDeleted ? `Undo delete (${selectedEntries.length})` : `Delete selected (${selectedEntries.length})`}</button> : null}
+          {pendingCount > 0 ? <>
+            <button className="secondary-button" onClick={() => { setPendingRows({}); setEditing(null); setNotice(null); }} disabled={saving}>Discard changes</button>
+            <button className="primary-button" onClick={() => void saveChanges()} disabled={saving}>{saving ? "Saving…" : `Save changes (${pendingCount})`}</button>
+          </> : null}
+        </div>
+      </div>
+
+      <div className="filter-panel">
+        <div className="filter-panel-header">
+          <strong>Filters</strong>
+          <span className="filter-join">All filters must match</span>
+          <button className="text-button" onClick={() => setFilterDrafts((current) => [...current, createFilterDraft(visibleColumns[0]?.name ?? "")])} disabled={!page}>＋ Add filter</button>
+          {page ? <span className="row-count">{page.totalRows ?? "—"} rows · {page.metadata.columns.length} columns</span> : null}
+        </div>
+        {filterDrafts.map((filter) => (
+          <div className="filter-row" key={filter.id}>
+            <select className="select-input filter-column" value={filter.column} onChange={(event) => updateFilter(filter.id, { column: event.target.value })} disabled={!page}>
+              {visibleColumns.map((column) => <option key={column.name} value={column.name}>{column.name}</option>)}
+            </select>
+            <select className="select-input filter-operator" value={filter.operator} onChange={(event) => updateFilter(filter.id, { operator: event.target.value as FilterOperator })} disabled={!page}>
+              {FILTER_OPERATORS.map((operator) => <option key={operator.value} value={operator.value}>{operator.label}</option>)}
+            </select>
+            {filterNeedsValue(filter.operator) ? <input
+              className="text-input"
+              placeholder={filter.operator === "in" || filter.operator === "notIn" ? "value 1, value 2, …" : "Value…"}
+              value={filter.value}
+              onChange={(event) => updateFilter(filter.id, { value: event.target.value })}
+              onKeyDown={(event) => { if (event.key === "Enter") applyFilters(); }}
+            /> : <span className="filter-no-value">No value needed</span>}
+            <button className="icon-button filter-remove" onClick={() => setFilterDrafts((current) => current.filter((candidate) => candidate.id !== filter.id))} aria-label="Remove filter">×</button>
+          </div>
+        ))}
+        <div className="table-query-controls">
+          <label>
+            <span>Preview limit</span>
+            <input className="text-input limit-input" type="number" min="1" max={MAX_PREVIEW_ROWS} value={limitInput} onChange={(event) => setLimitInput(event.target.value)} onBlur={applyPreviewLimit} onKeyDown={(event) => { if (event.key === "Enter") applyPreviewLimit(); }} />
+          </label>
+          <label>
+            <span>Sort by</span>
+            <select className="select-input sort-column-select" value={orderBy?.column ?? ""} onChange={(event) => { setOrderBy(event.target.value ? { column: event.target.value, descending: orderBy?.descending ?? false } : null); setPageIndex(0); }}>
+              <option value="">Default order</option>
+              {visibleColumns.map((column) => <option key={column.name} value={column.name}>{column.name}</option>)}
+            </select>
+          </label>
+          <select className="select-input sort-direction-select" aria-label="Sort direction" value={orderBy?.descending ? "desc" : "asc"} disabled={!orderBy} onChange={(event) => { setOrderBy((current) => current ? { ...current, descending: event.target.value === "desc" } : null); setPageIndex(0); }}>
+            <option value="asc">Ascending</option>
+            <option value="desc">Descending</option>
+          </select>
+          {collapsedColumns.size > 0 || Object.keys(columnWidths).length > 0 ? <button className="text-button" onClick={() => { setCollapsedColumns(new Set()); setColumnWidths({}); }}>Reset columns</button> : null}
+          <div className="filter-actions">
+            <button className="secondary-button" onClick={clearFilters} disabled={!page}>Clear</button>
+            <button className="secondary-button" onClick={applyFilters} disabled={!page}>Apply filters</button>
+          </div>
+        </div>
+      </div>
+
+      {error ? <DismissibleMessage className="inline-error" message={error} onDismiss={() => setError(null)} /> : null}
+      {notice ? <DismissibleMessage className="inline-notice" message={notice} onDismiss={() => setNotice(null)} /> : null}
+      {pendingCount > 0 ? <div className="pending-changes">{pendingCount} pending {pendingCount === 1 ? "change" : "changes"}. Orange rows contain edits; red rows are staged for deletion. Sorting and filtering keep these changes until you save or discard them.</div> : null}
+
+      <div className="grid-wrap">
+        {loading && !page ? <div className="loading-state">Loading rows…</div> : page && rowEntries.length > 0 ? (
+          <table className="data-grid resizable-grid" style={{ width: `${gridWidth}px`, minWidth: "100%" }}>
+            <colgroup>
+              <col style={{ width: `${SELECTION_COLUMN_WIDTH}px` }} />
+              {visibleColumns.map((column) => <col key={column.name} style={{ width: `${columnWidth(column)}px` }} />)}
+            </colgroup>
+            <thead><tr>
+              <th className="selection-header"><input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAll} aria-label="Select all visible rows" /></th>
+              {visibleColumns.map((column) => {
+                const sorted = orderBy?.column === column.name;
+                const collapsed = collapsedColumns.has(column.name);
+                return <th key={column.name} className={sorted ? "sorted-column resizable-header" : "resizable-header"}>
+                  {collapsed ? <button className="expand-column" onClick={() => toggleColumn(column.name)} title={`Expand ${column.name}`} aria-label={`Expand ${column.name}`}>▶</button> : <div className="column-header-content">
+                    <button className="column-sort" onClick={() => toggleSort(column.name)} aria-label={`Sort by ${column.name}`}>
+                      <span>{column.name}<small>{column.dataType}</small></span>
+                      <span className={`sort-indicator ${sorted ? "active" : ""}`}>{sorted ? orderBy.descending ? "↓" : "↑" : "↕"}</span>
+                    </button>
+                    <button className="collapse-column" onClick={() => toggleColumn(column.name)} title={`Collapse ${column.name}`} aria-label={`Collapse ${column.name}`}>◀</button>
+                  </div>}
+                  {!collapsed ? <div className="column-resize-handle" onMouseDown={(event) => startColumnResize(event, column)} /> : null}
+                </th>;
+              })}
+            </tr></thead>
+            <tbody>{rowEntries.map((entry) => {
+              const deleted = Boolean(entry.pending?.deleted);
+              const edited = Boolean(entry.pending && !entry.pending.deleted);
+              const rowClass = [selectedRows.has(entry.key) ? "selected-row" : "", deleted ? "deleted-row" : edited ? "staged-row" : ""].filter(Boolean).join(" ");
+              return <tr
+                key={entry.key}
+                className={rowClass}
+                onClick={(event) => selectRow(event, entry.rowIndex, entry.key)}
+                onContextMenu={(event) => openContextMenu(event, entry)}
+                onMouseEnter={() => setHoveredRowKey(entry.key)}
+                onMouseLeave={() => setHoveredRowKey(null)}
+              >
+                <td className="selection-cell">
+                  <input type="checkbox" checked={selectedRows.has(entry.key)} onClick={(event) => { event.stopPropagation(); selectRow(event, entry.rowIndex, entry.key, true); }} onChange={() => undefined} aria-label={`Select row ${entry.rowIndex + 1}`} />
+                  {hoveredRowKey === entry.key && entry.pending ? <ChangePreview pending={entry.pending} columns={visibleColumns} /> : null}
+                </td>
+                {visibleColumns.map((column, columnIndex) => {
+                  const collapsed = collapsedColumns.has(column.name);
+                  const isEditing = editing?.rowKey === entry.key && editing.column === columnIndex;
+                  const isPrimaryKey = page.metadata.primaryKey.includes(column.name);
+                  const displayValue = commands.toDisplayValue(entry.values[columnIndex]);
+                  return <td key={column.name} title={collapsed ? displayValue : undefined} onDoubleClick={() => editable && !collapsed && !isPrimaryKey && !deleted && setEditing({ rowKey: entry.key, column: columnIndex })}>
+                    {collapsed ? <span className="collapsed-cell">…</span> : isEditing ? <input
+                      autoFocus
+                      className="cell-input"
+                      value={displayValue === "NULL" ? "" : displayValue}
+                      onClick={(event) => event.stopPropagation()}
+                      onChange={(event) => setCell(entry, columnIndex, event.target.value)}
+                      onBlur={() => setEditing(null)}
+                      onKeyDown={(event) => { if (event.key === "Enter" || event.key === "Escape") setEditing(null); }}
+                    /> : <span className={entry.values[columnIndex] === null ? "null-value" : "cell-value"}>{displayValue}</span>}
+                  </td>;
+                })}
+              </tr>;
+            })}</tbody>
+          </table>
+        ) : <div className="empty-state">No rows match this view.</div>}
+        {showLoadingOverlay && page ? <div className="grid-loading-overlay"><span>Refreshing…</span></div> : null}
+      </div>
+
+      {pageIndex > 0 || page?.hasMore ? <div className="pagination">
+        {pageIndex > 0 ? <button className="secondary-button" disabled={loading} onClick={() => setPageIndex((value) => value - 1)}>← Previous</button> : null}
+        <span>Page {pageIndex + 1}</span>
+        {page?.hasMore ? <button className="secondary-button" disabled={loading} onClick={() => setPageIndex((value) => value + 1)}>Next →</button> : null}
+      </div> : null}
+
+      {contextMenu ? <div className="row-context-menu" style={{ left: contextMenu.x, top: contextMenu.y } as CSSProperties}>
+        <button onClick={() => void copyEntries(selectedEntries, "selected")}>Copy selected as CSV</button>
+        {editable ? <button className={allSelectedDeleted ? "" : "danger"} onClick={stageDeleteForSelected}>{allSelectedDeleted ? "Undo delete" : `Delete ${selectedEntries.length > 1 ? `${selectedEntries.length} rows` : "row"}`}</button> : null}
+      </div> : null}
+    </div>
+  );
+}
+
+function DismissibleMessage({ className, message, onDismiss }: { className: string; message: string; onDismiss: () => void }) {
+  return <div className={`${className} dismissible-message`}><span>{message}</span><button onClick={onDismiss} aria-label="Dismiss message">×</button></div>;
+}
+
+function ChangePreview({ pending, columns }: { pending: PendingRow; columns: TableColumn[] }) {
+  if (pending.deleted) return <div className="change-preview"><strong>Pending delete</strong><span>This row will be deleted when changes are saved.</span></div>;
+  const changes = columns.flatMap((column, index) => rowsEqual([pending.original[index]], [pending.changes[index]]) ? [] : [{
+    column: column.name,
+    before: commands.toDisplayValue(pending.original[index]),
+    after: commands.toDisplayValue(pending.changes[index]),
+  }]);
+  return <div className="change-preview">
+    <strong>Pending edits</strong>
+    {changes.slice(0, 4).map((change) => <span key={change.column}><b>{change.column}</b> {change.before} → {change.after}</span>)}
+    {changes.length > 4 ? <span>and {changes.length - 4} more…</span> : null}
+  </div>;
+}
+
+function createFilterDraft(column: string): FilterDraft {
+  return { id: crypto.randomUUID(), column, operator: "contains", value: "" };
+}
+
+function filterNeedsValue(operator: FilterOperator): boolean {
+  return operator !== "isNull" && operator !== "isNotNull";
+}
+
+function tableRowKey(metadata: TableMetadata, row: JsonValue[], fallbackIndex: number): string {
+  if (metadata.primaryKey.length === 0) return `row:${fallbackIndex}:${JSON.stringify(row)}`;
+  const values = metadata.primaryKey.map((key) => row[metadata.columns.findIndex((column) => column.name === key)]);
+  return `pk:${JSON.stringify(values)}`;
+}
+
+function defaultColumnWidth(column: TableColumn): number {
+  if (/json|array/i.test(column.dataType)) return 320;
+  if (/text|character|timestamp/i.test(column.dataType)) return 220;
+  return 160;
+}
+
+function parseCell(value: string): JsonValue {
+  if (value.trim() === "") return null;
+  if (value === "true") return true;
+  if (value === "false") return false;
+  if (/^-?\d+$/.test(value)) return Number(value);
+  if (/^-?\d+\.\d+$/.test(value)) return Number(value);
+  return value;
+}
+
+function toStringValue(value: JsonValue): string | null {
+  return value === null ? null : String(value);
+}
+
+function rowsEqual(left: JsonValue[], right: JsonValue[]): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function csvDocument(columns: string[], rows: JsonValue[][]): string {
+  return [csvLine(columns), ...rows.map(csvLine)].join("\n");
+}
+
+function csvLine(values: JsonValue[]): string {
+  return values.map((value) => {
+    const text = commands.toDisplayValue(value);
+    return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+  }).join(",");
+}
+
+function safeFileName(value: string): string {
+  return value.replace(/[\\/:*?"<>|]/g, "_");
+}
+
+function errorMessage(reason: unknown): string {
+  return reason instanceof Error ? reason.message : String(reason);
+}

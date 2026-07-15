@@ -236,6 +236,59 @@ export function toDisplayValue(value: JsonValue): string {
   return String(value);
 }
 
+export type CsvExportWriter = {
+  path: string;
+  write: (contents: string) => Promise<void>;
+  close: () => Promise<void>;
+  abort: () => Promise<void>;
+};
+
+export async function createCsvExportWriter(suggestedName: string): Promise<CsvExportWriter | null> {
+  if (inTauri()) {
+    const [{ save }, { open, remove }] = await Promise.all([
+      import("@tauri-apps/plugin-dialog"),
+      import("@tauri-apps/plugin-fs"),
+    ]);
+    const path = await save({
+      title: "Export CSV",
+      defaultPath: suggestedName,
+      filters: [{ name: "CSV", extensions: ["csv"] }],
+    });
+    if (!path) return null;
+    const file = await open(path, { write: true, create: true, truncate: true });
+    const encoder = new TextEncoder();
+    return {
+      path,
+      write: async (contents) => { await file.write(encoder.encode(contents)); },
+      close: async () => { await file.close(); },
+      abort: async () => {
+        try {
+          await file.close();
+        } finally {
+          await remove(path).catch(() => undefined);
+        }
+      },
+    };
+  }
+
+  const chunks: string[] = [];
+  return {
+    path: suggestedName,
+    write: async (contents) => { chunks.push(contents); },
+    close: async () => {
+      const url = URL.createObjectURL(new Blob(chunks, { type: "text/csv;charset=utf-8" }));
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = suggestedName;
+      document.body.append(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    },
+    abort: async () => { chunks.length = 0; },
+  };
+}
+
 function browserTableMetadata(schema: string, table: string): TableMetadata {
   return table === "orders"
     ? {

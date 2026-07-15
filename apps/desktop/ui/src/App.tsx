@@ -1,60 +1,27 @@
-import { useCallback, useEffect, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from "react";
 import CodeMirror from "@uiw/react-codemirror";
 import { sql } from "@codemirror/lang-sql";
 
 import * as commands from "./commands";
 import { parsePostgresConnectionUrl } from "./connectionUrl";
 import { useDbvStore } from "./store";
+import { TableView } from "./TableView";
 import type {
   ConnectionProfile,
-  FilterCondition,
-  FilterOperator,
   JsonValue,
-  MutationBatch,
-  OrderSpec,
   ProfileSummary,
   QueryHistoryEntry,
   QueryResponse,
   SaveProfileInput,
   SchemaNode,
-  TablePage,
 } from "./types";
 
-const PAGE_SIZE = 200;
-const EXPORT_PAGE_SIZE = 1_000;
-const LARGE_EXPORT_WARNING_ROWS = 100_000;
 const DEFAULT_CONNECTION_COLOR = "#38bdf8";
 const CONNECTION_COLORS = ["#38bdf8", "#22c55e", "#a78bfa", "#f59e0b", "#ef4444", "#64748b"];
-const FILTER_OPERATORS: Array<{ value: FilterOperator; label: string }> = [
-  { value: "equals", label: "Equals" },
-  { value: "notEquals", label: "Does not equal" },
-  { value: "contains", label: "Contains" },
-  { value: "startsWith", label: "Starts with" },
-  { value: "endsWith", label: "Ends with" },
-  { value: "greaterThan", label: "Greater than" },
-  { value: "greaterThanOrEqual", label: "Greater than or equal" },
-  { value: "lessThan", label: "Less than" },
-  { value: "lessThanOrEqual", label: "Less than or equal" },
-  { value: "in", label: "In list" },
-  { value: "notIn", label: "Not in list" },
-  { value: "isNull", label: "Is null" },
-  { value: "isNotNull", label: "Is not null" },
-];
-
-type FilterDraft = {
-  id: string;
-  column: string;
-  operator: FilterOperator;
-  value: string;
-};
-
-function createFilterDraft(column: string): FilterDraft {
-  return { id: crypto.randomUUID(), column, operator: "contains", value: "" };
-}
-
-function filterNeedsValue(operator: FilterOperator): boolean {
-  return operator !== "isNull" && operator !== "isNotNull";
-}
+const DEFAULT_SIDEBAR_WIDTH = 286;
+const MIN_SIDEBAR_WIDTH = 220;
+const MAX_SIDEBAR_WIDTH = 480;
+const COLLAPSED_SIDEBAR_WIDTH = 48;
 
 function defaultProfile(profile?: ConnectionProfile): SaveProfileInput {
   return {
@@ -92,10 +59,29 @@ export default function App() {
   const [schemas, setSchemas] = useState<Record<string, SchemaNode[]>>({});
   const [modalProfile, setModalProfile] = useState<ConnectionProfile | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    const saved = Number(window.localStorage.getItem("dbv.sidebarWidth"));
+    return Number.isFinite(saved) ? Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, saved)) : DEFAULT_SIDEBAR_WIDTH;
+  });
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem("dbv.sidebarCollapsed") === "true");
 
   useEffect(() => {
     void loadProfiles().catch((reason: unknown) => setError(errorMessage(reason)));
   }, [loadProfiles]);
+
+  useEffect(() => {
+    window.localStorage.setItem("dbv.sidebarWidth", String(sidebarWidth));
+  }, [sidebarWidth]);
+
+  useEffect(() => {
+    window.localStorage.setItem("dbv.sidebarCollapsed", String(sidebarCollapsed));
+  }, [sidebarCollapsed]);
+
+  useEffect(() => {
+    if (!error) return;
+    const timer = window.setTimeout(() => setError(null), 10_000);
+    return () => window.clearTimeout(timer);
+  }, [error]);
 
   const handleConnect = useCallback(async (profileId: string) => {
     try {
@@ -134,6 +120,23 @@ export default function App() {
     await handleConnect(saved.id);
   }, [handleConnect, saveProfile]);
 
+  const startSidebarResize = (event: ReactMouseEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = sidebarWidth;
+    const move = (moveEvent: MouseEvent) => {
+      setSidebarWidth(Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, startWidth + moveEvent.clientX - startX)));
+    };
+    const stop = () => {
+      document.body.classList.remove("resizing-sidebar");
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", stop);
+    };
+    document.body.classList.add("resizing-sidebar");
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", stop);
+  };
+
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? null;
   const activeWorkspace = activeProfileId ? workspaces[activeProfileId] : undefined;
   const activeViewProfile = (activeTab
@@ -145,14 +148,24 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <aside className="sidebar">
+      <aside
+        className={`sidebar ${sidebarCollapsed ? "collapsed" : ""}`}
+        style={{ width: sidebarCollapsed ? COLLAPSED_SIDEBAR_WIDTH : sidebarWidth, minWidth: sidebarCollapsed ? COLLAPSED_SIDEBAR_WIDTH : sidebarWidth }}
+      >
         <div className="brand-row">
-          <div className="brand-mark">DB</div>
-          <div>
+          {!sidebarCollapsed ? <div className="brand-mark">DB</div> : null}
+          {!sidebarCollapsed ? <div className="brand-copy">
             <strong>DBV</strong>
             <span>database viewer</span>
-          </div>
+          </div> : null}
+          <button
+            className="sidebar-collapse-button"
+            onClick={() => setSidebarCollapsed((value) => !value)}
+            title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >{sidebarCollapsed ? "›" : "‹"}</button>
         </div>
+        {!sidebarCollapsed ? <>
         <div className="sidebar-section-title">
           <span>Connections</span>
           <button className="sidebar-new-button" onClick={() => setModalProfile(null)}>New connection</button>
@@ -197,6 +210,24 @@ export default function App() {
         <div className="sidebar-footer">
           <span className="privacy-chip">LOCAL ONLY</span>
         </div>
+        <div
+          className="sidebar-resize-handle"
+          role="separator"
+          aria-label="Resize sidebar"
+          aria-orientation="vertical"
+          aria-valuemin={MIN_SIDEBAR_WIDTH}
+          aria-valuemax={MAX_SIDEBAR_WIDTH}
+          aria-valuenow={sidebarWidth}
+          tabIndex={0}
+          onMouseDown={startSidebarResize}
+          onDoubleClick={() => setSidebarWidth(DEFAULT_SIDEBAR_WIDTH)}
+          onKeyDown={(event) => {
+            if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+            event.preventDefault();
+            setSidebarWidth((width) => Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, width + (event.key === "ArrowLeft" ? -10 : 10))));
+          }}
+        />
+        </> : null}
       </aside>
 
       <main className={`main-pane ${activeViewProfile ? "connection-themed" : ""}`} style={connectionStyle}>
@@ -325,319 +356,6 @@ function Welcome({ hasProfiles }: { hasProfiles: boolean }) {
   );
 }
 
-function TableView({ profileId, schema, table }: { profileId: string; schema: string; table: string }) {
-  const [page, setPage] = useState<TablePage | null>(null);
-  const [pageIndex, setPageIndex] = useState(0);
-  const [filterDrafts, setFilterDrafts] = useState<FilterDraft[]>([]);
-  const [appliedFilters, setAppliedFilters] = useState<FilterCondition[]>([]);
-  const [orderBy, setOrderBy] = useState<OrderSpec | null>(null);
-  const [staged, setStaged] = useState<Record<number, JsonValue[]>>({});
-  const [deleted, setDeleted] = useState<Set<number>>(new Set());
-  const [editing, setEditing] = useState<{ row: number; column: number } | null>(null);
-  const [selectedRow, setSelectedRow] = useState<number | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [exporting, setExporting] = useState(false);
-  const [exportProgress, setExportProgress] = useState(0);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const nextPage = await commands.loadTablePage({
-        profileId,
-        schema,
-        table,
-        offset: pageIndex * PAGE_SIZE,
-        limit: PAGE_SIZE,
-        filters: appliedFilters,
-        orderBy,
-      });
-      setPage(nextPage);
-      setStaged({});
-      setDeleted(new Set());
-      setEditing(null);
-      setSelectedRow(null);
-      if (nextPage.metadata.columns[0]) {
-        setFilterDrafts((current) => current.length > 0 ? current : [createFilterDraft(nextPage.metadata.columns[0].name)]);
-      }
-    } catch (reason) {
-      setError(errorMessage(reason));
-    } finally {
-      setLoading(false);
-    }
-  }, [appliedFilters, orderBy, pageIndex, profileId, schema, table]);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => { void load(); }, 0);
-    return () => window.clearTimeout(timer);
-  }, [load]);
-
-  const editable = Boolean(page?.metadata.primaryKey.length);
-  const displayRows = page?.rows ?? [];
-  const visibleColumns = page?.metadata.columns ?? [];
-  const pendingCount = new Set([...Object.keys(staged).map(Number), ...deleted]).size;
-
-  const setCell = (rowIndex: number, columnIndex: number, value: string) => {
-    if (!page) return;
-    const next = [...(staged[rowIndex] ?? page.rows[rowIndex].slice(0, visibleColumns.length))];
-    next[columnIndex] = parseCell(value);
-    setStaged((current) => ({ ...current, [rowIndex]: next }));
-    setNotice(null);
-  };
-
-  const save = async () => {
-    if (!page || Object.keys(staged).length === 0 && deleted.size === 0) return;
-    setSaving(true);
-    const mutations: MutationBatch["mutations"] = [...new Set([...Object.keys(staged).map(Number), ...deleted])].map((rowIndex) => {
-      const original = page.rows[rowIndex].slice(0, visibleColumns.length);
-      const changes = staged[rowIndex] ?? original;
-      const primaryKey = page.metadata.primaryKey.map((key) => original[visibleColumns.findIndex((column) => column.name === key)]);
-      return {
-        original,
-        changes,
-        primaryKey,
-        xmin: toStringValue(page.rows[rowIndex][visibleColumns.length]),
-        deleted: deleted.has(rowIndex),
-      };
-    });
-    try {
-      const result = await commands.applyTableMutations({ profileId, schema, table, mutations });
-      await load();
-      if (result.conflicts.length > 0) {
-        setError(`${result.conflicts.length} row conflict(s); refresh before saving again.`);
-      } else {
-        setNotice(`${result.applied} ${result.applied === 1 ? "change" : "changes"} saved.`);
-      }
-    } catch (reason) {
-      setError(errorMessage(reason));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const copyVisibleRows = async () => {
-    if (!page) return;
-    try {
-      const rows = displayRows.map((row, rowIndex) => visibleColumns.map((_, columnIndex) => (
-        staged[rowIndex] ? staged[rowIndex][columnIndex] : row[columnIndex]
-      )));
-      await navigator.clipboard.writeText(csvDocument(visibleColumns.map((column) => column.name), rows));
-      setNotice(`Copied ${rows.length} visible ${rows.length === 1 ? "row" : "rows"} as CSV.`);
-    } catch (reason) {
-      setError(errorMessage(reason));
-    }
-  };
-
-  const exportAllRows = async () => {
-    if (!page || exporting) return;
-    if (pendingCount > 0) {
-      setError("Save or discard pending row changes before exporting.");
-      return;
-    }
-    if (page.totalRows !== null && page.totalRows > LARGE_EXPORT_WARNING_ROWS && !window.confirm(
-      `This export contains ${page.totalRows.toLocaleString()} rows and may take a while. Continue?`,
-    )) return;
-
-    setExporting(true);
-    setExportProgress(0);
-    setError(null);
-    setNotice(null);
-    try {
-      const chunks = [csvLine(visibleColumns.map((column) => column.name))];
-      let offset = 0;
-      let hasMore = true;
-      while (hasMore) {
-        const batch = await commands.loadTablePage({
-          profileId,
-          schema,
-          table,
-          offset,
-          limit: EXPORT_PAGE_SIZE,
-          filters: appliedFilters,
-          orderBy,
-          includeTotal: false,
-        });
-        const rows = batch.rows.map((row) => row.slice(0, visibleColumns.length));
-        if (rows.length > 0) chunks.push(rows.map(csvLine).join("\n"));
-        offset += rows.length;
-        setExportProgress(offset);
-        hasMore = batch.hasMore && rows.length > 0;
-      }
-      const url = URL.createObjectURL(new Blob(["\uFEFF", chunks.join("\n")], { type: "text/csv;charset=utf-8" }));
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = `${safeFileName(schema)}.${safeFileName(table)}.csv`;
-      document.body.append(anchor);
-      anchor.click();
-      anchor.remove();
-      URL.revokeObjectURL(url);
-      setNotice(`Exported ${offset.toLocaleString()} filtered ${offset === 1 ? "row" : "rows"}.`);
-    } catch (reason) {
-      setError(errorMessage(reason));
-    } finally {
-      setExporting(false);
-    }
-  };
-
-  const updateFilter = (id: string, patch: Partial<FilterDraft>) => {
-    setFilterDrafts((current) => current.map((filter) => filter.id === id ? { ...filter, ...patch } : filter));
-  };
-
-  const allowViewChange = () => {
-    if (pendingCount === 0) return true;
-    if (!window.confirm("Discard pending row changes and change this view?")) return false;
-    setStaged({});
-    setDeleted(new Set());
-    setEditing(null);
-    return true;
-  };
-
-  const applyFilters = () => {
-    if (!allowViewChange()) return;
-    const filters = filterDrafts.flatMap<FilterCondition>((filter) => {
-      if (!filter.column) return [];
-      if (filterNeedsValue(filter.operator) && !filter.value.trim()) return [];
-      return [{
-        column: filter.column,
-        operator: filter.operator,
-        value: filterNeedsValue(filter.operator) ? filter.value.trim() : null,
-      }];
-    });
-    setAppliedFilters(filters);
-    setPageIndex(0);
-    setNotice(null);
-  };
-
-  const clearFilters = () => {
-    if (!allowViewChange()) return;
-    setFilterDrafts(visibleColumns[0] ? [createFilterDraft(visibleColumns[0].name)] : []);
-    setAppliedFilters([]);
-    setPageIndex(0);
-    setNotice(null);
-  };
-
-  const toggleSort = (column: string) => {
-    if (!allowViewChange()) return;
-    setOrderBy((current) => {
-      if (current?.column !== column) return { column, descending: false };
-      if (!current.descending) return { column, descending: true };
-      return null;
-    });
-    setPageIndex(0);
-    setNotice(null);
-  };
-
-  const exportLabel = exporting
-    ? `Exporting ${exportProgress.toLocaleString()}${page?.totalRows !== null ? ` / ${page?.totalRows.toLocaleString()}` : ""}…`
-    : "Export CSV";
-
-  return (
-    <div className="table-view">
-      <div className="view-toolbar">
-        <div><span className="eyebrow">TABLE</span><h2>{schema}.{table}</h2></div>
-        <div className="toolbar-actions">
-          <button className="secondary-button" onClick={() => void copyVisibleRows()} disabled={!page || loading} title="Copies the currently visible page">Copy CSV</button>
-          <button className="secondary-button" onClick={() => void exportAllRows()} disabled={!page || loading || exporting} title="Exports every filtered row, not only the visible page">{exportLabel}</button>
-          {editable ? <>
-            <button className="secondary-button" onClick={() => { setStaged({}); setDeleted(new Set()); setEditing(null); setNotice(null); }} disabled={pendingCount === 0 || saving}>Discard changes</button>
-            <button className="primary-button" onClick={() => void save()} disabled={saving || pendingCount === 0}>{saving ? "Saving…" : `Save changes${pendingCount > 0 ? ` (${pendingCount})` : ""}`}</button>
-          </> : null}
-        </div>
-      </div>
-      <div className="filter-panel">
-        <div className="filter-panel-header">
-          <strong>Filters</strong>
-          <span className="filter-join">All filters must match</span>
-          <button className="text-button" onClick={() => setFilterDrafts((current) => [...current, createFilterDraft(visibleColumns[0]?.name ?? "")])} disabled={!page}>＋ Add filter</button>
-          {page ? <span className="row-count">{page.totalRows ?? "—"} rows · {page.metadata.columns.length} columns</span> : null}
-        </div>
-        {filterDrafts.map((filter) => (
-          <div className="filter-row" key={filter.id}>
-            <select className="select-input filter-column" value={filter.column} onChange={(event) => updateFilter(filter.id, { column: event.target.value })} disabled={!page}>
-              {visibleColumns.map((column) => <option key={column.name} value={column.name}>{column.name}</option>)}
-            </select>
-            <select className="select-input filter-operator" value={filter.operator} onChange={(event) => updateFilter(filter.id, { operator: event.target.value as FilterOperator })} disabled={!page}>
-              {FILTER_OPERATORS.map((operator) => <option key={operator.value} value={operator.value}>{operator.label}</option>)}
-            </select>
-            {filterNeedsValue(filter.operator) ? (
-              <input
-                className="text-input"
-                placeholder={filter.operator === "in" || filter.operator === "notIn" ? "value 1, value 2, …" : "Value…"}
-                value={filter.value}
-                onChange={(event) => updateFilter(filter.id, { value: event.target.value })}
-                onKeyDown={(event) => { if (event.key === "Enter") applyFilters(); }}
-              />
-            ) : <span className="filter-no-value">No value needed</span>}
-            <button className="icon-button filter-remove" onClick={() => setFilterDrafts((current) => current.filter((candidate) => candidate.id !== filter.id))} aria-label="Remove filter">×</button>
-          </div>
-        ))}
-        <div className="filter-actions">
-          <button className="secondary-button" onClick={clearFilters} disabled={!page}>Clear</button>
-          <button className="secondary-button" onClick={applyFilters} disabled={!page}>Apply filters</button>
-        </div>
-      </div>
-      {error ? <div className="inline-error">{error}</div> : null}
-      {notice ? <div className="inline-notice">{notice}</div> : null}
-      {pendingCount > 0 ? <div className="pending-changes">{pendingCount} pending {pendingCount === 1 ? "change" : "changes"}. Deleted rows and cell edits are only written after you select Save changes.</div> : null}
-      <div className="grid-wrap">
-        {loading ? <div className="loading-state">Loading rows…</div> : page && displayRows.length > 0 ? (
-          <table className="data-grid">
-            <thead><tr>{visibleColumns.map((column) => {
-              const sorted = orderBy?.column === column.name;
-              return <th key={column.name} className={sorted ? "sorted-column" : ""}>
-                <button className="column-sort" onClick={() => toggleSort(column.name)} aria-label={`Sort by ${column.name}`}>
-                  <span>{column.name}<small>{column.dataType}</small></span>
-                  <span className={`sort-indicator ${sorted ? "active" : ""}`}>{sorted ? orderBy.descending ? "↓" : "↑" : "↕"}</span>
-                </button>
-              </th>;
-            })}{editable ? <th className="row-actions-header">Actions</th> : null}</tr></thead>
-            <tbody>{displayRows.map((row, rowIndex) => {
-              const values = staged[rowIndex] ?? row.slice(0, visibleColumns.length);
-              const rowClass = [
-                selectedRow === rowIndex ? "selected-row" : "",
-                deleted.has(rowIndex) ? "deleted-row" : staged[rowIndex] ? "staged-row" : "",
-              ].filter(Boolean).join(" ");
-              return <tr key={`${rowIndex}-${String(row[0])}`} className={rowClass} onClick={() => setSelectedRow(rowIndex)}>
-                {visibleColumns.map((column, columnIndex) => {
-                  const isEditing = editing?.row === rowIndex && editing.column === columnIndex;
-                  const isPrimaryKey = page.metadata.primaryKey.includes(column.name);
-                  return <td key={column.name} onDoubleClick={() => editable && !isPrimaryKey && !deleted.has(rowIndex) && setEditing({ row: rowIndex, column: columnIndex })}>
-                    {isEditing ? <input autoFocus className="cell-input" value={commands.toDisplayValue(values[columnIndex]) === "NULL" ? "" : commands.toDisplayValue(values[columnIndex])} onChange={(event) => setCell(rowIndex, columnIndex, event.target.value)} onBlur={() => setEditing(null)} onKeyDown={(event) => { if (event.key === "Enter") setEditing(null); }} /> : <span className={values[columnIndex] === null ? "null-value" : "cell-value"}>{commands.toDisplayValue(values[columnIndex])}</span>}
-                  </td>;
-                })}
-                {editable ? <td className="row-actions-cell"><button className={`row-delete ${deleted.has(rowIndex) ? "undo" : ""}`} title={deleted.has(rowIndex) ? "Keep this row" : "Delete this row after saving changes"} onClick={(event) => { event.stopPropagation(); setDeleted((current) => { const next = new Set(current); if (next.has(rowIndex)) next.delete(rowIndex); else next.add(rowIndex); return next; }); setNotice(null); }}>{deleted.has(rowIndex) ? "Undo delete" : "Delete"}</button></td> : null}
-              </tr>;
-            })}</tbody>
-          </table>
-        ) : <div className="empty-state">No rows match this view.</div>}
-      </div>
-      {pageIndex > 0 || page?.hasMore ? <div className="pagination">
-        {pageIndex > 0 ? <button className="secondary-button" disabled={loading} onClick={() => { if (allowViewChange()) setPageIndex((value) => value - 1); }}>← Previous</button> : null}
-        <span>Page {pageIndex + 1}</span>
-        {page?.hasMore ? <button className="secondary-button" disabled={loading} onClick={() => { if (allowViewChange()) setPageIndex((value) => value + 1); }}>Next →</button> : null}
-      </div> : null}
-    </div>
-  );
-}
-
-function csvDocument(columns: string[], rows: JsonValue[][]): string {
-  return [csvLine(columns), ...rows.map(csvLine)].join("\n");
-}
-
-function csvLine(values: JsonValue[]): string {
-  return values.map((value) => {
-    const text = commands.toDisplayValue(value);
-    return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
-  }).join(",");
-}
-
-function safeFileName(value: string): string {
-  return value.replace(/[\\/:*?"<>|]/g, "_");
-}
-
 function QueryView({ profileId, initialSql }: { profileId: string; initialSql: string }) {
   const [sqlText, setSqlText] = useState(initialSql);
   const [response, setResponse] = useState<QueryResponse | null>(null);
@@ -648,6 +366,12 @@ function QueryView({ profileId, initialSql }: { profileId: string; initialSql: s
   useEffect(() => {
     void commands.listQueryHistory(profileId).then(setHistory).catch((reason: unknown) => setError(errorMessage(reason)));
   }, [profileId]);
+
+  useEffect(() => {
+    if (!error) return;
+    const timer = window.setTimeout(() => setError(null), 10_000);
+    return () => window.clearTimeout(timer);
+  }, [error]);
 
   const run = async () => {
     if (requiresConfirmation(sqlText) && !window.confirm("This query may change or remove many rows. Run it anyway?")) return;
@@ -671,7 +395,7 @@ function QueryView({ profileId, initialSql }: { profileId: string; initialSql: s
         <div className="editor-panel"><CodeMirror value={sqlText} height="260px" theme="dark" extensions={[sql()]} onChange={setSqlText} basicSetup={{ lineNumbers: true, foldGutter: false }} /><div className="editor-hint">Dedicated session · results capped at 10,000 rows · writes are enabled</div></div>
         <aside className="history-panel"><div className="panel-title">History</div>{history.length === 0 ? <p className="muted">Run a query to start history.</p> : history.slice(0, 12).map((entry) => <button className="history-item" key={entry.id} onClick={() => setSqlText(entry.sql)}><span>{entry.success ? "✓" : "!"}</span><span className="history-sql">{entry.sql.replace(/\s+/g, " ").slice(0, 70)}</span><small>{new Date(entry.executedAt).toLocaleTimeString()}</small></button>)}</aside>
       </div>
-      {error ? <div className="inline-error">{error}</div> : null}
+      {error ? <div className="inline-error dismissible-message"><span>{error}</span><button onClick={() => setError(null)} aria-label="Dismiss message">×</button></div> : null}
       {response ? <div className="result-panel"><div className="result-meta"><span>{response.rowCount} rows{response.affectedRows !== null ? ` · ${response.affectedRows} affected` : ""} · {response.durationMs} ms</span>{response.truncated ? <span className="warning-chip">truncated</span> : null}</div><ResultTable columns={response.columns.map((column) => column.name)} rows={response.rows} /></div> : <div className="query-empty">Results will appear here.</div>}
     </div>
   );
@@ -846,19 +570,6 @@ function ProfileModal({
       </div>
     </div>
   );
-}
-
-function parseCell(value: string): JsonValue {
-  if (value.trim() === "") return null;
-  if (value === "true") return true;
-  if (value === "false") return false;
-  if (/^-?\d+$/.test(value)) return Number(value);
-  if (/^-?\d+\.\d+$/.test(value)) return Number(value);
-  return value;
-}
-
-function toStringValue(value: JsonValue): string | null {
-  return value === null ? null : String(value);
 }
 
 function errorMessage(reason: unknown): string {
