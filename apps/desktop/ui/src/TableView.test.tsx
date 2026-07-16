@@ -98,4 +98,22 @@ describe("TableView", () => {
     expect(expand).not.toHaveAttribute("title");
     expect(expand).toHaveAttribute("data-tooltip", "Expand email");
   });
+
+  it("clears the pending-change export warning when all changes are discarded", async () => {
+    render(<TableView profileId="preview" schema="public" table="users" />);
+
+    const email = await screen.findByText("person1@example.com");
+    const row = email.closest("tr");
+    fireEvent.doubleClick(email.closest("td")!);
+    const editor = within(row!).getByRole("textbox");
+    fireEvent.change(editor, { target: { value: "discard-me@example.com" } });
+    fireEvent.blur(editor);
+
+    fireEvent.click(screen.getByRole("button", { name: "Export all (12)" }));
+    expect(screen.getByText("Save or discard pending row changes before exporting.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
+    expect(screen.queryByText("Save or discard pending row changes before exporting.")).not.toBeInTheDocument();
+    expect(screen.getByText("person1@example.com")).toBeInTheDocument();
+  });
 });

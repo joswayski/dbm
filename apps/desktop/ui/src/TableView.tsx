@@ -17,6 +17,7 @@ const MAX_PREVIEW_ROWS = 200;
 const EXPORT_PAGE_SIZE = 1_000;
 const LARGE_EXPORT_WARNING_ROWS = 100_000;
 const COLLAPSED_COLUMN_WIDTH = 76;
+const PENDING_EXPORT_ERROR = "Save or discard pending row changes before exporting.";
 
 const FILTER_OPERATORS: Array<{ value: FilterOperator; label: string }> = [
   { value: "equals", label: "Equals" },
@@ -277,7 +278,7 @@ export function TableView({ profileId, schema, table }: { profileId: string; sch
   const exportAllRows = async () => {
     if (!page || exporting) return;
     if (pendingCount > 0) {
-      setError("Save or discard pending row changes before exporting.");
+      setError(PENDING_EXPORT_ERROR);
       return;
     }
     if (page.totalRows !== null && page.totalRows > LARGE_EXPORT_WARNING_ROWS && !window.confirm(
@@ -527,7 +528,7 @@ export function TableView({ profileId, schema, table }: { profileId: string; sch
             </div> : null}
           </div> : null}
           {pendingCount > 0 ? <>
-            <button className="secondary-button" onClick={() => { setPendingRows({}); setEditing(null); setNotice(null); }} disabled={saving}>Discard changes</button>
+            <button className="secondary-button" onClick={() => { setPendingRows({}); setEditing(null); setNotice(null); setError((current) => current === PENDING_EXPORT_ERROR ? null : current); }} disabled={saving}>Discard changes</button>
             <button className="primary-button" onClick={() => void saveChanges()} disabled={saving}>{saving ? "Saving…" : `Save changes (${pendingCount})`}</button>
           </> : null}
         </div>
