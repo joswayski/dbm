@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from "react";
+import { createPortal } from "react-dom";
 
 import * as commands from "./commands";
 import type {
@@ -56,6 +57,14 @@ type RowEntry = {
   values: JsonValue[];
 };
 
+type ChangePreviewState = {
+  rowKey: string;
+  left: number;
+  top?: number;
+  bottom?: number;
+  maxHeight: number;
+};
+
 export function TableView({ profileId, schema, table }: { profileId: string; schema: string; table: string }) {
   const [page, setPage] = useState<TablePage | null>(null);
   const [pageIndex, setPageIndex] = useState(0);
@@ -68,8 +77,9 @@ export function TableView({ profileId, schema, table }: { profileId: string; sch
   const [editing, setEditing] = useState<{ rowKey: string; column: number } | null>(null);
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
   const [selectionAnchor, setSelectionAnchor] = useState<number | null>(null);
-  const [hoveredRowKey, setHoveredRowKey] = useState<string | null>(null);
+  const [changePreview, setChangePreview] = useState<ChangePreviewState | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [selectionMenuOpen, setSelectionMenuOpen] = useState(false);
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});
   const [collapsedColumns, setCollapsedColumns] = useState<Set<string>>(new Set());
   const [hoveredColumnAction, setHoveredColumnAction] = useState<string | null>(null);
@@ -81,6 +91,8 @@ export function TableView({ profileId, schema, table }: { profileId: string; sch
   const [exporting, setExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
   const filtersInitialized = useRef(false);
+  const gridRef = useRef<HTMLDivElement>(null);
+  const previewCloseTimer = useRef<number | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -102,6 +114,8 @@ export function TableView({ profileId, schema, table }: { profileId: string; sch
       setSelectedRows(new Set());
       setSelectionAnchor(null);
       setContextMenu(null);
+      setSelectionMenuOpen(false);
+      setChangePreview(null);
       if (!filtersInitialized.current && nextPage.metadata.columns[0]) {
         filtersInitialized.current = true;
         setFilterDrafts([createFilterDraft(nextPage.metadata.columns[0].name)]);
@@ -142,6 +156,33 @@ export function TableView({ profileId, schema, table }: { profileId: string; sch
       window.removeEventListener("blur", close);
     };
   }, [contextMenu]);
+
+  useEffect(() => {
+    if (!selectionMenuOpen) return;
+    const close = () => setSelectionMenuOpen(false);
+    window.addEventListener("click", close);
+    window.addEventListener("blur", close);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("blur", close);
+    };
+  }, [selectionMenuOpen]);
+
+  useEffect(() => {
+    if (!changePreview) return;
+    const close = () => setChangePreview(null);
+    const grid = gridRef.current;
+    window.addEventListener("resize", close);
+    grid?.addEventListener("scroll", close, { passive: true });
+    return () => {
+      window.removeEventListener("resize", close);
+      grid?.removeEventListener("scroll", close);
+    };
+  }, [changePreview]);
+
+  useEffect(() => () => {
+    if (previewCloseTimer.current !== null) window.clearTimeout(previewCloseTimer.current);
+  }, []);
 
   const visibleColumns = page?.metadata.columns ?? [];
   const displayRows = page?.rows ?? [];
@@ -350,6 +391,35 @@ export function TableView({ profileId, schema, table }: { profileId: string; sch
     });
     setSelectionAnchor(rowIndex);
     setContextMenu(null);
+    setSelectionMenuOpen(false);
+  };
+
+  const cancelPreviewClose = () => {
+    if (previewCloseTimer.current === null) return;
+    window.clearTimeout(previewCloseTimer.current);
+    previewCloseTimer.current = null;
+  };
+
+  const schedulePreviewClose = () => {
+    cancelPreviewClose();
+    previewCloseTimer.current = window.setTimeout(() => {
+      setChangePreview(null);
+      previewCloseTimer.current = null;
+    }, 140);
+  };
+
+  const showChangePreview = (element: HTMLTableRowElement, rowKey: string) => {
+    cancelPreviewClose();
+    const rect = element.getBoundingClientRect();
+    const previewWidth = Math.min(720, Math.max(320, window.innerWidth - 32));
+    const left = Math.max(16, Math.min(rect.left + 16, window.innerWidth - previewWidth - 16));
+    const spaceBelow = Math.max(0, window.innerHeight - rect.bottom - 16);
+    const spaceAbove = Math.max(0, rect.top - 16);
+    if (spaceBelow >= 260 || spaceBelow >= spaceAbove) {
+      setChangePreview({ rowKey, left, top: rect.bottom + 4, maxHeight: Math.max(140, Math.min(520, spaceBelow)) });
+    } else {
+      setChangePreview({ rowKey, left, bottom: window.innerHeight - rect.top + 4, maxHeight: Math.max(140, Math.min(520, spaceAbove)) });
+    }
   };
 
   const discardPendingRow = (rowKey: string) => {
@@ -383,6 +453,7 @@ export function TableView({ profileId, schema, table }: { profileId: string; sch
     });
     setNotice(null);
     setContextMenu(null);
+    setSelectionMenuOpen(false);
   };
 
   const openContextMenu = (event: ReactMouseEvent, entry: RowEntry) => {
@@ -442,7 +513,19 @@ export function TableView({ profileId, schema, table }: { profileId: string; sch
         <div className="toolbar-actions">
           <button className="secondary-button" onClick={() => void copyEntries(copyableEntries, "visible")} disabled={!page || loading} title="Copies only the current preview page">Copy visible ({copyableEntries.length})</button>
           <button className="secondary-button" onClick={() => void exportAllRows()} disabled={!page || loading || exporting} title="Prompts for a location and exports every filtered row">{exportLabel}</button>
-          {editable && selectedEntries.length > 0 ? <button className="danger-button" onClick={stageDeleteForSelected}>{allSelectedDeleted ? `Undo delete (${selectedEntries.length})` : `Delete selected (${selectedEntries.length})`}</button> : null}
+          {selectedEntries.length > 0 ? <div className="selection-actions">
+            <button
+              className="secondary-button selection-actions-trigger"
+              aria-expanded={selectionMenuOpen}
+              aria-haspopup="menu"
+              onClick={(event) => { event.stopPropagation(); setSelectionMenuOpen((open) => !open); }}
+            >{selectedEntries.length} selected <span aria-hidden="true">⌄</span></button>
+            {selectionMenuOpen ? <div className="selection-actions-menu" role="menu" onClick={(event) => event.stopPropagation()}>
+              <button role="menuitem" onClick={() => { void copyEntries(selectedEntries, "selected"); setSelectionMenuOpen(false); }}>Copy selected as CSV</button>
+              {editable ? <button role="menuitem" className={allSelectedDeleted ? "" : "danger"} onClick={stageDeleteForSelected}>{allSelectedDeleted ? "Undo staged deletion" : `Stage ${selectedEntries.length === 1 ? "row" : `${selectedEntries.length} rows`} for deletion`}</button> : null}
+              <button role="menuitem" onClick={() => { setSelectedRows(new Set()); setSelectionAnchor(null); setSelectionMenuOpen(false); }}>Clear selection</button>
+            </div> : null}
+          </div> : null}
           {pendingCount > 0 ? <>
             <button className="secondary-button" onClick={() => { setPendingRows({}); setEditing(null); setNotice(null); }} disabled={saving}>Discard changes</button>
             <button className="primary-button" onClick={() => void saveChanges()} disabled={saving}>{saving ? "Saving…" : `Save changes (${pendingCount})`}</button>
@@ -494,7 +577,7 @@ export function TableView({ profileId, schema, table }: { profileId: string; sch
           {collapsedColumns.size > 0 || Object.keys(columnWidths).length > 0 ? <button className="text-button" onClick={() => { setCollapsedColumns(new Set()); setColumnWidths({}); }}>Reset columns</button> : null}
           <div className="filter-actions">
             <button className="secondary-button" onClick={clearFilters} disabled={!page}>Clear</button>
-            <button className="secondary-button" onClick={applyFilters} disabled={!page}>Apply filters</button>
+            <button className="primary-button apply-filters-button" onClick={applyFilters} disabled={!page}>Apply filters</button>
           </div>
         </div>
       </div>
@@ -507,7 +590,7 @@ export function TableView({ profileId, schema, table }: { profileId: string; sch
         {pendingDeleteCount > 0 ? <span className="pending-delete-count">{pendingDeleteCount} {pendingDeleteCount === 1 ? "deletion" : "deletions"}</span> : null}
       </div> : null}
 
-      <div className="grid-wrap">
+      <div className="grid-wrap" ref={gridRef}>
         {loading && !page ? <div className="initial-grid-skeleton" aria-label="Loading rows">
           <div className="skeleton-header" />
           {Array.from({ length: 5 }, (_, index) => <div className="skeleton-row" key={index} />)}
@@ -558,8 +641,8 @@ export function TableView({ profileId, schema, table }: { profileId: string; sch
                 className={rowClass}
                 onClick={(event) => selectRow(event, entry.rowIndex, entry.key)}
                 onContextMenu={(event) => openContextMenu(event, entry)}
-                onMouseEnter={() => setHoveredRowKey(entry.key)}
-                onMouseLeave={() => setHoveredRowKey(null)}
+                onMouseEnter={(event) => { if (entry.pending) showChangePreview(event.currentTarget, entry.key); }}
+                onMouseLeave={() => { if (entry.pending) schedulePreviewClose(); }}
                 aria-selected={selectedRows.has(entry.key)}
               >
                 {visibleColumns.map((column, columnIndex) => {
@@ -572,10 +655,9 @@ export function TableView({ profileId, schema, table }: { profileId: string; sch
                     : "";
                   return <td
                     key={column.name}
-                    className={[columnIndex === 0 ? "row-preview-anchor" : "", collapsed ? "collapsed-data-cell" : "", focusClass].filter(Boolean).join(" ")}
+                    className={[collapsed ? "collapsed-data-cell" : "", focusClass].filter(Boolean).join(" ")}
                     onDoubleClick={() => editable && !collapsed && !isPrimaryKey && !deleted && setEditing({ rowKey: entry.key, column: columnIndex })}
                   >
-                    {columnIndex === 0 && hoveredRowKey === entry.key && entry.pending ? <ChangePreview pending={entry.pending} columns={visibleColumns} onDiscard={() => discardPendingRow(entry.key)} /> : null}
                     {collapsed ? <span className="collapsed-cell">…</span> : isEditing ? <input
                       autoFocus
                       className="cell-input"
@@ -602,8 +684,16 @@ export function TableView({ profileId, schema, table }: { profileId: string; sch
 
       {contextMenu ? <div className="row-context-menu" style={{ left: contextMenu.x, top: contextMenu.y } as CSSProperties}>
         <button onClick={() => void copyEntries(selectedEntries, "selected")}>Copy selected as CSV</button>
-        {editable ? <button className={allSelectedDeleted ? "" : "danger"} onClick={stageDeleteForSelected}>{allSelectedDeleted ? "Undo delete" : `Delete ${selectedEntries.length > 1 ? `${selectedEntries.length} rows` : "row"}`}</button> : null}
+        {editable ? <button className={allSelectedDeleted ? "" : "danger"} onClick={stageDeleteForSelected}>{allSelectedDeleted ? "Undo staged deletion" : `Stage ${selectedEntries.length > 1 ? `${selectedEntries.length} rows` : "row"} for deletion`}</button> : null}
       </div> : null}
+      {changePreview && pendingRows[changePreview.rowKey] ? createPortal(<ChangePreview
+        pending={pendingRows[changePreview.rowKey]}
+        columns={visibleColumns}
+        onDiscard={() => { discardPendingRow(changePreview.rowKey); setChangePreview(null); }}
+        onMouseEnter={cancelPreviewClose}
+        onMouseLeave={schedulePreviewClose}
+        style={{ left: changePreview.left, top: changePreview.top, bottom: changePreview.bottom, maxHeight: changePreview.maxHeight }}
+      />, document.body) : null}
     </div>
   );
 }
@@ -612,9 +702,16 @@ function DismissibleMessage({ className, message, onDismiss }: { className: stri
   return <div className={`${className} dismissible-message`}><span>{message}</span><button onClick={onDismiss} aria-label="Dismiss message">×</button></div>;
 }
 
-function ChangePreview({ pending, columns, onDiscard }: { pending: PendingRow; columns: TableColumn[]; onDiscard: () => void }) {
+function ChangePreview({ pending, columns, onDiscard, onMouseEnter, onMouseLeave, style }: {
+  pending: PendingRow;
+  columns: TableColumn[];
+  onDiscard: () => void;
+  onMouseEnter: () => void;
+  onMouseLeave: () => void;
+  style: CSSProperties;
+}) {
   const stopPropagation = (event: ReactMouseEvent) => event.stopPropagation();
-  if (pending.deleted) return <div className="change-preview delete-preview" onMouseDown={stopPropagation} onClick={stopPropagation}>
+  if (pending.deleted) return <div className="change-preview delete-preview" style={style} onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave} onMouseDown={stopPropagation} onClick={stopPropagation}>
     <div className="change-preview-header"><strong>Pending delete</strong><button onClick={(event) => { event.stopPropagation(); onDiscard(); }}>Undo delete</button></div>
     <p>This row will be deleted when changes are saved.</p>
   </div>;
@@ -623,7 +720,7 @@ function ChangePreview({ pending, columns, onDiscard }: { pending: PendingRow; c
     before: commands.toDisplayValue(pending.original[index]),
     after: commands.toDisplayValue(pending.changes[index]),
   }]);
-  return <div className="change-preview edit-preview" onMouseDown={stopPropagation} onClick={stopPropagation}>
+  return <div className="change-preview edit-preview" style={style} onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave} onMouseDown={stopPropagation} onClick={stopPropagation}>
     <div className="change-preview-header"><strong>Pending edit</strong><button onClick={(event) => { event.stopPropagation(); onDiscard(); }}>Discard row edit</button></div>
     <div className="change-diff-list">
       {changes.map((change) => <div className="change-diff" key={change.column}>

@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from "react";
-import CodeMirror, { keymap, type EditorView, type ReactCodeMirrorRef } from "@uiw/react-codemirror";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from "react";
+import CodeMirror, { Decoration, ViewPlugin, type DecorationSet, type EditorView, type ReactCodeMirrorRef, type ViewUpdate } from "@uiw/react-codemirror";
 import { sql } from "@codemirror/lang-sql";
 
 import * as commands from "./commands";
 import { parsePostgresConnectionUrl } from "./connectionUrl";
-import { sqlToRun } from "./sqlSelection";
+import { sqlExecutionTarget, type SqlExecutionTarget } from "./sqlSelection";
 import { useDbvStore } from "./store";
 import { TableView } from "./TableView";
 import type {
@@ -394,12 +394,47 @@ function Welcome({ hasProfiles }: { hasProfiles: boolean }) {
   );
 }
 
-function QueryView({ profileId, initialSql }: { profileId: string; initialSql: string }) {
+const activeSqlStatement = ViewPlugin.fromClass(class {
+  decorations: DecorationSet;
+
+  constructor(view: EditorView) {
+    this.decorations = activeSqlDecorations(view);
+  }
+
+  update(update: ViewUpdate) {
+    if (update.docChanged || update.selectionSet) this.decorations = activeSqlDecorations(update.view);
+  }
+}, {
+  decorations: (plugin) => plugin.decorations,
+});
+
+function activeSqlDecorations(view: EditorView): DecorationSet {
+  const selection = view.state.selection.main;
+  if (!selection.empty) return Decoration.none;
+  const target = sqlExecutionTarget(view.state.doc.toString(), selection.from, selection.to);
+  if (!target) return Decoration.none;
+
+  const firstLine = view.state.doc.lineAt(target.from);
+  const lastLine = view.state.doc.lineAt(Math.max(target.from, target.to - 1));
+  const decorations = [];
+  for (let lineNumber = firstLine.number; lineNumber <= lastLine.number; lineNumber += 1) {
+    const classes = [
+      "cm-active-sql-line",
+      lineNumber === firstLine.number ? "cm-active-sql-start" : "",
+      lineNumber === lastLine.number ? "cm-active-sql-end" : "",
+    ].filter(Boolean).join(" ");
+    decorations.push(Decoration.line({ attributes: { class: classes } }).range(view.state.doc.line(lineNumber).from));
+  }
+  return Decoration.set(decorations);
+}
+
+export function QueryView({ profileId, initialSql }: { profileId: string; initialSql: string }) {
   const [sqlText, setSqlText] = useState(initialSql);
   const [response, setResponse] = useState<QueryResponse | null>(null);
   const [history, setHistory] = useState<QueryHistoryEntry[]>([]);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [executionTarget, setExecutionTarget] = useState<SqlExecutionTarget | null>(() => sqlExecutionTarget(initialSql, 0, 0));
   const editorRef = useRef<ReactCodeMirrorRef>(null);
 
   useEffect(() => {
@@ -433,26 +468,46 @@ function QueryView({ profileId, initialSql }: { profileId: string; initialSql: s
   const selectedOrCurrentStatement = useCallback((view?: EditorView) => {
     if (!view) return sqlText.trim();
     const selection = view.state.selection.main;
-    return sqlToRun(view.state.doc.toString(), selection.from, selection.to);
+    return sqlExecutionTarget(view.state.doc.toString(), selection.from, selection.to)?.sql ?? "";
   }, [sqlText]);
 
-  const runFromKeymap = useCallback((view: EditorView) => {
-    void run(selectedOrCurrentStatement(view));
-    return true;
-  }, [run, selectedOrCurrentStatement]);
-
-  const editorExtensions = useMemo(() => [sql(), keymap.of([{ key: "Mod-Enter", run: runFromKeymap }])], [runFromKeymap]);
+  const editorExtensions = useMemo(() => [sql(), activeSqlStatement], []);
 
   const runFromEditor = () => {
     void run(selectedOrCurrentStatement(editorRef.current?.view));
   };
 
+  const handleEditorKeyDownCapture = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "Enter" || (!event.metaKey && !event.ctrlKey)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    runFromEditor();
+  };
+
+  const handleEditorUpdate = (update: ViewUpdate) => {
+    if (!update.docChanged && !update.selectionSet) return;
+    const selection = update.state.selection.main;
+    setExecutionTarget(sqlExecutionTarget(update.state.doc.toString(), selection.from, selection.to));
+  };
+
+  const runLabel = executionTarget?.kind === "selection" ? "Run selection" : "Run statement";
+
   return (
     <div className="query-view">
-      <div className="view-toolbar"><div><span className="eyebrow">SQL WORKBENCH</span><h2>Query</h2></div><div className="toolbar-actions"><button className="secondary-button" onClick={() => void commands.cancelQuery().catch((reason: unknown) => setError(errorMessage(reason)))} disabled={!running}>Cancel</button><button className="primary-button" onClick={runFromEditor} disabled={running || !sqlText.trim()}>{running ? "Running…" : "Run current"}<kbd>⌘↵</kbd></button></div></div>
+      <div className="view-toolbar"><div><span className="eyebrow">SQL WORKBENCH</span><h2>Query</h2></div><div className="toolbar-actions"><button className="secondary-button" onClick={() => void commands.cancelQuery().catch((reason: unknown) => setError(errorMessage(reason)))} disabled={!running}>Cancel</button><button className="primary-button" onClick={runFromEditor} disabled={running || !executionTarget}>{running ? "Running…" : runLabel}<kbd>⌘↵</kbd></button></div></div>
       <div className="query-layout">
-        <div className="editor-panel"><CodeMirror ref={editorRef} value={sqlText} height="260px" theme="dark" extensions={editorExtensions} onChange={setSqlText} basicSetup={{ lineNumbers: true, foldGutter: false }} /><div className="editor-hint">Select SQL to run it, or place the cursor in a statement · Command/Ctrl+Enter · results capped at 10,000 rows</div></div>
-        <aside className="history-panel"><div className="panel-title">History</div>{history.length === 0 ? <p className="muted">Run a query to start history.</p> : history.slice(0, 12).map((entry) => <button className="history-item" key={entry.id} onClick={() => setSqlText(entry.sql)}><span>{entry.success ? "✓" : "!"}</span><span className="history-sql">{entry.sql.replace(/\s+/g, " ").slice(0, 70)}</span><small>{new Date(entry.executedAt).toLocaleTimeString()}</small></button>)}</aside>
+        <div className="editor-panel" onKeyDownCapture={handleEditorKeyDownCapture}>
+          <CodeMirror ref={editorRef} className="query-code-editor" value={sqlText} height="100%" theme="dark" extensions={editorExtensions} onChange={setSqlText} onUpdate={handleEditorUpdate} basicSetup={{ lineNumbers: true, foldGutter: false }} />
+          {executionTarget?.kind === "selection" ? <button
+            className="editor-selection-run"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={runFromEditor}
+            disabled={running}
+            title="Run the selected SQL (Command/Ctrl+Enter)"
+          ><span aria-hidden="true">▶</span> Run selection</button> : null}
+          <div className="editor-hint">The outlined statement or selected SQL will run · Command/Ctrl+Enter · results capped at 10,000 rows</div>
+        </div>
+        <aside className="history-panel"><div className="panel-title">History <span>{history.length}</span></div>{history.length === 0 ? <p className="muted">Run a query to start history.</p> : <div className="history-list">{history.slice(0, 100).map((entry) => <button className="history-item" key={entry.id} onClick={() => setSqlText(entry.sql)}><span>{entry.success ? "✓" : "!"}</span><span className="history-sql">{entry.sql.replace(/\s+/g, " ").slice(0, 70)}</span><small>{new Date(entry.executedAt).toLocaleTimeString()}</small></button>)}</div>}</aside>
       </div>
       {error ? <div className="inline-error dismissible-message"><span>{error}</span><button onClick={() => setError(null)} aria-label="Dismiss message">×</button></div> : null}
       {response ? <div className="result-panel"><div className="result-meta"><span>{response.rowCount} rows{response.affectedRows !== null ? ` · ${response.affectedRows} affected` : ""} · {response.durationMs} ms</span>{response.truncated ? <span className="warning-chip">truncated</span> : null}</div><ResultTable columns={response.columns.map((column) => column.name)} rows={response.rows} /></div> : <div className="query-empty">Results will appear here.</div>}

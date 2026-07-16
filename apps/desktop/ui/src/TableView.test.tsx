@@ -21,7 +21,9 @@ describe("TableView", () => {
     expect(row).toHaveClass("staged-row");
     expect(screen.getByRole("button", { name: "Save changes (1)" })).toBeInTheDocument();
     fireEvent.mouseEnter(row!);
-    expect(screen.getByText("Pending edit")).toBeInTheDocument();
+    const preview = screen.getByText("Pending edit").closest(".change-preview");
+    expect(preview).toBeInTheDocument();
+    expect(row!.contains(preview)).toBe(false);
     expect(screen.getByText("Before").nextElementSibling).toHaveTextContent("person1@example.com");
     expect(screen.getByText("After").nextElementSibling).toHaveTextContent("updated@example.com");
     fireEvent.mouseLeave(row!);
@@ -49,7 +51,11 @@ describe("TableView", () => {
 
     expect(rows[0]).toHaveAttribute("aria-selected", "true");
     expect(rows[1]).toHaveAttribute("aria-selected", "true");
-    fireEvent.click(screen.getByRole("button", { name: "Delete selected (2)" }));
+    expect(screen.queryByRole("button", { name: /Delete selected/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "2 selected" }));
+    const stageDeletion = screen.getByRole("menuitem", { name: "Stage 2 rows for deletion" });
+    expect(stageDeletion).toHaveClass("danger");
+    fireEvent.click(stageDeletion);
 
     expect(container.querySelectorAll("tr.deleted-row")).toHaveLength(2);
     expect(screen.getByText("2 pending changes")).toBeInTheDocument();
@@ -71,6 +77,7 @@ describe("TableView", () => {
     fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
 
     await waitFor(() => expect(screen.getByRole("button", { name: /Copy visible/ })).not.toBeDisabled());
+    expect(screen.getByRole("button", { name: "Apply filters" })).toHaveClass("primary-button");
     expect(screen.queryByRole("button", { name: "Remove filter" })).not.toBeInTheDocument();
   });
 
