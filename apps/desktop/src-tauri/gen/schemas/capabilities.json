@@ -1,0 +1,1 @@
+{"main":{"identifier":"main","description":"Permissions for the DBV desktop window","local":true,"windows":["main"],"permissions":["core:default","dialog:allow-save","fs:allow-open","fs:allow-remove","fs:allow-write"]}}
