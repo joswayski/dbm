@@ -1,5 +1,5 @@
 [package]
-name = "dbv-desktop"
+name = "dbm-desktop"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -7,11 +7,11 @@ rust-version.workspace = true
 publish = false
 
 [lib]
-name = "dbv_desktop_lib"
+name = "dbm_desktop_lib"
 crate-type = ["lib", "cdylib", "staticlib"]
 
 [[bin]]
-name = "dbv"
+name = "dbm"
 path = "src/main.rs"
 
 [build-dependencies]

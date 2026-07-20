@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import * as commands from "./commands";
-import { useDbvStore } from "./store";
+import { useDbmStore } from "./store";
 
-describe("DBV store", () => {
+describe("DBM store", () => {
   it("preserves open tabs and the active view when a profile is edited", async () => {
     const profile = await commands.saveProfile({
       name: "Keep my tabs",
@@ -18,19 +18,19 @@ describe("DBV store", () => {
       readOnly: false,
     });
     const tab = { id: "table-tab", title: "public.users", kind: "table" as const, profileId: profile.id, schema: "public", table: "users" };
-    useDbvStore.setState({
+    useDbmStore.setState({
       tabs: [tab],
       activeTabId: tab.id,
       activeProfileId: profile.id,
       workspaces: { [profile.id]: { profile, databases: [] } },
     });
 
-    await useDbvStore.getState().saveProfile({
+    await useDbmStore.getState().saveProfile({
       ...profile,
       color: "#a78bfa",
     });
 
-    const state = useDbvStore.getState();
+    const state = useDbmStore.getState();
     expect(state.tabs).toEqual([tab]);
     expect(state.activeTabId).toBe(tab.id);
     expect(state.activeProfileId).toBe(profile.id);

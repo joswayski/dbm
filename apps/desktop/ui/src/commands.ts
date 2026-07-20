@@ -145,7 +145,7 @@ export function loadTablePage(request: TablePageRequest): Promise<TablePage> {
     const pageRows = rows.slice(request.offset, request.offset + request.limit).map((row) => [...row]);
     return {
       metadata,
-      columns: [...metadata.columns.map((column) => column.name), "__dbv_xmin"],
+      columns: [...metadata.columns.map((column) => column.name), "__dbm_xmin"],
       rows: pageRows,
       totalRows: request.includeTotal === false ? null : rows.length,
       offset: request.offset,
@@ -171,7 +171,7 @@ export function runQuery(request: QueryRequest): Promise<QueryResponse> {
     if (/^\s*(select|show|with|values)/i.test(request.sql)) {
       return {
         columns: [{ name: "result", dataType: "text" }],
-        rows: [["DBV browser preview"]],
+        rows: [["DBM browser preview"]],
         rowCount: 1,
         affectedRows: null,
         durationMs: 2,

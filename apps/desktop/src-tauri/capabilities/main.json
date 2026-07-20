@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
-  "description": "Permissions for the DBV desktop window",
+  "description": "Permissions for the DBM desktop window",
   "windows": ["main"],
   "permissions": [
     "core:default",

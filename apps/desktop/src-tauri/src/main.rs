@@ -1,3 +1,3 @@
 fn main() {
-    dbv_desktop_lib::run();
+    dbm_desktop_lib::run();
 }

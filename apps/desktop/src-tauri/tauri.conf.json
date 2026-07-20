@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "DBV",
+  "productName": "DBM",
   "version": "0.1.0",
-  "identifier": "io.github.joswayski.dbv",
+  "identifier": "io.github.joswayski.dbm",
   "build": {
     "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build",
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "DBV",
+        "title": "DBM",
         "width": 1400,
         "height": 900,
         "minWidth": 960,
@@ -33,8 +33,8 @@
       "icons/icon.ico"
     ],
     "targets": ["dmg", "nsis", "deb", "appimage"],
-    "shortDescription": "A focused, private database viewer",
-    "longDescription": "DBV is a cross-platform PostgreSQL viewer and SQL workbench for personal use.",
+    "shortDescription": "A focused, private database manager",
+    "longDescription": "DBM is a cross-platform PostgreSQL manager and SQL workbench for personal use.",
     "category": "DeveloperTool"
   }
 }

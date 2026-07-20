@@ -176,7 +176,7 @@ impl PgSession {
             .columns
             .iter()
             .map(|column| quote_identifier(&column.name))
-            .chain(std::iter::once("xmin::text AS \"__dbv_xmin\"".to_owned()))
+            .chain(std::iter::once("xmin::text AS \"__dbm_xmin\"".to_owned()))
             .collect::<Vec<_>>();
         let table_name = qualified_name(&request.schema, &request.table)?;
         let predicate = build_predicate(&metadata, &request.filters)?;
@@ -213,7 +213,7 @@ impl PgSession {
             .columns
             .iter()
             .map(|column| column.name.clone())
-            .chain(std::iter::once("__dbv_xmin".into()))
+            .chain(std::iter::once("__dbm_xmin".into()))
             .collect();
         Ok(TablePage {
             metadata,

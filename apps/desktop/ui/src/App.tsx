@@ -5,7 +5,7 @@ import { sql } from "@codemirror/lang-sql";
 import * as commands from "./commands";
 import { parsePostgresConnectionUrl } from "./connectionUrl";
 import { sqlExecutionTarget, type SqlExecutionTarget } from "./sqlSelection";
-import { useDbvStore } from "./store";
+import { useDbmStore } from "./store";
 import { TableView } from "./TableView";
 import type {
   ConnectionProfile,
@@ -42,29 +42,29 @@ function defaultProfile(profile?: ConnectionProfile): SaveProfileInput {
 }
 
 export default function App() {
-  const profiles = useDbvStore((state) => state.profiles);
-  const workspaces = useDbvStore((state) => state.workspaces);
-  const activeProfileId = useDbvStore((state) => state.activeProfileId);
-  const tabs = useDbvStore((state) => state.tabs);
-  const activeTabId = useDbvStore((state) => state.activeTabId);
-  const loadProfiles = useDbvStore((state) => state.loadProfiles);
-  const saveProfile = useDbvStore((state) => state.saveProfile);
-  const removeProfile = useDbvStore((state) => state.removeProfile);
-  const connect = useDbvStore((state) => state.connect);
-  const switchDatabase = useDbvStore((state) => state.switchDatabase);
-  const disconnect = useDbvStore((state) => state.disconnect);
-  const openTable = useDbvStore((state) => state.openTable);
-  const openQuery = useDbvStore((state) => state.openQuery);
-  const closeTab = useDbvStore((state) => state.closeTab);
-  const setActiveTab = useDbvStore((state) => state.setActiveTab);
+  const profiles = useDbmStore((state) => state.profiles);
+  const workspaces = useDbmStore((state) => state.workspaces);
+  const activeProfileId = useDbmStore((state) => state.activeProfileId);
+  const tabs = useDbmStore((state) => state.tabs);
+  const activeTabId = useDbmStore((state) => state.activeTabId);
+  const loadProfiles = useDbmStore((state) => state.loadProfiles);
+  const saveProfile = useDbmStore((state) => state.saveProfile);
+  const removeProfile = useDbmStore((state) => state.removeProfile);
+  const connect = useDbmStore((state) => state.connect);
+  const switchDatabase = useDbmStore((state) => state.switchDatabase);
+  const disconnect = useDbmStore((state) => state.disconnect);
+  const openTable = useDbmStore((state) => state.openTable);
+  const openQuery = useDbmStore((state) => state.openQuery);
+  const closeTab = useDbmStore((state) => state.closeTab);
+  const setActiveTab = useDbmStore((state) => state.setActiveTab);
   const [schemas, setSchemas] = useState<Record<string, SchemaNode[]>>({});
   const [modalProfile, setModalProfile] = useState<ConnectionProfile | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState(() => {
-    const saved = Number(window.localStorage.getItem("dbv.sidebarWidth"));
+    const saved = Number(window.localStorage.getItem("dbm.sidebarWidth"));
     return Number.isFinite(saved) ? Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, saved)) : DEFAULT_SIDEBAR_WIDTH;
   });
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem("dbv.sidebarCollapsed") === "true");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem("dbm.sidebarCollapsed") === "true");
   const [mountedTabIds, setMountedTabIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
@@ -72,11 +72,11 @@ export default function App() {
   }, [loadProfiles]);
 
   useEffect(() => {
-    window.localStorage.setItem("dbv.sidebarWidth", String(sidebarWidth));
+    window.localStorage.setItem("dbm.sidebarWidth", String(sidebarWidth));
   }, [sidebarWidth]);
 
   useEffect(() => {
-    window.localStorage.setItem("dbv.sidebarCollapsed", String(sidebarCollapsed));
+    window.localStorage.setItem("dbm.sidebarCollapsed", String(sidebarCollapsed));
   }, [sidebarCollapsed]);
 
   useEffect(() => {
@@ -190,8 +190,8 @@ export default function App() {
         <div className="brand-row">
           {!sidebarCollapsed ? <div className="brand-mark">DB</div> : null}
           {!sidebarCollapsed ? <div className="brand-copy">
-            <strong>DBV</strong>
-            <span>database viewer</span>
+            <strong>DBM</strong>
+            <span>database manager</span>
           </div> : null}
           <button
             className="sidebar-collapse-button"
@@ -673,7 +673,7 @@ function ProfileModal({
           </label>
         </div>
         {feedback ? <div className={`modal-feedback ${feedback.kind}`} role="status">{feedback.message}</div> : null}
-        <div className="modal-note">Passwords are stored in your operating system credential manager and are never written to DBV's profile database.</div>
+        <div className="modal-note">Passwords are stored in your operating system credential manager and are never written to DBM's profile database.</div>
         <div className="modal-actions">
           {onDelete ? <button className="danger-button" onClick={() => void onDelete()} disabled={testing || saving}>Delete</button> : <span />}
           <div className="modal-actions-right">
