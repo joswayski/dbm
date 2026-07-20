@@ -1,6 +1,6 @@
-# DBV
+# DBM
 
-DBV is a local-first desktop database viewer for macOS, Windows, and Linux.
+DBM is a local-first desktop database manager for macOS, Windows, and Linux.
 The first milestone targets PostgreSQL: saved connections, database and schema
 exploration, paginated table browsing, SQL execution, and safe local profile
 storage. Redis and other protocol adapters are planned after the PostgreSQL
@@ -21,7 +21,7 @@ npm run check
 npm run dev
 ```
 
-DBV never uploads connection profiles, query history, or database results.
+DBM never uploads connection profiles, query history, or database results.
 Passwords are stored in the operating system credential store when available.
 
 ## What is implemented

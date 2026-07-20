@@ -23,7 +23,7 @@ describe("QueryView", () => {
       maxRows: 10_000,
     }));
     expect(editor).toHaveTextContent("SELECT now();SELECT 1;");
-    expect(await screen.findByText("DBV browser preview")).toBeInTheDocument();
+    expect(await screen.findByText("DBM browser preview")).toBeInTheDocument();
   });
 
   it("uses disabled behavior for Cancel and exposes the current statement target", async () => {

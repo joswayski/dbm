@@ -3,7 +3,7 @@ import { create } from "zustand";
 import * as commands from "./commands";
 import type { ConnectionProfile, ProfileSummary, Tab, WorkspaceInfo } from "./types";
 
-type DbvStore = {
+type DbmStore = {
   profiles: ProfileSummary[];
   workspaces: Record<string, WorkspaceInfo>;
   activeProfileId: string | null;
@@ -21,7 +21,7 @@ type DbvStore = {
   setActiveTab: (tabId: string) => void;
 };
 
-export const useDbvStore = create<DbvStore>((set, get) => ({
+export const useDbmStore = create<DbmStore>((set, get) => ({
   profiles: [],
   workspaces: {},
   activeProfileId: null,

@@ -18,13 +18,13 @@ pub struct LocalStore {
 
 impl LocalStore {
     pub fn new() -> AppResult<Self> {
-        let project_dirs = ProjectDirs::from("io", "github", "dbv").ok_or_else(|| {
+        let project_dirs = ProjectDirs::from("io", "github", "dbm").ok_or_else(|| {
             AppError::Storage("could not determine application data directory".into())
         })?;
         let directory = project_dirs.data_local_dir();
         std::fs::create_dir_all(directory).map_err(|error| AppError::Storage(error.to_string()))?;
         let store = Self {
-            path: directory.join("dbv.sqlite3"),
+            path: directory.join("dbm.sqlite3"),
         };
         store.migrate()?;
         Ok(store)
@@ -308,7 +308,7 @@ mod tests {
     use super::*;
     #[test]
     fn profile_round_trip() {
-        let path = std::env::temp_dir().join(format!("dbv-test-{}.sqlite3", Uuid::new_v4()));
+        let path = std::env::temp_dir().join(format!("dbm-test-{}.sqlite3", Uuid::new_v4()));
         let store = LocalStore::from_path(&path).expect("store");
         let input = SaveProfileInput {
             id: None,

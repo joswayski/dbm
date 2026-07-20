@@ -48,8 +48,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: DBV ${{ github.ref_name }}
-          releaseBody: Cross-platform DBV desktop installers.
+          releaseName: DBM ${{ github.ref_name }}
+          releaseBody: Cross-platform DBM desktop installers.
           releaseDraft: true
           prerelease: true
           args: ${{ matrix.args }}

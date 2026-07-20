@@ -3,7 +3,7 @@ use uuid::Uuid;
 
 use crate::error::{AppError, AppResult};
 
-const SERVICE: &str = "io.github.joswayski.dbv";
+const SERVICE: &str = "io.github.joswayski.dbm";
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CredentialStore;

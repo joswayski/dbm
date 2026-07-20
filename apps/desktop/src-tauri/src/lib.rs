@@ -270,13 +270,13 @@ pub fn run() {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("dbv_desktop=info")),
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("dbm_desktop=info")),
         )
         .with_target(false)
         .compact()
         .init();
 
-    let state = AppState::new().expect("DBV local storage must initialize");
+    let state = AppState::new().expect("DBM local storage must initialize");
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -298,5 +298,5 @@ pub fn run() {
             apply_table_mutations,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running DBV");
+        .expect("error while running DBM");
 }
