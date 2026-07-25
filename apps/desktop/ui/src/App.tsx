@@ -325,7 +325,6 @@ export default function App() {
                   connected={Boolean(workspace)}
                   active={active}
                   onSelect={() => handleSelectProfile(profileId, Boolean(workspace))}
-                  onConnect={() => void handleConnect(profileId)}
                   onDisconnect={() => void handleDisconnect(profileId)}
                   onEdit={() => setModalProfile(summary.profile)}
                   expandable={active && Boolean(workspace)}
@@ -536,7 +535,6 @@ function ConnectionItem({
   connected,
   active,
   onSelect,
-  onConnect,
   onDisconnect,
   onEdit,
   expandable,
@@ -547,37 +545,73 @@ function ConnectionItem({
   connected: boolean;
   active: boolean;
   onSelect: () => void;
-  onConnect: () => void;
   onDisconnect: () => void;
   onEdit: () => void;
   expandable: boolean;
   expanded: boolean;
   onToggleExpanded: () => void;
 }) {
+  const [actionsOpen, setActionsOpen] = useState(false);
+  const actionsRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!actionsOpen) return;
+    const closeOnPointerDown = (event: PointerEvent) => {
+      if (!actionsRef.current?.contains(event.target as Node)) setActionsOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setActionsOpen(false);
+    };
+    window.addEventListener("pointerdown", closeOnPointerDown);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      window.removeEventListener("pointerdown", closeOnPointerDown);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [actionsOpen]);
+
   return (
-    <div className={`connection-item ${active ? "active" : ""}`}>
-      <button className="connection-main" onClick={onSelect} aria-current={active ? "page" : undefined}>
-        <span className="connection-color" style={{ background: summary.profile.color ?? DEFAULT_CONNECTION_COLOR, color: summary.profile.color ?? DEFAULT_CONNECTION_COLOR }} />
-        <span className="connection-copy">
-          <strong>{summary.profile.name}</strong>
-          <small>{summary.profile.username}@{summary.profile.host}</small>
-        </span>
-      </button>
-      <div className="connection-actions">
-        {expandable ? <button
-          className="icon-button subtle connection-toggle"
-          title={expanded ? "Collapse connection" : "Expand connection"}
-          aria-label={expanded ? "Collapse connection" : "Expand connection"}
-          aria-expanded={expanded}
-          onClick={onToggleExpanded}
-        >{expanded ? "⌃" : "⌄"}</button> : null}
+    <div className="connection-entry" ref={actionsRef}>
+      <div className={`connection-item ${active ? "active" : ""}`}>
         <button
-          className={`connection-state-button ${connected ? "disconnect" : "connect"}`}
-          title={connected ? "Disconnect and close this connection's tabs" : "Connect"}
-          onClick={connected ? onDisconnect : onConnect}
-        >{connected ? "Disconnect" : "Connect"}</button>
-        <button className="icon-button subtle" title="Edit connection" onClick={onEdit}>⋯</button>
+          className="connection-main"
+          onClick={() => { setActionsOpen(false); onSelect(); }}
+          aria-current={active ? "page" : undefined}
+          title={connected ? undefined : "Connect"}
+        >
+          <span className="connection-color" style={{ background: summary.profile.color ?? DEFAULT_CONNECTION_COLOR, color: summary.profile.color ?? DEFAULT_CONNECTION_COLOR }} />
+          <span className="connection-copy">
+            <strong>{summary.profile.name}</strong>
+            <small>{summary.profile.username}@{summary.profile.host}</small>
+          </span>
+        </button>
+        <div className="connection-actions">
+          {expandable ? <button
+            className="icon-button subtle connection-toggle"
+            title={expanded ? "Collapse connection" : "Expand connection"}
+            aria-label={expanded ? "Collapse connection" : "Expand connection"}
+            aria-expanded={expanded}
+            onClick={() => { setActionsOpen(false); onToggleExpanded(); }}
+          >{expanded ? "⌃" : "⌄"}</button> : null}
+          <button
+            className="icon-button subtle"
+            title="Connection actions"
+            aria-label={`Connection actions for ${summary.profile.name}`}
+            aria-haspopup="menu"
+            aria-expanded={actionsOpen}
+            onClick={() => setActionsOpen((open) => !open)}
+          >⋯</button>
+        </div>
       </div>
+      {actionsOpen ? <div className="connection-actions-menu" role="menu">
+        <button role="menuitem" onClick={() => { setActionsOpen(false); onEdit(); }}>Edit connection</button>
+        {connected ? <button
+          role="menuitem"
+          className="danger"
+          title="Close this connection and its tabs"
+          onClick={() => { setActionsOpen(false); onDisconnect(); }}
+        >Disconnect</button> : null}
+      </div> : null}
     </div>
   );
 }

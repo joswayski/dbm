@@ -39,6 +39,7 @@ describe("App connection and query navigation", () => {
     const profileName = await screen.findByText(profile.name);
     const connectionButton = profileName.closest("button");
     expect(connectionButton).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Connect" })).not.toBeInTheDocument();
     fireEvent.click(connectionButton!);
 
     await screen.findByLabelText("Database");
@@ -61,10 +62,11 @@ describe("App connection and query navigation", () => {
     expect(screen.queryByLabelText("Database")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Expand connection" }));
     await screen.findByLabelText("Database");
-    expect(screen.getByRole("button", { name: "Disconnect" })).toHaveAttribute(
-      "title",
-      "Disconnect and close this connection's tabs",
-    );
+    expect(screen.queryByRole("menuitem", { name: "Disconnect" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: `Connection actions for ${profile.name}` }));
+    expect(screen.getByRole("menuitem", { name: "Disconnect" })).toHaveAttribute("title", "Close this connection and its tabs");
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("menuitem", { name: "Disconnect" })).not.toBeInTheDocument();
 
     const usersTable = await screen.findByRole("button", { name: "users" });
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
@@ -114,6 +116,11 @@ describe("App connection and query navigation", () => {
     fireEvent.click(screen.getByRole("button", { name: "Collapse Revenue audit" }));
     await waitFor(() => expect(screen.getByRole("heading", { name: "public.users" })).toBeInTheDocument());
     expect(screen.getByRole("button", { name: "Expand Revenue audit" }).closest(".tab")).toHaveClass("collapsed");
+
+    fireEvent.click(screen.getByRole("button", { name: `Connection actions for ${profile.name}` }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Disconnect" }));
+    expect(await screen.findByRole("heading", { name: "No connection selected" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Revenue audit" })).not.toBeInTheDocument();
   });
 
   it("closes the connection popup with Escape", () => {

@@ -59,9 +59,10 @@ body.resizing-sidebar, body.resizing-sidebar * { cursor: col-resize !important; 
 .connection-copy small { display: block; overflow: hidden; margin-top: 3px; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .connection-actions { display: flex; align-items: center; gap: 3px; padding-right: 5px; }
 .connection-toggle { color: #7890a8; }
-.connection-state-button { height: 25px; padding: 0 7px; border: 1px solid var(--border-strong); border-radius: 5px; background: rgba(23, 34, 49, .9); color: var(--muted); font-size: 9px; font-weight: 650; }
-.connection-state-button:hover { border-color: var(--accent); color: var(--accent); }
-.connection-state-button.disconnect:hover { border-color: rgba(248, 113, 113, .55); background: rgba(248, 113, 113, .08); color: #fca5a5; }
+.connection-actions-menu { display: grid; gap: 2px; padding: 4px 5px 5px; border-top: 1px solid var(--border); background: rgba(7, 13, 20, .28); }
+.connection-actions-menu button { width: 100%; height: 29px; padding: 0 9px; border: 0; border-radius: 4px; background: transparent; color: var(--text); font-size: 10px; text-align: left; }
+.connection-actions-menu button:hover { background: var(--panel-hover); }
+.connection-actions-menu button.danger { color: #fca5a5; }
 .icon-button, .text-button, .link-button { border: 0; background: transparent; }
 .icon-button { width: 27px; height: 27px; display: grid; place-items: center; border-radius: 6px; color: var(--muted); font-size: 17px; }
 .icon-button:hover, .text-button:hover, .link-button:hover { color: var(--accent); background: rgba(56, 189, 248, .08); }
@@ -286,6 +287,10 @@ body.resizing-column, body.resizing-column * { cursor: col-resize !important; us
 .pending-delete-count { border-color: rgba(248, 113, 113, .36); background: rgba(248, 113, 113, .1); color: #fca5a5; }
 .dismissible-message span { min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
 .dismissible-message button { flex: 0 0 auto; border: 0; background: transparent; color: inherit; font-size: 17px; line-height: 1; }
+.dismissible-message.inline-error { display: grid; grid-template-columns: 24px minmax(0, 1fr) 24px; align-items: center; }
+.dismissible-message.inline-error::before { content: ""; }
+.dismissible-message.inline-error span { text-align: center; }
+.dismissible-message.inline-error button { width: 24px; padding: 0; justify-self: end; }
 .dismissible-message.inline-error, .error-banner { animation: error-lifetime 10s linear; }
 .dismissible-message.inline-notice { animation: notice-lifetime 6s linear; }
 .grid-loading-overlay { position: absolute; z-index: 6; inset: 0; display: grid; place-items: center; background: rgba(8, 14, 21, .28); backdrop-filter: blur(1.5px); pointer-events: none; animation: loading-overlay-in 180ms ease-out; }
