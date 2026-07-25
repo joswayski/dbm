@@ -222,12 +222,10 @@ export function TableView({ profileId, schema, table }: { profileId: string; sch
   const selectedEntries = rowEntries.filter((entry) => selectedRows.has(entry.key));
   const allSelectedDeleted = selectedEntries.length > 0 && selectedEntries.every((entry) => entry.pending?.deleted);
   const copyableEntries = rowEntries.filter((entry) => !entry.pending?.deleted);
-  const defaultOrderLabel = page?.metadata.primaryKey.length
-    ? `Primary key (${page.metadata.primaryKey.join(", ")}), ascending`
-    : "Unspecified database order";
-  const defaultOrderTitle = page?.metadata.primaryKey.length
-    ? `Rows use ${page.metadata.primaryKey.join(", ")} ascending until another sort column is selected.`
-    : "This table has no primary key, so row order is not guaranteed until a sort column is selected.";
+  const defaultOrderBy: OrderSpec | null = page?.metadata.primaryKey[0]
+    ? { column: page.metadata.primaryKey[0], descending: false }
+    : null;
+  const effectiveOrderBy = orderBy ?? defaultOrderBy;
   const hasFiltersToClear = appliedFilters.length > 0 ||
     filterDrafts.length > 1 ||
     filterDrafts.some((filter) => !filterNeedsValue(filter.operator) || filter.value.trim().length > 0);
@@ -391,11 +389,9 @@ export function TableView({ profileId, schema, table }: { profileId: string; sch
   };
 
   const toggleSort = (column: string) => {
-    setOrderBy((current) => {
-      if (current?.column !== column) return { column, descending: false };
-      if (!current.descending) return { column, descending: true };
-      return null;
-    });
+    setOrderBy(effectiveOrderBy?.column === column
+      ? { column, descending: !effectiveOrderBy.descending }
+      : { column, descending: false });
     setPageIndex(0);
     setNotice(null);
   };
@@ -612,14 +608,33 @@ export function TableView({ profileId, schema, table }: { profileId: string; sch
           </label>
           <label>
             <span>Sort by</span>
-            <select className="select-input sort-column-select" title={defaultOrderTitle} value={orderBy?.column ?? ""} onChange={(event) => { setOrderBy(event.target.value ? { column: event.target.value, descending: orderBy?.descending ?? false } : null); setPageIndex(0); }}>
-              <option value="">{defaultOrderLabel}</option>
-              {visibleColumns.map((column) => <option key={column.name} value={column.name}>{column.name}</option>)}
+            <select
+              className="select-input sort-column-select"
+              value={effectiveOrderBy?.column ?? ""}
+              onChange={(event) => {
+                setOrderBy(event.target.value ? { column: event.target.value, descending: false } : null);
+                setPageIndex(0);
+              }}
+            >
+              {page?.metadata.primaryKey.length ? null : <option value="">Choose a sort column</option>}
+              {visibleColumns.map((column) => (
+                <option key={column.name} value={column.name}>
+                  {column.name}{page?.metadata.primaryKey.includes(column.name) ? " (primary key)" : ""}
+                </option>
+              ))}
             </select>
           </label>
-          {orderBy ? <label>
+          {effectiveOrderBy ? <label>
             <span>Direction</span>
-            <select className="select-input sort-direction-select" aria-label="Sort direction" value={orderBy.descending ? "desc" : "asc"} onChange={(event) => { setOrderBy((current) => current ? { ...current, descending: event.target.value === "desc" } : null); setPageIndex(0); }}>
+            <select
+              className="select-input sort-direction-select"
+              aria-label="Sort direction"
+              value={effectiveOrderBy.descending ? "desc" : "asc"}
+              onChange={(event) => {
+                setOrderBy({ ...effectiveOrderBy, descending: event.target.value === "desc" });
+                setPageIndex(0);
+              }}
+            >
               <option value="asc">Ascending</option>
               <option value="desc">Descending</option>
             </select>
@@ -662,7 +677,7 @@ export function TableView({ profileId, schema, table }: { profileId: string; sch
             </colgroup>
             <thead><tr>
               {visibleColumns.map((column) => {
-                const sorted = orderBy?.column === column.name;
+                const sorted = effectiveOrderBy?.column === column.name;
                 const collapsed = collapsedColumns.has(column.name);
                 const focusClass = hoveredColumnAction
                   ? hoveredColumnAction === column.name ? "column-action-target" : "column-action-dimmed"
@@ -678,7 +693,7 @@ export function TableView({ profileId, schema, table }: { profileId: string; sch
                   ><span className="column-action-glyph" aria-hidden="true">↦</span><span className="collapsed-column-name">{column.name}</span></button> : <div className="column-header-content">
                     <button className="column-sort" onClick={() => toggleSort(column.name)} aria-label={`Sort by ${column.name}`}>
                       <span>{column.name}<small>{column.dataType}</small></span>
-                      <span className={`sort-indicator ${sorted ? "active" : ""}`}>{sorted ? orderBy.descending ? "↓" : "↑" : "↕"}</span>
+                      <span className={`sort-indicator ${sorted ? "active" : ""}`}>{sorted ? effectiveOrderBy?.descending ? "↓" : "↑" : "↕"}</span>
                     </button>
                     <button
                       className="collapse-column column-action-button"

@@ -1,5 +1,5 @@
 import { EditorView } from "@uiw/react-codemirror";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { QueryView } from "./App";
@@ -30,10 +30,26 @@ describe("QueryView", () => {
   it("hides Cancel while idle and exposes the current statement target", async () => {
     render(<QueryView profileId="preview" initialSql="SELECT now();" />);
 
-    await waitFor(() => expect(document.querySelector(".history-item")).toBeInTheDocument());
     expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Run statement/ })).toBeEnabled();
     expect(document.querySelector(".cm-active-sql-line")).toBeInTheDocument();
+  });
+
+  it("shares database-scoped history live across query tabs", async () => {
+    const profileId = `shared-${crypto.randomUUID()}`;
+    const { container } = render(<>
+      <QueryView profileId={profileId} database="postgres" initialSql="SELECT 42;" title="Query A" />
+      <QueryView profileId={profileId} database="postgres" initialSql="SELECT 7;" title="Query B" />
+    </>);
+    const views = container.querySelectorAll<HTMLElement>(".query-view");
+    const historyPanels = container.querySelectorAll<HTMLElement>(".history-panel");
+
+    fireEvent.click(within(views[0]).getByRole("button", { name: /Run statement/ }));
+
+    await waitFor(() => {
+      expect(historyPanels[0].querySelector(".history-sql")).toHaveTextContent("SELECT 42");
+      expect(historyPanels[1].querySelector(".history-sql")).toHaveTextContent("SELECT 42");
+    });
   });
 
   it("shows Cancel only while a query is running", async () => {

@@ -23,6 +23,12 @@ const DEFAULT_SIDEBAR_WIDTH = 320;
 const MIN_SIDEBAR_WIDTH = 280;
 const MAX_SIDEBAR_WIDTH = 480;
 const COLLAPSED_SIDEBAR_WIDTH = 48;
+const QUERY_HISTORY_UPDATED_EVENT = "dbm:query-history-updated";
+
+type QueryHistoryUpdatedDetail = {
+  profileId: string;
+  database: string;
+};
 
 function defaultProfile(profile?: ConnectionProfile): SaveProfileInput {
   return {
@@ -72,6 +78,8 @@ export default function App() {
   const [mountedTabIds, setMountedTabIds] = useState<Set<string>>(new Set());
   const [renamingTabId, setRenamingTabId] = useState<string | null>(null);
   const [tabTitleDraft, setTabTitleDraft] = useState("");
+  const [refreshingSchemaId, setRefreshingSchemaId] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ kind: "info" | "success"; message: string } | null>(null);
 
   useEffect(() => {
     void loadProfiles().catch((reason: unknown) => setError(errorMessage(reason)));
@@ -90,6 +98,12 @@ export default function App() {
     const timer = window.setTimeout(() => setError(null), 10_000);
     return () => window.clearTimeout(timer);
   }, [error]);
+
+  useEffect(() => {
+    if (!toast) return;
+    const timer = window.setTimeout(() => setToast(null), 6_000);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
 
   const handleConnect = useCallback(async (profileId: string) => {
     try {
@@ -133,6 +147,25 @@ export default function App() {
       setError(errorMessage(reason));
     }
   }, [activeProfileId, switchDatabase]);
+
+  const handleRefreshSchema = useCallback(async (profileId: string) => {
+    setRefreshingSchemaId(profileId);
+    setError(null);
+    try {
+      const previous = schemas[profileId] ?? [];
+      const next = await commands.loadSchemaTree(profileId);
+      setSchemas((current) => ({ ...current, [profileId]: next }));
+      const summary = describeSchemaRefresh(previous, next);
+      setToast({
+        kind: summary.changed ? "success" : "info",
+        message: summary.message,
+      });
+    } catch (reason) {
+      setError(errorMessage(reason));
+    } finally {
+      setRefreshingSchemaId(null);
+    }
+  }, [schemas]);
 
   const handleSaveProfile = useCallback(async (input: SaveProfileInput) => {
     const saved = await saveProfile(input);
@@ -309,10 +342,9 @@ export default function App() {
                       <span>Schema</span>
                       <button
                         className="text-button"
-                        onClick={() => void commands.loadSchemaTree(profileId).then((tree) => {
-                          setSchemas((current) => ({ ...current, [profileId]: tree }));
-                        })}
-                      >Refresh</button>
+                        onClick={() => void handleRefreshSchema(profileId)}
+                        disabled={refreshingSchemaId === profileId}
+                      >{refreshingSchemaId === profileId ? "Refreshing…" : "Refresh"}</button>
                     </div>
                     <div className="schema-tree">
                       {(schemas[profileId] ?? []).map((node) => (
@@ -444,11 +476,14 @@ export default function App() {
         <section className="content-pane">
           {tabs.map((tab) => {
             const shouldMount = tab.id === activeTabId || mountedTabIds.has(tab.id);
+            const database = workspaces[tab.profileId]?.profile.defaultDatabase ??
+              profiles.find((summary) => summary.profile.id === tab.profileId)?.profile.defaultDatabase ??
+              "postgres";
             return <div className={`tab-pane ${tab.id === activeTabId ? "active" : ""}`} key={tab.id} aria-hidden={tab.id !== activeTabId}>
               {shouldMount && tab.kind === "table" && tab.schema && tab.table ? (
                 <TableView profileId={tab.profileId} schema={tab.schema} table={tab.table} />
               ) : shouldMount && tab.kind === "query" ? (
-                <QueryView profileId={tab.profileId} initialSql={tab.sql ?? "SELECT now();"} title={tab.title} />
+                <QueryView profileId={tab.profileId} database={database} initialSql={tab.sql ?? "SELECT now();"} title={tab.title} />
               ) : null}
             </div>;
           })}
@@ -477,6 +512,10 @@ export default function App() {
           } : undefined}
         />
       ) : null}
+      {toast ? <div className={`app-toast ${toast.kind}`} role="status">
+        <span>{toast.message}</span>
+        <button onClick={() => setToast(null)} aria-label="Dismiss notification">×</button>
+      </div> : null}
     </div>
   );
 }
@@ -512,7 +551,6 @@ function ConnectionItem({
           <strong>{summary.profile.name}</strong>
           <small>{summary.profile.username}@{summary.profile.host}</small>
         </span>
-        {connected ? <span className="connected-label">connected</span> : null}
       </button>
       <div className="connection-actions">
         {expandable ? <button
@@ -522,7 +560,11 @@ function ConnectionItem({
           aria-expanded={expanded}
           onClick={onToggleExpanded}
         >{expanded ? "⌃" : "⌄"}</button> : null}
-        <button className="icon-button subtle" title={connected ? "Disconnect" : "Connect"} onClick={connected ? onDisconnect : onConnect}>{connected ? "●" : "▷"}</button>
+        <button
+          className={`connection-state-button ${connected ? "disconnect" : "connect"}`}
+          title={connected ? "Disconnect and close this connection's tabs" : "Connect"}
+          onClick={connected ? onDisconnect : onConnect}
+        >{connected ? "Disconnect" : "Connect"}</button>
         <button className="icon-button subtle" title="Edit connection" onClick={onEdit}>⋯</button>
       </div>
     </div>
@@ -632,10 +674,12 @@ function activeSqlDecorations(view: EditorView): DecorationSet {
 
 export function QueryView({
   profileId,
+  database = "postgres",
   initialSql,
   title = "Query",
 }: {
   profileId: string;
+  database?: string;
   initialSql: string;
   title?: string;
 }) {
@@ -647,9 +691,26 @@ export function QueryView({
   const [executionTarget, setExecutionTarget] = useState<SqlExecutionTarget | null>(() => sqlExecutionTarget(initialSql, 0, 0));
   const editorRef = useRef<ReactCodeMirrorRef>(null);
 
+  const refreshHistory = useCallback(async () => {
+    try {
+      setHistory(await commands.listQueryHistory(profileId, database));
+    } catch (reason) {
+      setError(errorMessage(reason));
+    }
+  }, [database, profileId]);
+
   useEffect(() => {
-    void commands.listQueryHistory(profileId).then(setHistory).catch((reason: unknown) => setError(errorMessage(reason)));
-  }, [profileId]);
+    const initialLoadTimer = window.setTimeout(() => void refreshHistory(), 0);
+    const handleHistoryUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<QueryHistoryUpdatedDetail>).detail;
+      if (detail.profileId === profileId && detail.database === database) void refreshHistory();
+    };
+    window.addEventListener(QUERY_HISTORY_UPDATED_EVENT, handleHistoryUpdated);
+    return () => {
+      window.clearTimeout(initialLoadTimer);
+      window.removeEventListener(QUERY_HISTORY_UPDATED_EVENT, handleHistoryUpdated);
+    };
+  }, [database, profileId, refreshHistory]);
 
   useEffect(() => {
     if (!error) return;
@@ -667,13 +728,16 @@ export function QueryView({
     try {
       const next = await commands.runQuery({ profileId, sql: executableSql, maxRows: 10_000 });
       setResponse(next);
-      setHistory(await commands.listQueryHistory(profileId));
     } catch (reason) {
       setError(errorMessage(reason));
     } finally {
+      window.dispatchEvent(new CustomEvent<QueryHistoryUpdatedDetail>(
+        QUERY_HISTORY_UPDATED_EVENT,
+        { detail: { profileId, database } },
+      ));
       setRunning(false);
     }
-  }, [profileId, running, sqlText]);
+  }, [database, profileId, running, sqlText]);
 
   const selectedOrCurrentStatement = useCallback((view?: EditorView) => {
     if (!view) return sqlText.trim();
@@ -757,8 +821,9 @@ function ProfileModal({
   const [form, setForm] = useState<SaveProfileInput>(() => defaultProfile(profile ?? undefined));
   const [connectionUrl, setConnectionUrl] = useState("");
   const [testing, setTesting] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const [saveStage, setSaveStage] = useState<"testing" | "connecting" | null>(null);
   const [feedback, setFeedback] = useState<{ kind: "success" | "error" | "info"; message: string } | null>(null);
+  const saving = saveStage !== null;
   const update = <K extends keyof SaveProfileInput>(key: K, value: SaveProfileInput[K]) => setForm((current) => ({ ...current, [key]: value }));
 
   useEffect(() => {
@@ -806,13 +871,16 @@ function ProfileModal({
   };
 
   const save = async () => {
-    setSaving(true);
-    setFeedback(null);
+    setSaveStage("testing");
+    setFeedback({ kind: "info", message: "Testing connection before saving…" });
     try {
+      await commands.testProfile(form);
+      setSaveStage("connecting");
+      setFeedback({ kind: "success", message: "Connection successful. Saving and connecting…" });
       await onSave(form);
     } catch (reason) {
       setFeedback({ kind: "error", message: errorMessage(reason) });
-      setSaving(false);
+      setSaveStage(null);
     }
   };
 
@@ -911,12 +979,53 @@ function ProfileModal({
           {onDelete ? <button className="danger-button" onClick={() => void onDelete()} disabled={testing || saving}>Delete</button> : <span />}
           <div className="modal-actions-right">
             <button className="secondary-button" onClick={() => void test()} disabled={testing || saving}>{testing ? "Testing…" : "Test connection"}</button>
-            <button className="primary-button" onClick={() => void save()} disabled={testing || saving}>{saving ? "Connecting…" : "Save & connect"}</button>
+            <button className="primary-button" onClick={() => void save()} disabled={testing || saving}>
+              {saveStage === "testing" ? "Testing…" : saveStage === "connecting" ? "Connecting…" : "Save & connect"}
+            </button>
           </div>
         </div>
       </div>
     </div>
   );
+}
+
+function describeSchemaRefresh(previous: SchemaNode[], next: SchemaNode[]): { changed: boolean; message: string } {
+  const previousObjects = schemaObjects(previous);
+  const nextObjects = schemaObjects(next);
+  const previousKeys = new Set(previousObjects.map((object) => object.key));
+  const nextKeys = new Set(nextObjects.map((object) => object.key));
+  const added = nextObjects.filter((object) => !previousKeys.has(object.key)).map((object) => object.label);
+  const removed = previousObjects.filter((object) => !nextKeys.has(object.key)).map((object) => object.label);
+  if (added.length === 0 && removed.length === 0) {
+    return { changed: false, message: "Schema is already up to date." };
+  }
+
+  const changes = [
+    added.length > 0 ? `Added ${summarizeSchemaObjects(added)}` : null,
+    removed.length > 0 ? `Removed ${summarizeSchemaObjects(removed)}` : null,
+  ].filter((change): change is string => Boolean(change));
+  return { changed: true, message: `Schema refreshed · ${changes.join(" · ")}.` };
+}
+
+function schemaObjects(nodes: SchemaNode[]): Array<{ key: string; label: string }> {
+  const objects: Array<{ key: string; label: string }> = [];
+  const visit = (node: SchemaNode) => {
+    const qualifiedName = node.schema && node.table ? `${node.schema}.${node.table}` : node.name;
+    objects.push({
+      key: `${node.kind}:${qualifiedName}`,
+      label: `${node.kind} ${qualifiedName}`,
+    });
+    node.children.forEach(visit);
+  };
+  nodes.forEach(visit);
+  return objects.sort((left, right) => left.key.localeCompare(right.key));
+}
+
+function summarizeSchemaObjects(labels: string[]): string {
+  if (labels.length === 1) return labels[0];
+  const visible = labels.slice(0, 3);
+  const remainder = labels.length - visible.length;
+  return `${labels.length} objects: ${visible.join(", ")}${remainder > 0 ? `, and ${remainder} more` : ""}`;
 }
 
 function errorMessage(reason: unknown): string {

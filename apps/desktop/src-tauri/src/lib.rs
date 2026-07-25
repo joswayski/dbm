@@ -244,11 +244,12 @@ async fn cancel_query() -> Result<(), String> {
 async fn list_query_history(
     state: tauri::State<'_, AppState>,
     profile_id: Uuid,
+    database: String,
     limit: Option<u32>,
 ) -> Result<Vec<QueryHistoryEntry>, String> {
     state
         .store
-        .list_history(profile_id, limit.unwrap_or(100).clamp(1, 500))
+        .list_history(profile_id, &database, limit.unwrap_or(100).clamp(1, 500))
         .map_err(command_error)
 }
 

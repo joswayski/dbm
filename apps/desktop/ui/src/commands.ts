@@ -193,8 +193,14 @@ export function cancelQuery(): Promise<void> {
   return call("cancel_query", {}, () => undefined);
 }
 
-export function listQueryHistory(profileId: string, limit = 100): Promise<QueryHistoryEntry[]> {
-  return call("list_query_history", { profileId, limit }, () => browserHistory.slice(0, limit));
+export function listQueryHistory(profileId: string, database: string, limit = 100): Promise<QueryHistoryEntry[]> {
+  return call(
+    "list_query_history",
+    { profileId, database, limit },
+    () => browserHistory
+      .filter((entry) => entry.profileId === profileId && entry.database === database)
+      .slice(0, limit),
+  );
 }
 
 export function applyTableMutations(batch: MutationBatch): Promise<MutationResult> {

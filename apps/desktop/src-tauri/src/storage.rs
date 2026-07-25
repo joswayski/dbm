@@ -72,7 +72,9 @@ impl LocalStore {
                  success INTEGER NOT NULL
              );
              CREATE INDEX IF NOT EXISTS query_history_profile_time
-                 ON query_history(profile_id, executed_at DESC);",
+                 ON query_history(profile_id, executed_at DESC);
+             CREATE INDEX IF NOT EXISTS query_history_profile_database_time
+                 ON query_history(profile_id, database_name, executed_at DESC);",
         )?;
         Ok(())
     }
@@ -216,29 +218,22 @@ impl LocalStore {
         Ok(())
     }
 
-    pub fn list_history(&self, profile_id: Uuid, limit: u32) -> AppResult<Vec<QueryHistoryEntry>> {
+    pub fn list_history(
+        &self,
+        profile_id: Uuid,
+        database: &str,
+        limit: u32,
+    ) -> AppResult<Vec<QueryHistoryEntry>> {
         let connection = self.open()?;
         let mut statement = connection.prepare(
             "SELECT id, profile_id, database_name, sql, executed_at, duration_ms, success
-             FROM query_history WHERE profile_id = ?1
-             ORDER BY executed_at DESC LIMIT ?2",
+             FROM query_history WHERE profile_id = ?1 AND database_name = ?2
+             ORDER BY executed_at DESC LIMIT ?3",
         )?;
-        let rows =
-            statement.query_map(params![profile_id.to_string(), i64::from(limit)], |row| {
-                let id = parse_uuid(row.get::<_, String>(0)?)?;
-                let profile_id = parse_uuid(row.get::<_, String>(1)?)?;
-                let executed_at = parse_datetime(row.get::<_, String>(4)?)?;
-                let duration_ms = u128::try_from(row.get::<_, i64>(5)?).unwrap_or_default();
-                Ok(QueryHistoryEntry {
-                    id,
-                    profile_id,
-                    database: row.get(2)?,
-                    sql: row.get(3)?,
-                    executed_at,
-                    duration_ms,
-                    success: row.get::<_, i64>(6)? != 0,
-                })
-            })?;
+        let rows = statement.query_map(
+            params![profile_id.to_string(), database, i64::from(limit)],
+            query_history_from_row,
+        )?;
         rows.collect::<Result<Vec<_>, _>>().map_err(AppError::from)
     }
 }
@@ -274,6 +269,18 @@ fn profile_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ConnectionProfi
         read_only: row.get::<_, i64>(10)? != 0,
         created_at: parse_datetime(row.get::<_, String>(11)?)?,
         updated_at: parse_datetime(row.get::<_, String>(12)?)?,
+    })
+}
+
+fn query_history_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<QueryHistoryEntry> {
+    Ok(QueryHistoryEntry {
+        id: parse_uuid(row.get::<_, String>(0)?)?,
+        profile_id: parse_uuid(row.get::<_, String>(1)?)?,
+        database: row.get(2)?,
+        sql: row.get(3)?,
+        executed_at: parse_datetime(row.get::<_, String>(4)?)?,
+        duration_ms: u128::try_from(row.get::<_, i64>(5)?).unwrap_or_default(),
+        success: row.get::<_, i64>(6)? != 0,
     })
 }
 
@@ -327,6 +334,49 @@ mod tests {
         let profile = store.save_profile(&input).expect("save");
         let profiles = store.list_profiles().expect("list");
         assert_eq!(profiles, vec![profile]);
+        std::fs::remove_file(path).expect("remove temp db");
+    }
+
+    #[test]
+    fn query_history_is_scoped_to_database() {
+        let path = std::env::temp_dir().join(format!("dbm-test-{}.sqlite3", Uuid::new_v4()));
+        let store = LocalStore::from_path(&path).expect("store");
+        let profile_id = Uuid::new_v4();
+        let postgres_entry = QueryHistoryEntry {
+            id: Uuid::new_v4(),
+            profile_id,
+            database: "postgres".into(),
+            sql: "SELECT 1".into(),
+            executed_at: Utc::now(),
+            duration_ms: 1,
+            success: true,
+        };
+        let analytics_entry = QueryHistoryEntry {
+            id: Uuid::new_v4(),
+            profile_id,
+            database: "analytics".into(),
+            sql: "SELECT 2".into(),
+            executed_at: Utc::now(),
+            duration_ms: 2,
+            success: true,
+        };
+        store
+            .add_history(&postgres_entry)
+            .expect("postgres history");
+        store
+            .add_history(&analytics_entry)
+            .expect("analytics history");
+
+        let postgres_history = store
+            .list_history(profile_id, "postgres", 100)
+            .expect("list postgres");
+        assert_eq!(postgres_history.len(), 1);
+        assert_eq!(postgres_history[0].id, postgres_entry.id);
+        let analytics_history = store
+            .list_history(profile_id, "analytics", 100)
+            .expect("list analytics");
+        assert_eq!(analytics_history.len(), 1);
+        assert_eq!(analytics_history[0].id, analytics_entry.id);
         std::fs::remove_file(path).expect("remove temp db");
     }
 }

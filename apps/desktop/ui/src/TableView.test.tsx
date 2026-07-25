@@ -93,18 +93,22 @@ describe("TableView", () => {
     expect(screen.queryByRole("button", { name: "Clear" })).not.toBeInTheDocument();
   });
 
-  it("explains the default order and only shows direction for an explicit sort", async () => {
+  it("uses the primary key as the single default sort and exposes its direction", async () => {
     render(<TableView profileId="preview" schema="public" table="users" />);
     await screen.findByText("person1@example.com");
 
-    const sort = screen.getByTitle("Rows use id ascending until another sort column is selected.");
-    expect(within(sort).getByRole("option", { name: "Primary key (id), ascending" })).toBeInTheDocument();
-    expect(screen.queryByLabelText("Sort direction")).not.toBeInTheDocument();
+    const sort = screen.getByRole("combobox", { name: "Sort by" });
+    expect(sort).toHaveValue("id");
+    expect(within(sort).getAllByRole("option", { name: /id/ })).toHaveLength(1);
+    expect(within(sort).getByRole("option", { name: "id (primary key)" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Sort direction")).toHaveValue("asc");
 
     fireEvent.change(sort, { target: { value: "email" } });
     expect(screen.getByLabelText("Sort direction")).toHaveValue("asc");
-    fireEvent.change(sort, { target: { value: "" } });
-    expect(screen.queryByLabelText("Sort direction")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Sort direction"), { target: { value: "desc" } });
+    expect(screen.getByLabelText("Sort direction")).toHaveValue("desc");
+    fireEvent.change(sort, { target: { value: "id" } });
+    expect(screen.getByLabelText("Sort direction")).toHaveValue("asc");
   });
 
   it("shows the collapsed column name and focuses the target column immediately", async () => {
