@@ -87,10 +87,8 @@ export function connectProfile(profileId: string): Promise<WorkspaceInfo> {
   return call("connect_profile", { profileId }, () => {
     const summary = browserProfiles.find((item) => item.profile.id === profileId);
     if (!summary) throw new Error("Profile not found");
-    const databases: DatabaseRef[] = [
-      { name: summary.profile.defaultDatabase, isTemplate: false, isConnectable: true },
-      { name: "postgres", isTemplate: false, isConnectable: true },
-    ];
+    const databases: DatabaseRef[] = [...new Set([summary.profile.defaultDatabase, "postgres"])]
+      .map((name) => ({ name, isTemplate: false, isConnectable: true }));
     return { profile: summary.profile, databases };
   });
 }

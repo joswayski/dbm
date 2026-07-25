@@ -651,12 +651,17 @@ export function TableView({ profileId, schema, table }: { profileId: string; sch
                   const isEditing = editing?.rowKey === entry.key && editing.column === columnIndex;
                   const isPrimaryKey = page.metadata.primaryKey.includes(column.name);
                   const displayValue = commands.toDisplayValue(entry.values[columnIndex]);
+                  const changed = Boolean(
+                    entry.pending &&
+                    !entry.pending.deleted &&
+                    !rowsEqual([entry.pending.original[columnIndex]], [entry.pending.changes[columnIndex]]),
+                  );
                   const focusClass = hoveredColumnAction
                     ? hoveredColumnAction === column.name ? "column-action-target" : "column-action-dimmed"
                     : "";
                   return <td
                     key={column.name}
-                    className={[collapsed ? "collapsed-data-cell" : "", focusClass].filter(Boolean).join(" ")}
+                    className={[collapsed ? "collapsed-data-cell" : "", changed ? "changed-cell" : "", focusClass].filter(Boolean).join(" ")}
                     onDoubleClick={() => editable && !collapsed && !isPrimaryKey && !deleted && setEditing({ rowKey: entry.key, column: columnIndex })}
                   >
                     {collapsed ? <span className="collapsed-cell">…</span> : isEditing ? <input
@@ -727,9 +732,9 @@ function ChangePreview({ pending, columns, onDiscard, onMouseEnter, onMouseLeave
       {changes.map((change) => <div className="change-diff" key={change.column}>
         <b>{change.column}</b>
         <div className="change-diff-values">
-          <div><span>Before</span><pre>{change.before}</pre></div>
+          <div className="change-diff-before"><span>Before</span><pre>{change.before}</pre></div>
           <span className="change-arrow" aria-hidden="true">→</span>
-          <div><span>After</span><pre>{change.after}</pre></div>
+          <div className="change-diff-after"><span>After</span><pre>{change.after}</pre></div>
         </div>
       </div>)}
     </div>
