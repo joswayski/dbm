@@ -16,6 +16,8 @@ describe("TableView", () => {
     fireEvent.doubleClick(cell!);
     const editor = within(row!).getByRole("textbox");
     fireEvent.change(editor, { target: { value: "updated@example.com" } });
+    expect(editor).toHaveValue("updated@example.com");
+    expect(row).not.toHaveClass("staged-row");
     fireEvent.blur(editor);
 
     expect(row).toHaveClass("staged-row");

@@ -37,6 +37,12 @@ The generated app bundle and DMG remain under `target/release/bundle`.
 Local builds use an installed Apple Development signing identity when one is
 available and otherwise use an ad-hoc signature.
 
+An ad-hoc signature changes whenever DBM is rebuilt. Because DBM keeps database
+passwords in macOS Keychain, macOS may ask for the login keychain password when
+a newly built copy first reads an existing password. This is a macOS system
+prompt—DBM never receives the login keychain password. A stable Apple
+Development signing identity avoids that repeated approval.
+
 ```sh
 # Build + install + launch (default on macOS)
 npm run build

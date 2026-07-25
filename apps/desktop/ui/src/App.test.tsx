@@ -48,10 +48,21 @@ describe("App connection and query navigation", () => {
     expect(topbar).not.toBeNull();
     expect(within(sidebar!).getAllByText(profile.name, { exact: true })).toHaveLength(1);
     expect(connectionButton).toHaveAttribute("aria-current", "page");
-    expect(main).toHaveClass("connection-themed");
+    expect(main).not.toHaveClass("connection-themed");
     expect(main).toHaveStyle("--connection-color: #ef4444");
     expect(screen.getByRole("heading", { name: profile.name })).toBeInTheDocument();
     expect(within(topbar!).queryByRole("button", { name: "New query" })).not.toBeInTheDocument();
+
+    const usersTable = await screen.findByRole("button", { name: "users" });
+    fireEvent.click(usersTable);
+    expect(usersTable).toHaveAttribute("aria-current", "page");
+    expect(usersTable).toHaveClass("active");
+    expect(screen.getByRole("button", { name: "Minimize public.users" })).toBeInTheDocument();
+    expect(container.querySelector(".tab-color")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Minimize public.users" }));
+    await waitFor(() => expect(screen.getByRole("heading", { name: profile.name })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "public.users" }));
 
     fireEvent.click(within(tabStrip!).getByRole("button", { name: "New query" }));
     const queryTab = await screen.findByRole("button", { name: "Query 1" });

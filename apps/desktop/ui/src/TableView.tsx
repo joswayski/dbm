@@ -66,6 +66,12 @@ type ChangePreviewState = {
   maxHeight: number;
 };
 
+type EditingCell = {
+  rowKey: string;
+  column: number;
+  value: string;
+};
+
 export function TableView({ profileId, schema, table }: { profileId: string; schema: string; table: string }) {
   const [page, setPage] = useState<TablePage | null>(null);
   const [pageIndex, setPageIndex] = useState(0);
@@ -75,7 +81,7 @@ export function TableView({ profileId, schema, table }: { profileId: string; sch
   const [appliedFilters, setAppliedFilters] = useState<FilterCondition[]>([]);
   const [orderBy, setOrderBy] = useState<OrderSpec | null>(null);
   const [pendingRows, setPendingRows] = useState<Record<string, PendingRow>>({});
-  const [editing, setEditing] = useState<{ rowKey: string; column: number } | null>(null);
+  const [editing, setEditing] = useState<EditingCell | null>(null);
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
   const [selectionAnchor, setSelectionAnchor] = useState<number | null>(null);
   const [changePreview, setChangePreview] = useState<ChangePreviewState | null>(null);
@@ -662,16 +668,45 @@ export function TableView({ profileId, schema, table }: { profileId: string; sch
                   return <td
                     key={column.name}
                     className={[collapsed ? "collapsed-data-cell" : "", changed ? "changed-cell" : "", focusClass].filter(Boolean).join(" ")}
-                    onDoubleClick={() => editable && !collapsed && !isPrimaryKey && !deleted && setEditing({ rowKey: entry.key, column: columnIndex })}
+                    onDoubleClick={(event) => {
+                      event.stopPropagation();
+                      if (editable && !collapsed && !isPrimaryKey && !deleted) {
+                        setEditing({
+                          rowKey: entry.key,
+                          column: columnIndex,
+                          value: displayValue === "NULL" ? "" : displayValue,
+                        });
+                      }
+                    }}
                   >
                     {collapsed ? <span className="collapsed-cell">…</span> : isEditing ? <input
                       autoFocus
                       className="cell-input"
-                      value={displayValue === "NULL" ? "" : displayValue}
+                      value={editing?.value ?? ""}
+                      onMouseDown={(event) => event.stopPropagation()}
                       onClick={(event) => event.stopPropagation()}
-                      onChange={(event) => setCell(entry, columnIndex, event.target.value)}
-                      onBlur={() => setEditing(null)}
-                      onKeyDown={(event) => { if (event.key === "Enter" || event.key === "Escape") setEditing(null); }}
+                      onDoubleClick={(event) => event.stopPropagation()}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        setEditing((current) => current?.rowKey === entry.key && current.column === columnIndex
+                          ? { ...current, value }
+                          : current);
+                      }}
+                      onBlur={() => {
+                        if (editing?.rowKey === entry.key && editing.column === columnIndex) {
+                          setCell(entry, columnIndex, editing.value);
+                        }
+                        setEditing(null);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          event.currentTarget.blur();
+                        } else if (event.key === "Escape") {
+                          event.preventDefault();
+                          setEditing(null);
+                        }
+                      }}
                     /> : <span className={entry.values[columnIndex] === null ? "null-value" : "cell-value"}>{displayValue}</span>}
                   </td>;
                 })}

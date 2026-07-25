@@ -202,6 +202,13 @@ export default function App() {
   };
 
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? null;
+  const activeTable = activeTab?.kind === "table" && activeTab.schema && activeTab.table
+    ? {
+        profileId: activeTab.profileId,
+        schema: activeTab.schema,
+        table: activeTab.table,
+      }
+    : null;
   const activeWorkspace = activeProfileId ? workspaces[activeProfileId] : undefined;
   const selectedProfile = activeProfileId
     ? profiles.find((summary) => summary.profile.id === activeProfileId)?.profile
@@ -287,6 +294,7 @@ export default function App() {
                           key={`${node.kind}-${node.name}`}
                           node={node}
                           onTable={(schema, table) => handleOpenTable(profileId, schema, table)}
+                          selectedTable={activeTable?.profileId === profileId ? activeTable : null}
                         />
                       ))}
                     </div>
@@ -319,7 +327,7 @@ export default function App() {
         </> : null}
       </aside>
 
-      <main className={`main-pane ${activeViewProfile ? "connection-themed" : ""}`} style={connectionStyle}>
+      <main className="main-pane" style={connectionStyle}>
         <header className="topbar">
           {activeViewProfile ? (
             <div className="connection-identity">
@@ -331,7 +339,7 @@ export default function App() {
             </div>
           ) : <div className="breadcrumb">No active connection</div>}
         </header>
-        {error ? <div className="error-banner"><span>{error}</span><button onClick={() => setError(null)}>×</button></div> : null}
+        {error ? <div className="error-banner" role="alert"><span>{error}</span><button onClick={() => setError(null)} aria-label="Dismiss error">×</button></div> : null}
         <div className="tab-strip">
           {tabs.map((tab) => (
             <div
@@ -341,7 +349,6 @@ export default function App() {
                 "--tab-color": profiles.find((summary) => summary.profile.id === tab.profileId)?.profile.color ?? DEFAULT_CONNECTION_COLOR,
               } as CSSProperties}
             >
-              <span className="tab-color" />
               {renamingTabId === tab.id ? (
                 <input
                   className="tab-title-input"
@@ -367,7 +374,6 @@ export default function App() {
                     if (tab.kind === "query") startRenamingTab(tab.id, tab.title);
                   }}
                 >
-                  <span aria-hidden="true">{tab.kind === "table" ? "▦" : "⌘"}</span>
                   <span>{tab.title}</span>
                 </button>
               )}
@@ -379,7 +385,7 @@ export default function App() {
                   aria-label={`Rename ${tab.title}`}
                 >✎</button>
               ) : null}
-              {tab.kind === "query" && tab.id === activeTabId ? (
+              {tab.id === activeTabId ? (
                 <button
                   className="tab-action tab-minimize"
                   onClick={() => handleMinimizeTab(tab.id)}
@@ -474,21 +480,44 @@ function ConnectionItem({
   );
 }
 
-function SchemaBranch({ node, onTable, depth = 0 }: { node: SchemaNode; onTable: (schema: string, table: string) => void; depth?: number }) {
+function SchemaBranch({
+  node,
+  onTable,
+  selectedTable,
+  depth = 0,
+}: {
+  node: SchemaNode;
+  onTable: (schema: string, table: string) => void;
+  selectedTable: { schema: string; table: string } | null;
+  depth?: number;
+}) {
   const [open, setOpen] = useState(depth < 1);
   const isTable = Boolean(node.table && node.schema);
+  const selected = isTable &&
+    selectedTable?.schema === node.schema &&
+    selectedTable.table === node.table;
   return (
     <div className="schema-node">
-      <button className="schema-node-button" style={{ paddingLeft: `${10 + depth * 14}px` }} onClick={() => {
-        if (isTable) onTable(node.schema!, node.table!);
-        else setOpen((value) => !value);
-      }}>
-        <span className="tree-caret">{isTable ? "▧" : open ? "⌄" : "›"}</span>
-        <span className={`schema-icon ${node.kind}`}>{isTable ? "T" : "S"}</span>
+      <button
+        className={`schema-node-button ${selected ? "active" : ""}`}
+        style={{ paddingLeft: `${10 + depth * 14}px` }}
+        aria-current={selected ? "page" : undefined}
+        onClick={() => {
+          if (isTable) onTable(node.schema!, node.table!);
+          else setOpen((value) => !value);
+        }}>
+        <span className="tree-caret" aria-hidden="true">{isTable ? "▧" : open ? "⌄" : "›"}</span>
+        <span className={`schema-icon ${node.kind}`} aria-hidden="true">{isTable ? "T" : "S"}</span>
         <span className="truncate">{node.name}</span>
       </button>
       {open && node.children.length > 0 ? node.children.map((child) => (
-        <SchemaBranch key={`${child.kind}-${child.name}`} node={child} onTable={onTable} depth={depth + 1} />
+        <SchemaBranch
+          key={`${child.kind}-${child.name}`}
+          node={child}
+          onTable={onTable}
+          selectedTable={selectedTable}
+          depth={depth + 1}
+        />
       )) : null}
     </div>
   );
@@ -832,7 +861,11 @@ function ProfileModal({
 }
 
 function errorMessage(reason: unknown): string {
-  return reason instanceof Error ? reason.message : String(reason);
+  const message = reason instanceof Error ? reason.message : String(reason);
+  if (/credential error:/i.test(message) && /(cancel|denied|interaction)/i.test(message)) {
+    return "DBM could not read this connection's saved password because access to the operating system credential manager was not approved. Approve the system prompt, then select the connection again.";
+  }
+  return message;
 }
 
 function requiresConfirmation(sqlText: string): boolean {
