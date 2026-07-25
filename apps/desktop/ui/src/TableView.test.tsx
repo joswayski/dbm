@@ -16,9 +16,12 @@ describe("TableView", () => {
     fireEvent.doubleClick(cell!);
     const editor = within(row!).getByRole("textbox");
     fireEvent.change(editor, { target: { value: "updated@example.com" } });
+    expect(editor).toHaveValue("updated@example.com");
+    expect(row).not.toHaveClass("staged-row");
     fireEvent.blur(editor);
 
     expect(row).toHaveClass("staged-row");
+    expect(cell).toHaveClass("changed-cell");
     expect(screen.getByRole("button", { name: "Save changes (1)" })).toBeInTheDocument();
     fireEvent.mouseEnter(row!);
     const preview = screen.getByText("Pending edit").closest(".change-preview");
@@ -26,6 +29,7 @@ describe("TableView", () => {
     expect(row!.contains(preview)).toBe(false);
     expect(screen.getByText("Before").nextElementSibling).toHaveTextContent("person1@example.com");
     expect(screen.getByText("After").nextElementSibling).toHaveTextContent("updated@example.com");
+    expect(screen.getByText("After").parentElement).toHaveClass("change-diff-after");
     fireEvent.mouseLeave(row!);
 
     fireEvent.click(screen.getByRole("button", { name: "Sort by id" }));

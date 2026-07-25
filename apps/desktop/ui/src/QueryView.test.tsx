@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { QueryView } from "./App";
 import * as commands from "./commands";
+import type { QueryResponse } from "./types";
 
 describe("QueryView", () => {
   afterEach(() => {
@@ -26,13 +27,37 @@ describe("QueryView", () => {
     expect(await screen.findByText("DBM browser preview")).toBeInTheDocument();
   });
 
-  it("uses disabled behavior for Cancel and exposes the current statement target", async () => {
+  it("hides Cancel while idle and exposes the current statement target", async () => {
     render(<QueryView profileId="preview" initialSql="SELECT now();" />);
 
     await waitFor(() => expect(document.querySelector(".history-item")).toBeInTheDocument());
-    expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Run statement/ })).toBeEnabled();
     expect(document.querySelector(".cm-active-sql-line")).toBeInTheDocument();
+  });
+
+  it("shows Cancel only while a query is running", async () => {
+    let resolveQuery: ((response: QueryResponse) => void) | undefined;
+    vi.spyOn(commands, "runQuery").mockImplementation(() => new Promise((resolve) => {
+      resolveQuery = resolve;
+    }));
+    render(<QueryView profileId="preview" initialSql="SELECT now();" title="Slow query" />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Run statement/ }));
+    expect(await screen.findByRole("button", { name: "Cancel" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Slow query" })).toBeInTheDocument();
+
+    act(() => resolveQuery?.({
+      columns: [],
+      rows: [],
+      rowCount: 0,
+      affectedRows: 0,
+      durationMs: 1,
+      truncated: false,
+      notices: [],
+    }));
+
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument());
   });
 
   it("shows a play action for selected SQL and runs only that selection", async () => {

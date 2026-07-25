@@ -21,6 +21,7 @@ const isMac = process.platform === "darwin";
 const isWindows = process.platform === "win32";
 const skipInstall = environment.DBM_SKIP_INSTALL === "1";
 const openAfterInstall = environment.DBM_OPEN_AFTER_INSTALL !== "0";
+let usingAdHocSignature = false;
 
 function run(command, args, options = {}) {
   return spawnSync(command, args, {
@@ -231,6 +232,18 @@ function printBuildOutputs() {
   }
 }
 
+function printAdHocKeychainWarning() {
+  console.warn([
+    "",
+    "macOS Keychain notice:",
+    "  This local build uses an ad-hoc signature, whose identity changes whenever DBM is rebuilt.",
+    "  macOS may therefore ask for your login keychain password when the new build reads a saved",
+    "  database password. That is a macOS system prompt; DBM never receives your login password.",
+    "  Install an Apple Development signing identity to keep a stable local app identity.",
+    "",
+  ].join("\n"));
+}
+
 if (isMac && !environment.APPLE_SIGNING_IDENTITY) {
   const identity = findAppleDevelopmentIdentity();
   if (identity) {
@@ -238,11 +251,11 @@ if (isMac && !environment.APPLE_SIGNING_IDENTITY) {
     log(`Using the macOS development signing identity “${identity}”.`);
   } else {
     environment.APPLE_SIGNING_IDENTITY = "-";
-    console.warn(
-      "No Apple Development signing identity was found. Using an ad-hoc signature for this local build.",
-    );
+    usingAdHocSignature = true;
+    console.warn("No Apple Development signing identity was found. Using an ad-hoc signature.");
   }
 }
+usingAdHocSignature = isMac && environment.APPLE_SIGNING_IDENTITY === "-";
 
 if (isMac) {
   detachMountedBuildImages();
@@ -305,6 +318,9 @@ printBuildOutputs();
 
 if (isMac && !skipInstall) {
   try {
+    if (usingAdHocSignature) {
+      printAdHocKeychainWarning();
+    }
     quitRunningDbm();
     installToApplications();
     if (openAfterInstall) {

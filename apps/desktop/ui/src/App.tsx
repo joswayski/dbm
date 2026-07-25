@@ -19,8 +19,8 @@ import type {
 
 const DEFAULT_CONNECTION_COLOR = "#38bdf8";
 const CONNECTION_COLORS = ["#38bdf8", "#22c55e", "#a78bfa", "#f59e0b", "#ef4444", "#64748b"];
-const DEFAULT_SIDEBAR_WIDTH = 286;
-const MIN_SIDEBAR_WIDTH = 220;
+const DEFAULT_SIDEBAR_WIDTH = 320;
+const MIN_SIDEBAR_WIDTH = 280;
 const MAX_SIDEBAR_WIDTH = 480;
 const COLLAPSED_SIDEBAR_WIDTH = 48;
 
@@ -51,10 +51,13 @@ export default function App() {
   const saveProfile = useDbmStore((state) => state.saveProfile);
   const removeProfile = useDbmStore((state) => state.removeProfile);
   const connect = useDbmStore((state) => state.connect);
+  const selectProfile = useDbmStore((state) => state.selectProfile);
   const switchDatabase = useDbmStore((state) => state.switchDatabase);
   const disconnect = useDbmStore((state) => state.disconnect);
   const openTable = useDbmStore((state) => state.openTable);
   const openQuery = useDbmStore((state) => state.openQuery);
+  const renameTab = useDbmStore((state) => state.renameTab);
+  const minimizeTab = useDbmStore((state) => state.minimizeTab);
   const closeTab = useDbmStore((state) => state.closeTab);
   const setActiveTab = useDbmStore((state) => state.setActiveTab);
   const [schemas, setSchemas] = useState<Record<string, SchemaNode[]>>({});
@@ -66,6 +69,8 @@ export default function App() {
   });
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem("dbm.sidebarCollapsed") === "true");
   const [mountedTabIds, setMountedTabIds] = useState<Set<string>>(new Set());
+  const [renamingTabId, setRenamingTabId] = useState<string | null>(null);
+  const [tabTitleDraft, setTabTitleDraft] = useState("");
 
   useEffect(() => {
     void loadProfiles().catch((reason: unknown) => setError(errorMessage(reason)));
@@ -139,12 +144,20 @@ export default function App() {
     window.addEventListener("mouseup", stop);
   };
 
-  const rememberActiveTab = () => {
-    if (!activeTabId) return;
+  const rememberTab = (tabId: string | null) => {
+    if (!tabId) return;
     setMountedTabIds((current) => {
-      if (current.has(activeTabId)) return current;
-      return new Set(current).add(activeTabId);
+      if (current.has(tabId)) return current;
+      return new Set(current).add(tabId);
     });
+  };
+
+  const rememberActiveTab = () => rememberTab(activeTabId);
+
+  const handleSelectProfile = (profileId: string, connected: boolean) => {
+    rememberActiveTab();
+    if (connected) selectProfile(profileId);
+    else void handleConnect(profileId);
   };
 
   const handleOpenTable = (profileId: string, schema: string, table: string) => {
@@ -172,11 +185,37 @@ export default function App() {
     closeTab(tabId);
   };
 
+  const handleMinimizeTab = (tabId: string) => {
+    rememberTab(tabId);
+    minimizeTab(tabId);
+  };
+
+  const startRenamingTab = (tabId: string, title: string) => {
+    setRenamingTabId(tabId);
+    setTabTitleDraft(title);
+  };
+
+  const finishRenamingTab = (tabId: string) => {
+    if (renamingTabId !== tabId) return;
+    renameTab(tabId, tabTitleDraft);
+    setRenamingTabId(null);
+  };
+
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? null;
+  const activeTable = activeTab?.kind === "table" && activeTab.schema && activeTab.table
+    ? {
+        profileId: activeTab.profileId,
+        schema: activeTab.schema,
+        table: activeTab.table,
+      }
+    : null;
   const activeWorkspace = activeProfileId ? workspaces[activeProfileId] : undefined;
+  const selectedProfile = activeProfileId
+    ? profiles.find((summary) => summary.profile.id === activeProfileId)?.profile
+    : undefined;
   const activeViewProfile = (activeTab
     ? profiles.find((summary) => summary.profile.id === activeTab.profileId)?.profile
-    : undefined) ?? activeWorkspace?.profile;
+    : undefined) ?? activeWorkspace?.profile ?? selectedProfile;
   const connectionStyle = activeViewProfile
     ? ({ "--connection-color": activeViewProfile.color ?? DEFAULT_CONNECTION_COLOR } as CSSProperties)
     : undefined;
@@ -208,40 +247,63 @@ export default function App() {
         <div className="connection-list">
           {profiles.length === 0 ? (
             <div className="empty-sidebar">No saved connections.</div>
-          ) : profiles.map((summary) => (
-            <ConnectionItem
-              key={summary.profile.id}
-              summary={summary}
-              connected={Boolean(workspaces[summary.profile.id])}
-              active={activeProfileId === summary.profile.id}
-              onConnect={() => void handleConnect(summary.profile.id)}
-              onDisconnect={() => void handleDisconnect(summary.profile.id)}
-              onEdit={() => setModalProfile(summary.profile)}
-            />
-          ))}
+          ) : profiles.map((summary) => {
+            const profileId = summary.profile.id;
+            const workspace = workspaces[profileId];
+            const active = activeProfileId === profileId;
+            return (
+              <div
+                className={`connection-group ${active ? "active" : ""} ${workspace ? "connected" : ""}`}
+                key={profileId}
+                style={{
+                  "--connection-color": summary.profile.color ?? DEFAULT_CONNECTION_COLOR,
+                } as CSSProperties}
+              >
+                <ConnectionItem
+                  summary={summary}
+                  connected={Boolean(workspace)}
+                  active={active}
+                  onSelect={() => handleSelectProfile(profileId, Boolean(workspace))}
+                  onConnect={() => void handleConnect(profileId)}
+                  onDisconnect={() => void handleDisconnect(profileId)}
+                  onEdit={() => setModalProfile(summary.profile)}
+                />
+                {active && workspace ? (
+                  <div className="workspace-panel">
+                    <label className="field-label" htmlFor={`database-select-${profileId}`}>Database</label>
+                    <select
+                      id={`database-select-${profileId}`}
+                      className="select-input"
+                      value={workspace.profile.defaultDatabase}
+                      onChange={(event) => void handleDatabaseChange(event.target.value)}
+                    >
+                      {workspace.databases.map((database) => <option key={database.name}>{database.name}</option>)}
+                    </select>
+                    <div className="schema-heading">
+                      <span>Schema</span>
+                      <button
+                        className="text-button"
+                        onClick={() => void commands.loadSchemaTree(profileId).then((tree) => {
+                          setSchemas((current) => ({ ...current, [profileId]: tree }));
+                        })}
+                      >Refresh</button>
+                    </div>
+                    <div className="schema-tree">
+                      {(schemas[profileId] ?? []).map((node) => (
+                        <SchemaBranch
+                          key={`${node.kind}-${node.name}`}
+                          node={node}
+                          onTable={(schema, table) => handleOpenTable(profileId, schema, table)}
+                          selectedTable={activeTable?.profileId === profileId ? activeTable : null}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
         </div>
-        {activeWorkspace && activeProfileId ? (
-          <div className="workspace-panel">
-            <div className="workspace-heading">
-              <span className="status-dot" />
-              <span className="truncate">{activeWorkspace.profile.name}</span>
-              <button className="icon-button subtle" title="New query" onClick={() => handleOpenQuery(activeProfileId)}>＋</button>
-            </div>
-            <label className="field-label" htmlFor="database-select">Database</label>
-            <select id="database-select" className="select-input" value={activeWorkspace.profile.defaultDatabase} onChange={(event) => void handleDatabaseChange(event.target.value)}>
-              {activeWorkspace.databases.map((database) => <option key={database.name}>{database.name}</option>)}
-            </select>
-            <div className="schema-heading">
-              <span>Schema</span>
-              <button className="text-button" onClick={() => void commands.loadSchemaTree(activeProfileId).then((tree) => setSchemas((current) => ({ ...current, [activeProfileId]: tree })))}>Refresh</button>
-            </div>
-            <div className="schema-tree">
-              {(schemas[activeProfileId] ?? []).map((node) => (
-                <SchemaBranch key={`${node.kind}-${node.name}`} node={node} onTable={(schema, table) => handleOpenTable(activeProfileId, schema, table)} />
-              ))}
-            </div>
-          </div>
-        ) : null}
         <div className="sidebar-footer">
           <span className="privacy-chip">LOCAL ONLY</span>
         </div>
@@ -265,7 +327,7 @@ export default function App() {
         </> : null}
       </aside>
 
-      <main className={`main-pane ${activeViewProfile ? "connection-themed" : ""}`} style={connectionStyle}>
+      <main className="main-pane" style={connectionStyle}>
         <header className="topbar">
           {activeViewProfile ? (
             <div className="connection-identity">
@@ -276,11 +338,8 @@ export default function App() {
               </span>
             </div>
           ) : <div className="breadcrumb">No active connection</div>}
-          <div className="topbar-actions">
-            {activeProfileId ? <button className="secondary-button" onClick={() => handleOpenQuery(activeProfileId)}>New query</button> : null}
-          </div>
         </header>
-        {error ? <div className="error-banner"><span>{error}</span><button onClick={() => setError(null)}>×</button></div> : null}
+        {error ? <div className="error-banner" role="alert"><span>{error}</span><button onClick={() => setError(null)} aria-label="Dismiss error">×</button></div> : null}
         <div className="tab-strip">
           {tabs.map((tab) => (
             <div
@@ -290,23 +349,80 @@ export default function App() {
                 "--tab-color": profiles.find((summary) => summary.profile.id === tab.profileId)?.profile.color ?? DEFAULT_CONNECTION_COLOR,
               } as CSSProperties}
             >
-              <span className="tab-color" />
-              <button onClick={() => handleSetActiveTab(tab.id)}>{tab.kind === "table" ? "▦" : "⌘"} {tab.title}</button>
+              {renamingTabId === tab.id ? (
+                <input
+                  className="tab-title-input"
+                  autoFocus
+                  value={tabTitleDraft}
+                  aria-label={`Rename ${tab.title}`}
+                  onChange={(event) => setTabTitleDraft(event.target.value)}
+                  onBlur={() => finishRenamingTab(tab.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") event.currentTarget.blur();
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      setRenamingTabId(null);
+                      setTabTitleDraft(tab.title);
+                    }
+                  }}
+                />
+              ) : (
+                <button
+                  className="tab-title"
+                  onClick={() => handleSetActiveTab(tab.id)}
+                  onDoubleClick={() => {
+                    if (tab.kind === "query") startRenamingTab(tab.id, tab.title);
+                  }}
+                >
+                  <span>{tab.title}</span>
+                </button>
+              )}
+              {tab.kind === "query" ? (
+                <button
+                  className="tab-action tab-rename"
+                  onClick={() => startRenamingTab(tab.id, tab.title)}
+                  title={`Rename ${tab.title}`}
+                  aria-label={`Rename ${tab.title}`}
+                >✎</button>
+              ) : null}
+              {tab.id === activeTabId ? (
+                <button
+                  className="tab-action tab-minimize"
+                  onClick={() => handleMinimizeTab(tab.id)}
+                  title={`Minimize ${tab.title}`}
+                  aria-label={`Minimize ${tab.title}`}
+                >−</button>
+              ) : null}
               <button className="tab-close" onClick={() => handleCloseTab(tab.id)} aria-label={`Close ${tab.title}`}>×</button>
             </div>
           ))}
+          {activeWorkspace && activeProfileId ? (
+            <button
+              className="new-query-tab"
+              title="New query"
+              aria-label="New query"
+              onClick={() => handleOpenQuery(activeProfileId)}
+            >＋</button>
+          ) : null}
         </div>
         <section className="content-pane">
-          {activeTab ? tabs.map((tab) => {
+          {tabs.map((tab) => {
             const shouldMount = tab.id === activeTabId || mountedTabIds.has(tab.id);
             return <div className={`tab-pane ${tab.id === activeTabId ? "active" : ""}`} key={tab.id} aria-hidden={tab.id !== activeTabId}>
               {shouldMount && tab.kind === "table" && tab.schema && tab.table ? (
                 <TableView profileId={tab.profileId} schema={tab.schema} table={tab.table} />
               ) : shouldMount && tab.kind === "query" ? (
-                <QueryView profileId={tab.profileId} initialSql={tab.sql ?? "SELECT now();"} />
+                <QueryView profileId={tab.profileId} initialSql={tab.sql ?? "SELECT now();"} title={tab.title} />
               ) : null}
             </div>;
-          }) : <Welcome hasProfiles={profiles.length > 0} />}
+          })}
+          {!activeTab ? (
+            <Welcome
+              hasProfiles={profiles.length > 0}
+              profile={selectedProfile ?? null}
+              connected={Boolean(activeWorkspace)}
+            />
+          ) : null}
         </section>
       </main>
       {modalProfile !== undefined ? (
@@ -333,6 +449,7 @@ function ConnectionItem({
   summary,
   connected,
   active,
+  onSelect,
   onConnect,
   onDisconnect,
   onEdit,
@@ -340,13 +457,14 @@ function ConnectionItem({
   summary: ProfileSummary;
   connected: boolean;
   active: boolean;
+  onSelect: () => void;
   onConnect: () => void;
   onDisconnect: () => void;
   onEdit: () => void;
 }) {
   return (
     <div className={`connection-item ${active ? "active" : ""}`}>
-      <button className="connection-main" onClick={connected ? undefined : onConnect}>
+      <button className="connection-main" onClick={onSelect} aria-current={active ? "page" : undefined}>
         <span className="connection-color" style={{ background: summary.profile.color ?? DEFAULT_CONNECTION_COLOR, color: summary.profile.color ?? DEFAULT_CONNECTION_COLOR }} />
         <span className="connection-copy">
           <strong>{summary.profile.name}</strong>
@@ -362,34 +480,69 @@ function ConnectionItem({
   );
 }
 
-function SchemaBranch({ node, onTable, depth = 0 }: { node: SchemaNode; onTable: (schema: string, table: string) => void; depth?: number }) {
+function SchemaBranch({
+  node,
+  onTable,
+  selectedTable,
+  depth = 0,
+}: {
+  node: SchemaNode;
+  onTable: (schema: string, table: string) => void;
+  selectedTable: { schema: string; table: string } | null;
+  depth?: number;
+}) {
   const [open, setOpen] = useState(depth < 1);
   const isTable = Boolean(node.table && node.schema);
+  const selected = isTable &&
+    selectedTable?.schema === node.schema &&
+    selectedTable.table === node.table;
   return (
     <div className="schema-node">
-      <button className="schema-node-button" style={{ paddingLeft: `${10 + depth * 14}px` }} onClick={() => {
-        if (isTable) onTable(node.schema!, node.table!);
-        else setOpen((value) => !value);
-      }}>
-        <span className="tree-caret">{isTable ? "▧" : open ? "⌄" : "›"}</span>
-        <span className={`schema-icon ${node.kind}`}>{isTable ? "T" : "S"}</span>
+      <button
+        className={`schema-node-button ${selected ? "active" : ""}`}
+        style={{ paddingLeft: `${10 + depth * 14}px` }}
+        aria-current={selected ? "page" : undefined}
+        onClick={() => {
+          if (isTable) onTable(node.schema!, node.table!);
+          else setOpen((value) => !value);
+        }}>
+        <span className="tree-caret" aria-hidden="true">{isTable ? "▧" : open ? "⌄" : "›"}</span>
+        <span className={`schema-icon ${node.kind}`} aria-hidden="true">{isTable ? "T" : "S"}</span>
         <span className="truncate">{node.name}</span>
       </button>
       {open && node.children.length > 0 ? node.children.map((child) => (
-        <SchemaBranch key={`${child.kind}-${child.name}`} node={child} onTable={onTable} depth={depth + 1} />
+        <SchemaBranch
+          key={`${child.kind}-${child.name}`}
+          node={child}
+          onTable={onTable}
+          selectedTable={selectedTable}
+          depth={depth + 1}
+        />
       )) : null}
     </div>
   );
 }
 
-function Welcome({ hasProfiles }: { hasProfiles: boolean }) {
+function Welcome({
+  hasProfiles,
+  profile,
+  connected,
+}: {
+  hasProfiles: boolean;
+  profile: ConnectionProfile | null;
+  connected: boolean;
+}) {
   return (
     <div className="welcome">
-      <div className="welcome-mark">DB<span>V</span></div>
-      <h1>No connection selected</h1>
-      <p>{hasProfiles
-        ? "Select a saved connection from the sidebar to browse its data."
-        : "Create a connection from the sidebar to get started."}</p>
+      <div className="welcome-mark">DB<span>M</span></div>
+      <h1>{profile ? profile.name : "No connection selected"}</h1>
+      <p>{profile
+        ? connected
+          ? "Choose a table from the sidebar or open a new query with the plus button above."
+          : "This connection is selected but not connected. Select it again to connect."
+        : hasProfiles
+          ? "Select a saved connection from the sidebar to browse its data."
+          : "Create a connection from the sidebar to get started."}</p>
     </div>
   );
 }
@@ -428,7 +581,15 @@ function activeSqlDecorations(view: EditorView): DecorationSet {
   return Decoration.set(decorations);
 }
 
-export function QueryView({ profileId, initialSql }: { profileId: string; initialSql: string }) {
+export function QueryView({
+  profileId,
+  initialSql,
+  title = "Query",
+}: {
+  profileId: string;
+  initialSql: string;
+  title?: string;
+}) {
   const [sqlText, setSqlText] = useState(initialSql);
   const [response, setResponse] = useState<QueryResponse | null>(null);
   const [history, setHistory] = useState<QueryHistoryEntry[]>([]);
@@ -494,7 +655,20 @@ export function QueryView({ profileId, initialSql }: { profileId: string; initia
 
   return (
     <div className="query-view">
-      <div className="view-toolbar"><div><span className="eyebrow">SQL WORKBENCH</span><h2>Query</h2></div><div className="toolbar-actions"><button className="secondary-button" onClick={() => void commands.cancelQuery().catch((reason: unknown) => setError(errorMessage(reason)))} disabled={!running}>Cancel</button><button className="primary-button" onClick={runFromEditor} disabled={running || !executionTarget}>{running ? "Running…" : runLabel}<kbd>⌘↵</kbd></button></div></div>
+      <div className="view-toolbar">
+        <div><span className="eyebrow">SQL WORKBENCH</span><h2>{title}</h2></div>
+        <div className="toolbar-actions">
+          {running ? (
+            <button
+              className="secondary-button"
+              onClick={() => void commands.cancelQuery().catch((reason: unknown) => setError(errorMessage(reason)))}
+            >Cancel</button>
+          ) : null}
+          <button className="primary-button" onClick={runFromEditor} disabled={running || !executionTarget}>
+            {running ? "Running…" : runLabel}<kbd>⌘↵</kbd>
+          </button>
+        </div>
+      </div>
       <div className="query-layout">
         <div className="editor-panel" onKeyDownCapture={handleEditorKeyDownCapture}>
           <CodeMirror ref={editorRef} className="query-code-editor" value={sqlText} height="100%" theme="dark" extensions={editorExtensions} onChange={setSqlText} onUpdate={handleEditorUpdate} basicSetup={{ lineNumbers: true, foldGutter: false }} />
@@ -687,7 +861,11 @@ function ProfileModal({
 }
 
 function errorMessage(reason: unknown): string {
-  return reason instanceof Error ? reason.message : String(reason);
+  const message = reason instanceof Error ? reason.message : String(reason);
+  if (/credential error:/i.test(message) && /(cancel|denied|interaction)/i.test(message)) {
+    return "DBM could not read this connection's saved password because access to the operating system credential manager was not approved. Approve the system prompt, then select the connection again.";
+  }
+  return message;
 }
 
 function requiresConfirmation(sqlText: string): boolean {

@@ -1,9 +1,19 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
 import * as commands from "./commands";
 import { useDbmStore } from "./store";
 
 describe("DBM store", () => {
+  beforeEach(() => {
+    useDbmStore.setState({
+      profiles: [],
+      workspaces: {},
+      activeProfileId: null,
+      tabs: [],
+      activeTabId: null,
+    });
+  });
+
   it("preserves open tabs and the active view when a profile is edited", async () => {
     const profile = await commands.saveProfile({
       name: "Keep my tabs",
@@ -35,5 +45,53 @@ describe("DBM store", () => {
     expect(state.activeTabId).toBe(tab.id);
     expect(state.activeProfileId).toBe(profile.id);
     expect(state.workspaces[profile.id]).toBeUndefined();
+  });
+
+  it("selects a newly saved profile and clears the previous profile's active tab", async () => {
+    useDbmStore.setState({
+      activeProfileId: "previous-profile",
+      activeTabId: "previous-tab",
+      tabs: [{
+        id: "previous-tab",
+        title: "public.users",
+        kind: "table",
+        profileId: "previous-profile",
+        schema: "public",
+        table: "users",
+      }],
+    });
+
+    const saved = await useDbmStore.getState().saveProfile({
+      name: "Selected after save",
+      color: "#ef4444",
+      host: "localhost",
+      port: 5432,
+      username: "postgres",
+      defaultDatabase: "postgres",
+      tlsMode: "disabled",
+      caCertPath: null,
+      ssh: null,
+      readOnly: false,
+    });
+
+    expect(useDbmStore.getState().activeProfileId).toBe(saved.id);
+    expect(useDbmStore.getState().activeTabId).toBeNull();
+  });
+
+  it("names, renames, and minimizes query tabs without closing them", () => {
+    const store = useDbmStore.getState();
+    store.openQuery("profile");
+    store.openQuery("profile");
+
+    const [first, second] = useDbmStore.getState().tabs;
+    expect([first.title, second.title]).toEqual(["Query 1", "Query 2"]);
+    expect(useDbmStore.getState().activeTabId).toBe(second.id);
+
+    useDbmStore.getState().renameTab(second.id, "Revenue check");
+    useDbmStore.getState().minimizeTab(second.id);
+
+    expect(useDbmStore.getState().tabs.map((tab) => tab.title)).toEqual(["Query 1", "Revenue check"]);
+    expect(useDbmStore.getState().activeTabId).toBeNull();
+    expect(useDbmStore.getState().tabs).toHaveLength(2);
   });
 });

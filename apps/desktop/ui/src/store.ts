@@ -13,10 +13,13 @@ type DbmStore = {
   saveProfile: (input: Parameters<typeof commands.saveProfile>[0]) => Promise<ConnectionProfile>;
   removeProfile: (profileId: string) => Promise<void>;
   connect: (profileId: string) => Promise<void>;
+  selectProfile: (profileId: string) => void;
   switchDatabase: (profileId: string, database: string) => Promise<void>;
   disconnect: (profileId: string) => Promise<void>;
   openTable: (profileId: string, schema: string, table: string) => void;
   openQuery: (profileId: string) => void;
+  renameTab: (tabId: string, title: string) => void;
+  minimizeTab: (tabId: string) => void;
   closeTab: (tabId: string) => void;
   setActiveTab: (tabId: string) => void;
 };
@@ -39,6 +42,8 @@ export const useDbmStore = create<DbmStore>((set, get) => ({
       return {
         profiles,
         workspaces,
+        activeProfileId: saved.id,
+        activeTabId: state.activeProfileId === saved.id ? state.activeTabId : null,
       };
     });
     return saved;
@@ -59,7 +64,13 @@ export const useDbmStore = create<DbmStore>((set, get) => ({
     set((state) => ({
       workspaces: { ...state.workspaces, [profileId]: workspace },
       activeProfileId: profileId,
+      activeTabId: state.activeProfileId === profileId ? state.activeTabId : null,
     }));
+  },
+  selectProfile: (profileId) => {
+    if (get().profiles.some((summary) => summary.profile.id === profileId)) {
+      set({ activeProfileId: profileId, activeTabId: null });
+    }
   },
   switchDatabase: async (profileId, database) => {
     const workspace = await commands.connectDatabase(profileId, database);
@@ -87,8 +98,31 @@ export const useDbmStore = create<DbmStore>((set, get) => ({
     set((state) => ({ tabs: [...state.tabs, tab], activeTabId: tab.id, activeProfileId: profileId }));
   },
   openQuery: (profileId) => {
-    const tab: Tab = { id: crypto.randomUUID(), title: "Query", kind: "query", profileId, sql: "SELECT now();" };
+    const existingTitles = new Set(
+      get().tabs
+        .filter((tab) => tab.kind === "query" && tab.profileId === profileId)
+        .map((tab) => tab.title),
+    );
+    let queryNumber = 1;
+    while (existingTitles.has(`Query ${queryNumber}`)) queryNumber += 1;
+    const tab: Tab = {
+      id: crypto.randomUUID(),
+      title: `Query ${queryNumber}`,
+      kind: "query",
+      profileId,
+      sql: "SELECT now();",
+    };
     set((state) => ({ tabs: [...state.tabs, tab], activeTabId: tab.id, activeProfileId: profileId }));
+  },
+  renameTab: (tabId, title) => {
+    const nextTitle = title.trim();
+    if (!nextTitle) return;
+    set((state) => ({
+      tabs: state.tabs.map((tab) => tab.id === tabId ? { ...tab, title: nextTitle } : tab),
+    }));
+  },
+  minimizeTab: (tabId) => {
+    set((state) => state.activeTabId === tabId ? { activeTabId: null } : state);
   },
   closeTab: (tabId) => {
     const { tabs, activeTabId } = get();
