@@ -1,10 +1,21 @@
 import { EditorView } from "@uiw/react-codemirror";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { QueryView } from "./App";
 import * as commands from "./commands";
-import type { QueryResponse } from "./types";
+import type { QueryResponse, SchemaNode } from "./types";
+
+const schemaTree: SchemaNode[] = [{
+  name: "public",
+  kind: "schema",
+  schema: "public",
+  table: null,
+  children: [
+    { name: "users", kind: "table", schema: "public", table: "users", children: [] },
+    { name: "orders", kind: "table", schema: "public", table: "orders", children: [] },
+  ],
+}];
 
 describe("QueryView", () => {
   afterEach(() => {
@@ -30,10 +41,88 @@ describe("QueryView", () => {
   it("hides Cancel while idle and exposes the current statement target", async () => {
     render(<QueryView profileId="preview" initialSql="SELECT now();" />);
 
-    await waitFor(() => expect(document.querySelector(".history-item")).toBeInTheDocument());
     expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Run statement/ })).toBeEnabled();
     expect(document.querySelector(".cm-active-sql-line")).toBeInTheDocument();
+  });
+
+  it("shares database-scoped history live across query tabs", async () => {
+    const profileId = `shared-${crypto.randomUUID()}`;
+    const { container } = render(<>
+      <QueryView profileId={profileId} database="postgres" initialSql="SELECT 42;" title="Query A" />
+      <QueryView profileId={profileId} database="postgres" initialSql="SELECT 7;" title="Query B" />
+    </>);
+    const views = container.querySelectorAll<HTMLElement>(".query-view");
+    const historyPanels = container.querySelectorAll<HTMLElement>(".history-panel");
+
+    fireEvent.click(within(views[0]).getByRole("button", { name: /Run statement/ }));
+
+    await waitFor(() => {
+      expect(historyPanels[0].querySelector(".history-sql")).toHaveTextContent("SELECT 42");
+      expect(historyPanels[1].querySelector(".history-sql")).toHaveTextContent("SELECT 42");
+    });
+  });
+
+  it("uses the full table viewer for an exact, uniquely resolved table select", async () => {
+    render(
+      <QueryView
+        profileId="preview"
+        schemaTree={schemaTree}
+        initialSql="SELECT * FROM users;"
+        title="Editable query"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Run statement/ }));
+
+    expect(await screen.findByText("Editable table")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "public.users" })).toBeInTheDocument();
+    expect(await screen.findByText("person1@example.com")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Collapse email" })).toBeInTheDocument();
+  });
+
+  it("keeps complex query results read-only and explains that state", async () => {
+    render(
+      <QueryView
+        profileId="preview"
+        schemaTree={schemaTree}
+        initialSql="SELECT users.id FROM users JOIN orders ON orders.user_id = users.id;"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Run statement/ }));
+
+    const readOnly = await screen.findByText("Read-only result");
+    expect(readOnly).toHaveAttribute(
+      "title",
+      "This query does not resolve to one complete table, so DBM cannot safely map edits back to rows.",
+    );
+    expect(await screen.findByText("DBM browser preview")).toBeInTheDocument();
+  });
+
+  it("blocks another query while the embedded table viewer has pending edits", async () => {
+    const runQuery = vi.spyOn(commands, "runQuery");
+    render(
+      <QueryView
+        profileId="preview"
+        schemaTree={schemaTree}
+        initialSql="SELECT * FROM public.users;"
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Run statement/ }));
+
+    const email = await screen.findByText("person1@example.com");
+    const row = email.closest("tr");
+    fireEvent.doubleClick(email.closest("td")!);
+    const editor = within(row!).getByRole("textbox");
+    fireEvent.change(editor, { target: { value: "pending@example.com" } });
+    fireEvent.blur(editor);
+    await waitFor(() => expect(screen.getByText("1 pending change")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: /Run statement/ }));
+
+    expect(await screen.findByText("Save or discard the pending table changes before running another query.")).toBeInTheDocument();
+    expect(runQuery).toHaveBeenCalledTimes(1);
   });
 
   it("shows Cancel only while a query is running", async () => {

@@ -72,7 +72,27 @@ type EditingCell = {
   value: string;
 };
 
-export function TableView({ profileId, schema, table }: { profileId: string; schema: string; table: string }) {
+type ExportResult = {
+  path: string;
+  rows: number;
+};
+
+type InlineDiffPart = {
+  value: string;
+  changed: boolean;
+};
+
+export function TableView({
+  profileId,
+  schema,
+  table,
+  onPendingChange,
+}: {
+  profileId: string;
+  schema: string;
+  table: string;
+  onPendingChange?: (count: number) => void;
+}) {
   const [page, setPage] = useState<TablePage | null>(null);
   const [pageIndex, setPageIndex] = useState(0);
   const [previewLimit, setPreviewLimit] = useState(MAX_PREVIEW_ROWS);
@@ -97,6 +117,7 @@ export function TableView({ profileId, schema, table }: { profileId: string; sch
   const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
+  const [exportResult, setExportResult] = useState<ExportResult | null>(null);
   const filtersInitialized = useRef(false);
   const gridRef = useRef<HTMLDivElement>(null);
   const previewCloseTimer = useRef<number | null>(null);
@@ -211,6 +232,19 @@ export function TableView({ profileId, schema, table }: { profileId: string; sch
   const selectedEntries = rowEntries.filter((entry) => selectedRows.has(entry.key));
   const allSelectedDeleted = selectedEntries.length > 0 && selectedEntries.every((entry) => entry.pending?.deleted);
   const copyableEntries = rowEntries.filter((entry) => !entry.pending?.deleted);
+  const defaultOrderBy: OrderSpec | null = page?.metadata.primaryKey[0]
+    ? { column: page.metadata.primaryKey[0], descending: false }
+    : null;
+  const effectiveOrderBy = orderBy ?? defaultOrderBy;
+  const hasFiltersToClear = appliedFilters.length > 0 ||
+    filterDrafts.length > 1 ||
+    filterDrafts.some((filter) => !filterNeedsValue(filter.operator) || filter.value.trim().length > 0);
+
+  useEffect(() => {
+    onPendingChange?.(pendingCount);
+  }, [onPendingChange, pendingCount]);
+
+  useEffect(() => () => onPendingChange?.(0), [onPendingChange]);
 
   const columnWidth = (column: TableColumn) => {
     if (collapsedColumns.has(column.name)) return COLLAPSED_COLUMN_WIDTH;
@@ -295,6 +329,7 @@ export function TableView({ profileId, schema, table }: { profileId: string; sch
     setExportProgress(0);
     setError(null);
     setNotice(null);
+    setExportResult(null);
     let writer: commands.CsvExportWriter | null = null;
     try {
       const suggestedName = `${safeFileName(schema)}.${safeFileName(table)}.csv`;
@@ -326,7 +361,7 @@ export function TableView({ profileId, schema, table }: { profileId: string; sch
       const path = writer.path;
       await writer.close();
       writer = null;
-      setNotice(`Exported ${offset.toLocaleString()} filtered ${offset === 1 ? "row" : "rows"} to ${path}.`);
+      setExportResult({ path, rows: offset });
     } catch (reason) {
       await writer?.abort().catch(() => undefined);
       setError(errorMessage(reason));
@@ -361,12 +396,18 @@ export function TableView({ profileId, schema, table }: { profileId: string; sch
     setNotice(null);
   };
 
+  const discardAllChanges = () => {
+    setPendingRows({});
+    setEditing(null);
+    setChangePreview(null);
+    setNotice(null);
+    setError((current) => current === PENDING_EXPORT_ERROR ? null : current);
+  };
+
   const toggleSort = (column: string) => {
-    setOrderBy((current) => {
-      if (current?.column !== column) return { column, descending: false };
-      if (!current.descending) return { column, descending: true };
-      return null;
-    });
+    setOrderBy(effectiveOrderBy?.column === column
+      ? { column, descending: !effectiveOrderBy.descending }
+      : { column, descending: false });
     setPageIndex(0);
     setNotice(null);
   };
@@ -374,6 +415,15 @@ export function TableView({ profileId, schema, table }: { profileId: string; sch
   const applyPreviewLimit = () => {
     const parsed = Number(limitInput);
     const next = Number.isFinite(parsed) ? Math.min(MAX_PREVIEW_ROWS, Math.max(1, Math.floor(parsed))) : previewLimit;
+    setLimitInput(String(next));
+    setPreviewLimit(next);
+    setPageIndex(0);
+  };
+
+  const stepPreviewLimit = (amount: number) => {
+    const parsed = Number(limitInput);
+    const current = Number.isFinite(parsed) ? Math.floor(parsed) : previewLimit;
+    const next = Math.min(MAX_PREVIEW_ROWS, Math.max(1, current + amount));
     setLimitInput(String(next));
     setPreviewLimit(next);
     setPageIndex(0);
@@ -416,6 +466,7 @@ export function TableView({ profileId, schema, table }: { profileId: string; sch
   };
 
   const showChangePreview = (element: HTMLTableRowElement, rowKey: string) => {
+    if (changePreview && changePreview.rowKey !== rowKey && previewCloseTimer.current !== null) return;
     cancelPreviewClose();
     const rect = element.getBoundingClientRect();
     const previewWidth = Math.min(720, Math.max(320, window.innerWidth - 32));
@@ -423,9 +474,20 @@ export function TableView({ profileId, schema, table }: { profileId: string; sch
     const spaceBelow = Math.max(0, window.innerHeight - rect.bottom - 16);
     const spaceAbove = Math.max(0, rect.top - 16);
     if (spaceBelow >= 260 || spaceBelow >= spaceAbove) {
-      setChangePreview({ rowKey, left, top: rect.bottom + 4, maxHeight: Math.max(140, Math.min(520, spaceBelow)) });
+      setChangePreview({ rowKey, left, top: rect.bottom, maxHeight: Math.max(140, Math.min(520, spaceBelow)) });
     } else {
-      setChangePreview({ rowKey, left, bottom: window.innerHeight - rect.top + 4, maxHeight: Math.max(140, Math.min(520, spaceAbove)) });
+      setChangePreview({ rowKey, left, bottom: window.innerHeight - rect.top, maxHeight: Math.max(140, Math.min(520, spaceAbove)) });
+    }
+  };
+
+  const handleExportAction = async (action: "open" | "reveal") => {
+    if (!exportResult) return;
+    try {
+      setError(null);
+      if (action === "open") await commands.openExportedFile(exportResult.path);
+      else await commands.revealExportedFile(exportResult.path);
+    } catch (reason) {
+      setError(errorMessage(reason));
     }
   };
 
@@ -534,7 +596,6 @@ export function TableView({ profileId, schema, table }: { profileId: string; sch
             </div> : null}
           </div> : null}
           {pendingCount > 0 ? <>
-            <button className="secondary-button" onClick={() => { setPendingRows({}); setEditing(null); setNotice(null); setError((current) => current === PENDING_EXPORT_ERROR ? null : current); }} disabled={saving}>Discard changes</button>
             <button className="primary-button" onClick={() => void saveChanges()} disabled={saving}>{saving ? "Saving…" : `Save changes (${pendingCount})`}</button>
           </> : null}
         </div>
@@ -568,22 +629,50 @@ export function TableView({ profileId, schema, table }: { profileId: string; sch
         <div className="table-query-controls">
           <label>
             <span>Preview limit</span>
-            <input className="text-input limit-input" type="number" min="1" max={MAX_PREVIEW_ROWS} value={limitInput} onChange={(event) => setLimitInput(event.target.value)} onBlur={applyPreviewLimit} onKeyDown={(event) => { if (event.key === "Enter") applyPreviewLimit(); }} />
+            <span className="limit-input-wrap">
+              <input className="text-input limit-input" aria-label="Preview limit" type="number" min="1" max={MAX_PREVIEW_ROWS} value={limitInput} onChange={(event) => setLimitInput(event.target.value)} onBlur={applyPreviewLimit} onKeyDown={(event) => { if (event.key === "Enter") applyPreviewLimit(); }} />
+              <span className="limit-stepper">
+                <button type="button" aria-label="Increase preview limit" onMouseDown={(event) => event.preventDefault()} onClick={() => stepPreviewLimit(1)}>▲</button>
+                <button type="button" aria-label="Decrease preview limit" onMouseDown={(event) => event.preventDefault()} onClick={() => stepPreviewLimit(-1)}>▼</button>
+              </span>
+            </span>
           </label>
           <label>
             <span>Sort by</span>
-            <select className="select-input sort-column-select" value={orderBy?.column ?? ""} onChange={(event) => { setOrderBy(event.target.value ? { column: event.target.value, descending: orderBy?.descending ?? false } : null); setPageIndex(0); }}>
-              <option value="">Default order</option>
-              {visibleColumns.map((column) => <option key={column.name} value={column.name}>{column.name}</option>)}
+            <select
+              className="select-input sort-column-select"
+              value={effectiveOrderBy?.column ?? ""}
+              onChange={(event) => {
+                setOrderBy(event.target.value ? { column: event.target.value, descending: false } : null);
+                setPageIndex(0);
+              }}
+            >
+              {page?.metadata.primaryKey.length ? null : <option value="">Choose a sort column</option>}
+              {visibleColumns.map((column) => (
+                <option key={column.name} value={column.name}>
+                  {column.name}{page?.metadata.primaryKey.includes(column.name) ? " (primary key)" : ""}
+                </option>
+              ))}
             </select>
           </label>
-          <select className="select-input sort-direction-select" aria-label="Sort direction" value={orderBy?.descending ? "desc" : "asc"} disabled={!orderBy} onChange={(event) => { setOrderBy((current) => current ? { ...current, descending: event.target.value === "desc" } : null); setPageIndex(0); }}>
-            <option value="asc">Ascending</option>
-            <option value="desc">Descending</option>
-          </select>
+          {effectiveOrderBy ? <label>
+            <span>Direction</span>
+            <select
+              className="select-input sort-direction-select"
+              aria-label="Sort direction"
+              value={effectiveOrderBy.descending ? "desc" : "asc"}
+              onChange={(event) => {
+                setOrderBy({ ...effectiveOrderBy, descending: event.target.value === "desc" });
+                setPageIndex(0);
+              }}
+            >
+              <option value="asc">Ascending</option>
+              <option value="desc">Descending</option>
+            </select>
+          </label> : null}
           {collapsedColumns.size > 0 || Object.keys(columnWidths).length > 0 ? <button className="text-button" onClick={() => { setCollapsedColumns(new Set()); setColumnWidths({}); }}>Reset columns</button> : null}
           <div className="filter-actions">
-            <button className="secondary-button" onClick={clearFilters} disabled={!page}>Clear</button>
+            {hasFiltersToClear ? <button className="secondary-button" onClick={clearFilters} disabled={!page}>Clear</button> : null}
             <button className="primary-button apply-filters-button" onClick={applyFilters} disabled={!page}>Apply filters</button>
           </div>
         </div>
@@ -591,10 +680,21 @@ export function TableView({ profileId, schema, table }: { profileId: string; sch
 
       {error ? <DismissibleMessage className="inline-error" message={error} onDismiss={() => setError(null)} /> : null}
       {notice ? <DismissibleMessage className="inline-notice" message={notice} onDismiss={() => setNotice(null)} /> : null}
+      {exportResult ? <div className="inline-notice export-complete" role="status">
+        <span>
+          Exported {exportResult.rows.toLocaleString()} filtered {exportResult.rows === 1 ? "row" : "rows"} to{" "}
+          <button className="export-file-link" onClick={() => void handleExportAction("open")}>{fileName(exportResult.path)}</button>.
+        </span>
+        <div className="export-complete-actions">
+          <button className="secondary-button export-reveal-button" onClick={() => void handleExportAction("reveal")}><span className="export-folder-icon" aria-hidden="true" /> Show in folder</button>
+          <button className="export-dismiss-button" onClick={() => setExportResult(null)} aria-label="Dismiss export result">×</button>
+        </div>
+      </div> : null}
       {pendingCount > 0 ? <div className="pending-changes">
         <strong>{pendingCount} pending {pendingCount === 1 ? "change" : "changes"}</strong>
         {pendingEditCount > 0 ? <span className="pending-edit-count">{pendingEditCount} {pendingEditCount === 1 ? "edited row" : "edited rows"}</span> : null}
         {pendingDeleteCount > 0 ? <span className="pending-delete-count">{pendingDeleteCount} {pendingDeleteCount === 1 ? "deletion" : "deletions"}</span> : null}
+        <button className="secondary-button pending-discard-button" onClick={discardAllChanges} disabled={saving}>Discard changes</button>
       </div> : null}
 
       <div className="grid-wrap" ref={gridRef}>
@@ -608,7 +708,7 @@ export function TableView({ profileId, schema, table }: { profileId: string; sch
             </colgroup>
             <thead><tr>
               {visibleColumns.map((column) => {
-                const sorted = orderBy?.column === column.name;
+                const sorted = effectiveOrderBy?.column === column.name;
                 const collapsed = collapsedColumns.has(column.name);
                 const focusClass = hoveredColumnAction
                   ? hoveredColumnAction === column.name ? "column-action-target" : "column-action-dimmed"
@@ -624,7 +724,7 @@ export function TableView({ profileId, schema, table }: { profileId: string; sch
                   ><span className="column-action-glyph" aria-hidden="true">↦</span><span className="collapsed-column-name">{column.name}</span></button> : <div className="column-header-content">
                     <button className="column-sort" onClick={() => toggleSort(column.name)} aria-label={`Sort by ${column.name}`}>
                       <span>{column.name}<small>{column.dataType}</small></span>
-                      <span className={`sort-indicator ${sorted ? "active" : ""}`}>{sorted ? orderBy.descending ? "↓" : "↑" : "↕"}</span>
+                      <span className={`sort-indicator ${sorted ? "active" : ""}`}>{sorted ? effectiveOrderBy?.descending ? "↓" : "↑" : "↕"}</span>
                     </button>
                     <button
                       className="collapse-column column-action-button"
@@ -762,18 +862,56 @@ function ChangePreview({ pending, columns, onDiscard, onMouseEnter, onMouseLeave
     after: commands.toDisplayValue(pending.changes[index]),
   }]);
   return <div className="change-preview edit-preview" style={style} onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave} onMouseDown={stopPropagation} onClick={stopPropagation}>
-    <div className="change-preview-header"><strong>Pending edit</strong><button onClick={(event) => { event.stopPropagation(); onDiscard(); }}>Discard row edit</button></div>
+    <div className="change-preview-header"><strong>Pending edit</strong><button onClick={(event) => { event.stopPropagation(); onDiscard(); }}>Discard edit</button></div>
     <div className="change-diff-list">
-      {changes.map((change) => <div className="change-diff" key={change.column}>
-        <b>{change.column}</b>
-        <div className="change-diff-values">
-          <div className="change-diff-before"><span>Before</span><pre>{change.before}</pre></div>
-          <span className="change-arrow" aria-hidden="true">→</span>
-          <div className="change-diff-after"><span>After</span><pre>{change.after}</pre></div>
-        </div>
-      </div>)}
+      {changes.map((change) => {
+        const diff = inlineDiff(change.before, change.after);
+        return <div className="change-diff" key={change.column}>
+          <b>{change.column}</b>
+          <div className="change-diff-values">
+            <div className="change-diff-before"><span>Before</span><InlineDiffValue parts={diff.before} kind="removed" /></div>
+            <span className="change-arrow" aria-hidden="true">→</span>
+            <div className="change-diff-after"><span>After</span><InlineDiffValue parts={diff.after} kind="added" /></div>
+          </div>
+        </div>;
+      })}
     </div>
   </div>;
+}
+
+function InlineDiffValue({ parts, kind }: { parts: InlineDiffPart[]; kind: "added" | "removed" }) {
+  return <pre>{parts.map((part, index) => part.changed
+    ? <mark className={`change-inline-${kind}`} key={index}>{part.value}</mark>
+    : part.value)}</pre>;
+}
+
+function inlineDiff(before: string, after: string): { before: InlineDiffPart[]; after: InlineDiffPart[] } {
+  const beforeCharacters = Array.from(before);
+  const afterCharacters = Array.from(after);
+  let prefixLength = 0;
+  while (
+    prefixLength < beforeCharacters.length &&
+    prefixLength < afterCharacters.length &&
+    beforeCharacters[prefixLength] === afterCharacters[prefixLength]
+  ) prefixLength += 1;
+
+  let suffixLength = 0;
+  while (
+    suffixLength < beforeCharacters.length - prefixLength &&
+    suffixLength < afterCharacters.length - prefixLength &&
+    beforeCharacters[beforeCharacters.length - suffixLength - 1] === afterCharacters[afterCharacters.length - suffixLength - 1]
+  ) suffixLength += 1;
+
+  const prefix = beforeCharacters.slice(0, prefixLength).join("");
+  const suffix = suffixLength > 0 ? beforeCharacters.slice(beforeCharacters.length - suffixLength).join("") : "";
+  const beforeChanged = beforeCharacters.slice(prefixLength, beforeCharacters.length - suffixLength).join("");
+  const afterChanged = afterCharacters.slice(prefixLength, afterCharacters.length - suffixLength).join("");
+  const parts = (changedValue: string): InlineDiffPart[] => [
+    ...(prefix ? [{ value: prefix, changed: false }] : []),
+    ...(changedValue ? [{ value: changedValue, changed: true }] : []),
+    ...(suffix ? [{ value: suffix, changed: false }] : []),
+  ];
+  return { before: parts(beforeChanged), after: parts(afterChanged) };
 }
 
 function createFilterDraft(column: string): FilterDraft {
@@ -807,6 +945,10 @@ function parseCell(value: string): JsonValue {
 
 function toStringValue(value: JsonValue): string | null {
   return value === null ? null : String(value);
+}
+
+function fileName(path: string): string {
+  return path.split(/[\\/]/).pop() || path;
 }
 
 function rowsEqual(left: JsonValue[], right: JsonValue[]): boolean {

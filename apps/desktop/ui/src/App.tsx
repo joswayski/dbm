@@ -23,6 +23,17 @@ const DEFAULT_SIDEBAR_WIDTH = 320;
 const MIN_SIDEBAR_WIDTH = 280;
 const MAX_SIDEBAR_WIDTH = 480;
 const COLLAPSED_SIDEBAR_WIDTH = 48;
+const QUERY_HISTORY_UPDATED_EVENT = "dbm:query-history-updated";
+const SQL_IDENTIFIER = String.raw`(?:"(?:[^"]|"")*"|[A-Za-z_][A-Za-z0-9_$]*)`;
+const SIMPLE_FULL_TABLE_SELECT = new RegExp(
+  String.raw`^\s*select\s+\*\s+from\s+(${SQL_IDENTIFIER})(?:\s*\.\s*(${SQL_IDENTIFIER}))?\s*;?\s*$`,
+  "i",
+);
+
+type QueryHistoryUpdatedDetail = {
+  profileId: string;
+  database: string;
+};
 
 function defaultProfile(profile?: ConnectionProfile): SaveProfileInput {
   return {
@@ -57,7 +68,7 @@ export default function App() {
   const openTable = useDbmStore((state) => state.openTable);
   const openQuery = useDbmStore((state) => state.openQuery);
   const renameTab = useDbmStore((state) => state.renameTab);
-  const minimizeTab = useDbmStore((state) => state.minimizeTab);
+  const collapseTab = useDbmStore((state) => state.collapseTab);
   const closeTab = useDbmStore((state) => state.closeTab);
   const setActiveTab = useDbmStore((state) => state.setActiveTab);
   const [schemas, setSchemas] = useState<Record<string, SchemaNode[]>>({});
@@ -68,9 +79,12 @@ export default function App() {
     return Number.isFinite(saved) ? Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, saved)) : DEFAULT_SIDEBAR_WIDTH;
   });
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem("dbm.sidebarCollapsed") === "true");
+  const [collapsedConnectionIds, setCollapsedConnectionIds] = useState<Set<string>>(new Set());
   const [mountedTabIds, setMountedTabIds] = useState<Set<string>>(new Set());
   const [renamingTabId, setRenamingTabId] = useState<string | null>(null);
   const [tabTitleDraft, setTabTitleDraft] = useState("");
+  const [refreshingSchemaId, setRefreshingSchemaId] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ kind: "info" | "success"; message: string } | null>(null);
 
   useEffect(() => {
     void loadProfiles().catch((reason: unknown) => setError(errorMessage(reason)));
@@ -90,12 +104,24 @@ export default function App() {
     return () => window.clearTimeout(timer);
   }, [error]);
 
+  useEffect(() => {
+    if (!toast) return;
+    const timer = window.setTimeout(() => setToast(null), 6_000);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
+
   const handleConnect = useCallback(async (profileId: string) => {
     try {
       setError(null);
       await connect(profileId);
       const tree = await commands.loadSchemaTree(profileId);
       setSchemas((current) => ({ ...current, [profileId]: tree }));
+      setCollapsedConnectionIds((current) => {
+        if (!current.has(profileId)) return current;
+        const next = new Set(current);
+        next.delete(profileId);
+        return next;
+      });
     } catch (reason) {
       setError(errorMessage(reason));
     }
@@ -104,6 +130,12 @@ export default function App() {
   const handleDisconnect = useCallback(async (profileId: string) => {
     try {
       await disconnect(profileId);
+      setCollapsedConnectionIds((current) => {
+        if (!current.has(profileId)) return current;
+        const next = new Set(current);
+        next.delete(profileId);
+        return next;
+      });
     } catch (reason) {
       setError(errorMessage(reason));
     }
@@ -120,6 +152,25 @@ export default function App() {
       setError(errorMessage(reason));
     }
   }, [activeProfileId, switchDatabase]);
+
+  const handleRefreshSchema = useCallback(async (profileId: string) => {
+    setRefreshingSchemaId(profileId);
+    setError(null);
+    try {
+      const previous = schemas[profileId] ?? [];
+      const next = await commands.loadSchemaTree(profileId);
+      setSchemas((current) => ({ ...current, [profileId]: next }));
+      const summary = describeSchemaRefresh(previous, next);
+      setToast({
+        kind: summary.changed ? "success" : "info",
+        message: summary.message,
+      });
+    } catch (reason) {
+      setError(errorMessage(reason));
+    } finally {
+      setRefreshingSchemaId(null);
+    }
+  }, [schemas]);
 
   const handleSaveProfile = useCallback(async (input: SaveProfileInput) => {
     const saved = await saveProfile(input);
@@ -185,9 +236,18 @@ export default function App() {
     closeTab(tabId);
   };
 
-  const handleMinimizeTab = (tabId: string) => {
+  const handleCollapseTab = (tabId: string) => {
     rememberTab(tabId);
-    minimizeTab(tabId);
+    collapseTab(tabId);
+  };
+
+  const toggleConnectionExpanded = (profileId: string) => {
+    setCollapsedConnectionIds((current) => {
+      const next = new Set(current);
+      if (next.has(profileId)) next.delete(profileId);
+      else next.add(profileId);
+      return next;
+    });
   };
 
   const startRenamingTab = (tabId: string, title: string) => {
@@ -251,9 +311,10 @@ export default function App() {
             const profileId = summary.profile.id;
             const workspace = workspaces[profileId];
             const active = activeProfileId === profileId;
+            const expanded = active && Boolean(workspace) && !collapsedConnectionIds.has(profileId);
             return (
               <div
-                className={`connection-group ${active ? "active" : ""} ${workspace ? "connected" : ""}`}
+                className={`connection-group ${active ? "active" : ""} ${workspace ? "connected" : ""} ${expanded ? "expanded" : ""}`}
                 key={profileId}
                 style={{
                   "--connection-color": summary.profile.color ?? DEFAULT_CONNECTION_COLOR,
@@ -264,11 +325,13 @@ export default function App() {
                   connected={Boolean(workspace)}
                   active={active}
                   onSelect={() => handleSelectProfile(profileId, Boolean(workspace))}
-                  onConnect={() => void handleConnect(profileId)}
                   onDisconnect={() => void handleDisconnect(profileId)}
                   onEdit={() => setModalProfile(summary.profile)}
+                  expandable={active && Boolean(workspace)}
+                  expanded={expanded}
+                  onToggleExpanded={() => toggleConnectionExpanded(profileId)}
                 />
-                {active && workspace ? (
+                {expanded && workspace ? (
                   <div className="workspace-panel">
                     <label className="field-label" htmlFor={`database-select-${profileId}`}>Database</label>
                     <select
@@ -283,10 +346,9 @@ export default function App() {
                       <span>Schema</span>
                       <button
                         className="text-button"
-                        onClick={() => void commands.loadSchemaTree(profileId).then((tree) => {
-                          setSchemas((current) => ({ ...current, [profileId]: tree }));
-                        })}
-                      >Refresh</button>
+                        onClick={() => void handleRefreshSchema(profileId)}
+                        disabled={refreshingSchemaId === profileId}
+                      >{refreshingSchemaId === profileId ? "Refreshing…" : "Refresh"}</button>
                     </div>
                     <div className="schema-tree">
                       {(schemas[profileId] ?? []).map((node) => (
@@ -343,13 +405,23 @@ export default function App() {
         <div className="tab-strip">
           {tabs.map((tab) => (
             <div
-              className={`tab ${tab.id === activeTabId ? "active" : ""}`}
+              className={`tab ${tab.id === activeTabId ? "active" : ""} ${tab.collapsed ? "collapsed" : ""}`}
               key={tab.id}
               style={{
                 "--tab-color": profiles.find((summary) => summary.profile.id === tab.profileId)?.profile.color ?? DEFAULT_CONNECTION_COLOR,
               } as CSSProperties}
             >
-              {renamingTabId === tab.id ? (
+              {tab.collapsed ? (
+                <button
+                  className="tab-expand"
+                  onClick={() => handleSetActiveTab(tab.id)}
+                  title={`Expand ${tab.title}`}
+                  aria-label={`Expand ${tab.title}`}
+                >
+                  <span className="tab-collapse-glyph" aria-hidden="true">↦</span>
+                  <span className="collapsed-tab-name">{tab.title}</span>
+                </button>
+              ) : renamingTabId === tab.id ? (
                 <input
                   className="tab-title-input"
                   autoFocus
@@ -377,7 +449,7 @@ export default function App() {
                   <span>{tab.title}</span>
                 </button>
               )}
-              {tab.kind === "query" ? (
+              {!tab.collapsed && tab.kind === "query" ? (
                 <button
                   className="tab-action tab-rename"
                   onClick={() => startRenamingTab(tab.id, tab.title)}
@@ -385,13 +457,13 @@ export default function App() {
                   aria-label={`Rename ${tab.title}`}
                 >✎</button>
               ) : null}
-              {tab.id === activeTabId ? (
+              {!tab.collapsed && tab.id === activeTabId ? (
                 <button
-                  className="tab-action tab-minimize"
-                  onClick={() => handleMinimizeTab(tab.id)}
-                  title={`Minimize ${tab.title}`}
-                  aria-label={`Minimize ${tab.title}`}
-                >−</button>
+                  className="tab-action tab-collapse"
+                  onClick={() => handleCollapseTab(tab.id)}
+                  title={`Collapse ${tab.title}`}
+                  aria-label={`Collapse ${tab.title}`}
+                >↤</button>
               ) : null}
               <button className="tab-close" onClick={() => handleCloseTab(tab.id)} aria-label={`Close ${tab.title}`}>×</button>
             </div>
@@ -408,11 +480,20 @@ export default function App() {
         <section className="content-pane">
           {tabs.map((tab) => {
             const shouldMount = tab.id === activeTabId || mountedTabIds.has(tab.id);
+            const database = workspaces[tab.profileId]?.profile.defaultDatabase ??
+              profiles.find((summary) => summary.profile.id === tab.profileId)?.profile.defaultDatabase ??
+              "postgres";
             return <div className={`tab-pane ${tab.id === activeTabId ? "active" : ""}`} key={tab.id} aria-hidden={tab.id !== activeTabId}>
               {shouldMount && tab.kind === "table" && tab.schema && tab.table ? (
                 <TableView profileId={tab.profileId} schema={tab.schema} table={tab.table} />
               ) : shouldMount && tab.kind === "query" ? (
-                <QueryView profileId={tab.profileId} initialSql={tab.sql ?? "SELECT now();"} title={tab.title} />
+                <QueryView
+                  profileId={tab.profileId}
+                  database={database}
+                  schemaTree={schemas[tab.profileId] ?? []}
+                  initialSql={tab.sql ?? "SELECT now();"}
+                  title={tab.title}
+                />
               ) : null}
             </div>;
           })}
@@ -441,6 +522,10 @@ export default function App() {
           } : undefined}
         />
       ) : null}
+      {toast ? <div className={`app-toast ${toast.kind}`} role="status">
+        <span>{toast.message}</span>
+        <button onClick={() => setToast(null)} aria-label="Dismiss notification">×</button>
+      </div> : null}
     </div>
   );
 }
@@ -450,32 +535,83 @@ function ConnectionItem({
   connected,
   active,
   onSelect,
-  onConnect,
   onDisconnect,
   onEdit,
+  expandable,
+  expanded,
+  onToggleExpanded,
 }: {
   summary: ProfileSummary;
   connected: boolean;
   active: boolean;
   onSelect: () => void;
-  onConnect: () => void;
   onDisconnect: () => void;
   onEdit: () => void;
+  expandable: boolean;
+  expanded: boolean;
+  onToggleExpanded: () => void;
 }) {
+  const [actionsOpen, setActionsOpen] = useState(false);
+  const actionsRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!actionsOpen) return;
+    const closeOnPointerDown = (event: PointerEvent) => {
+      if (!actionsRef.current?.contains(event.target as Node)) setActionsOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setActionsOpen(false);
+    };
+    window.addEventListener("pointerdown", closeOnPointerDown);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      window.removeEventListener("pointerdown", closeOnPointerDown);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [actionsOpen]);
+
   return (
-    <div className={`connection-item ${active ? "active" : ""}`}>
-      <button className="connection-main" onClick={onSelect} aria-current={active ? "page" : undefined}>
-        <span className="connection-color" style={{ background: summary.profile.color ?? DEFAULT_CONNECTION_COLOR, color: summary.profile.color ?? DEFAULT_CONNECTION_COLOR }} />
-        <span className="connection-copy">
-          <strong>{summary.profile.name}</strong>
-          <small>{summary.profile.username}@{summary.profile.host}</small>
-        </span>
-        {connected ? <span className="connected-label">connected</span> : null}
-      </button>
-      <div className="connection-actions">
-        <button className="icon-button subtle" title={connected ? "Disconnect" : "Connect"} onClick={connected ? onDisconnect : onConnect}>{connected ? "●" : "▷"}</button>
-        <button className="icon-button subtle" title="Edit connection" onClick={onEdit}>⋯</button>
+    <div className="connection-entry" ref={actionsRef}>
+      <div className={`connection-item ${active ? "active" : ""}`}>
+        <button
+          className="connection-main"
+          onClick={() => { setActionsOpen(false); onSelect(); }}
+          aria-current={active ? "page" : undefined}
+          title={connected ? undefined : "Connect"}
+        >
+          <span className="connection-color" style={{ background: summary.profile.color ?? DEFAULT_CONNECTION_COLOR, color: summary.profile.color ?? DEFAULT_CONNECTION_COLOR }} />
+          <span className="connection-copy">
+            <strong>{summary.profile.name}</strong>
+            <small>{summary.profile.username}@{summary.profile.host}</small>
+          </span>
+        </button>
+        <div className="connection-actions">
+          {expandable ? <button
+            className="icon-button subtle connection-toggle"
+            title={expanded ? "Collapse connection" : "Expand connection"}
+            aria-label={expanded ? "Collapse connection" : "Expand connection"}
+            aria-expanded={expanded}
+            onClick={() => { setActionsOpen(false); onToggleExpanded(); }}
+          >{expanded ? "⌃" : "⌄"}</button> : null}
+          <button
+            className="icon-button subtle"
+            title="Connection actions"
+            aria-label={`Connection actions for ${summary.profile.name}`}
+            aria-haspopup="menu"
+            aria-expanded={actionsOpen}
+            onClick={() => setActionsOpen((open) => !open)}
+          >⋯</button>
+        </div>
       </div>
+      {actionsOpen ? <div className="connection-actions-menu" role="menu">
+        <button role="menuitem" onClick={() => { setActionsOpen(false); onEdit(); }}>Edit connection</button>
+        {connected ? <button
+          role="menuitem"
+          className="danger"
+          title="Close this connection and its tabs"
+          onClick={() => { setActionsOpen(false); onDisconnect(); }}
+        >Disconnect</button> : null}
+      </div> : null}
     </div>
   );
 }
@@ -583,24 +719,48 @@ function activeSqlDecorations(view: EditorView): DecorationSet {
 
 export function QueryView({
   profileId,
+  database = "postgres",
+  schemaTree = [],
   initialSql,
   title = "Query",
 }: {
   profileId: string;
+  database?: string;
+  schemaTree?: SchemaNode[];
   initialSql: string;
   title?: string;
 }) {
   const [sqlText, setSqlText] = useState(initialSql);
   const [response, setResponse] = useState<QueryResponse | null>(null);
+  const [executedSql, setExecutedSql] = useState<string | null>(null);
+  const [executionRevision, setExecutionRevision] = useState(0);
   const [history, setHistory] = useState<QueryHistoryEntry[]>([]);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [embeddedPendingCount, setEmbeddedPendingCount] = useState(0);
   const [executionTarget, setExecutionTarget] = useState<SqlExecutionTarget | null>(() => sqlExecutionTarget(initialSql, 0, 0));
   const editorRef = useRef<ReactCodeMirrorRef>(null);
 
+  const refreshHistory = useCallback(async () => {
+    try {
+      setHistory(await commands.listQueryHistory(profileId, database));
+    } catch (reason) {
+      setError(errorMessage(reason));
+    }
+  }, [database, profileId]);
+
   useEffect(() => {
-    void commands.listQueryHistory(profileId).then(setHistory).catch((reason: unknown) => setError(errorMessage(reason)));
-  }, [profileId]);
+    const initialLoadTimer = window.setTimeout(() => void refreshHistory(), 0);
+    const handleHistoryUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<QueryHistoryUpdatedDetail>).detail;
+      if (detail.profileId === profileId && detail.database === database) void refreshHistory();
+    };
+    window.addEventListener(QUERY_HISTORY_UPDATED_EVENT, handleHistoryUpdated);
+    return () => {
+      window.clearTimeout(initialLoadTimer);
+      window.removeEventListener(QUERY_HISTORY_UPDATED_EVENT, handleHistoryUpdated);
+    };
+  }, [database, profileId, refreshHistory]);
 
   useEffect(() => {
     if (!error) return;
@@ -610,6 +770,10 @@ export function QueryView({
 
   const run = useCallback(async (statement?: string) => {
     if (running) return;
+    if (embeddedPendingCount > 0) {
+      setError("Save or discard the pending table changes before running another query.");
+      return;
+    }
     const executableSql = (statement ?? sqlText).trim();
     if (!executableSql) return;
     if (requiresConfirmation(executableSql) && !window.confirm("This query may change or remove many rows. Run it anyway?")) return;
@@ -618,13 +782,18 @@ export function QueryView({
     try {
       const next = await commands.runQuery({ profileId, sql: executableSql, maxRows: 10_000 });
       setResponse(next);
-      setHistory(await commands.listQueryHistory(profileId));
+      setExecutedSql(executableSql);
+      setExecutionRevision((current) => current + 1);
     } catch (reason) {
       setError(errorMessage(reason));
     } finally {
+      window.dispatchEvent(new CustomEvent<QueryHistoryUpdatedDetail>(
+        QUERY_HISTORY_UPDATED_EVENT,
+        { detail: { profileId, database } },
+      ));
       setRunning(false);
     }
-  }, [profileId, running, sqlText]);
+  }, [database, embeddedPendingCount, profileId, running, sqlText]);
 
   const selectedOrCurrentStatement = useCallback((view?: EditorView) => {
     if (!view) return sqlText.trim();
@@ -652,6 +821,7 @@ export function QueryView({
   };
 
   const runLabel = executionTarget?.kind === "selection" ? "Run selection" : "Run statement";
+  const editableTable = executedSql ? resolveFullTableSelect(executedSql, schemaTree) : null;
 
   return (
     <div className="query-view">
@@ -684,7 +854,31 @@ export function QueryView({
         <aside className="history-panel"><div className="panel-title">History <span>{history.length}</span></div>{history.length === 0 ? <p className="muted">Run a query to start history.</p> : <div className="history-list">{history.slice(0, 100).map((entry) => <button className="history-item" key={entry.id} onClick={() => setSqlText(entry.sql)}><span>{entry.success ? "✓" : "!"}</span><span className="history-sql">{entry.sql.replace(/\s+/g, " ").slice(0, 70)}</span><small>{new Date(entry.executedAt).toLocaleTimeString()}</small></button>)}</div>}</aside>
       </div>
       {error ? <div className="inline-error dismissible-message"><span>{error}</span><button onClick={() => setError(null)} aria-label="Dismiss message">×</button></div> : null}
-      {response ? <div className="result-panel"><div className="result-meta"><span>{response.rowCount} rows{response.affectedRows !== null ? ` · ${response.affectedRows} affected` : ""} · {response.durationMs} ms</span>{response.truncated ? <span className="warning-chip">truncated</span> : null}</div><ResultTable columns={response.columns.map((column) => column.name)} rows={response.rows} /></div> : <div className="query-empty">Results will appear here.</div>}
+      {response ? editableTable ? <div className="result-panel editable-query-result">
+        <div className="result-meta">
+          <span>Table viewer · query completed in {response.durationMs} ms</span>
+          <span className="editable-result-chip">Editable table</span>
+        </div>
+        <TableView
+          key={`${profileId}:${editableTable.schema}:${editableTable.table}:${executionRevision}`}
+          profileId={profileId}
+          schema={editableTable.schema}
+          table={editableTable.table}
+          onPendingChange={setEmbeddedPendingCount}
+        />
+      </div> : <div className="result-panel">
+        <div className="result-meta">
+          <span>{response.rowCount} rows{response.affectedRows !== null ? ` · ${response.affectedRows} affected` : ""} · {response.durationMs} ms</span>
+          <span className="result-meta-actions">
+            {response.truncated ? <span className="warning-chip">truncated</span> : null}
+            {response.columns.length > 0 ? <span
+              className="read-only-result-chip"
+              title="This query does not resolve to one complete table, so DBM cannot safely map edits back to rows."
+            >Read-only result</span> : null}
+          </span>
+        </div>
+        <ResultTable columns={response.columns.map((column) => column.name)} rows={response.rows} />
+      </div> : <div className="query-empty">Results will appear here.</div>}
     </div>
   );
 }
@@ -708,9 +902,20 @@ function ProfileModal({
   const [form, setForm] = useState<SaveProfileInput>(() => defaultProfile(profile ?? undefined));
   const [connectionUrl, setConnectionUrl] = useState("");
   const [testing, setTesting] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const [saveStage, setSaveStage] = useState<"testing" | "connecting" | null>(null);
   const [feedback, setFeedback] = useState<{ kind: "success" | "error" | "info"; message: string } | null>(null);
+  const saving = saveStage !== null;
   const update = <K extends keyof SaveProfileInput>(key: K, value: SaveProfileInput[K]) => setForm((current) => ({ ...current, [key]: value }));
+
+  useEffect(() => {
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      onClose();
+    };
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [onClose]);
 
   const importConnectionUrl = (value: string) => {
     try {
@@ -747,21 +952,24 @@ function ProfileModal({
   };
 
   const save = async () => {
-    setSaving(true);
-    setFeedback(null);
+    setSaveStage("testing");
+    setFeedback({ kind: "info", message: "Testing connection before saving…" });
     try {
+      await commands.testProfile(form);
+      setSaveStage("connecting");
+      setFeedback({ kind: "success", message: "Connection successful. Saving and connecting…" });
       await onSave(form);
     } catch (reason) {
       setFeedback({ kind: "error", message: errorMessage(reason) });
-      setSaving(false);
+      setSaveStage(null);
     }
   };
 
   return (
     <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <div className="modal-card">
+      <div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="connection-modal-title">
         <div className="modal-header">
-          <div><span className="eyebrow">POSTGRESQL</span><h2>{profile ? "Edit connection" : "New connection"}</h2></div>
+          <div><span className="eyebrow">POSTGRESQL</span><h2 id="connection-modal-title">{profile ? "Edit connection" : "New connection"}</h2></div>
           <button className="icon-button" onClick={onClose} aria-label="Close">×</button>
         </div>
         <div className="form-grid">
@@ -852,12 +1060,82 @@ function ProfileModal({
           {onDelete ? <button className="danger-button" onClick={() => void onDelete()} disabled={testing || saving}>Delete</button> : <span />}
           <div className="modal-actions-right">
             <button className="secondary-button" onClick={() => void test()} disabled={testing || saving}>{testing ? "Testing…" : "Test connection"}</button>
-            <button className="primary-button" onClick={() => void save()} disabled={testing || saving}>{saving ? "Connecting…" : "Save & connect"}</button>
+            <button className="primary-button" onClick={() => void save()} disabled={testing || saving}>
+              {saveStage === "testing" ? "Testing…" : saveStage === "connecting" ? "Connecting…" : "Save & connect"}
+            </button>
           </div>
         </div>
       </div>
     </div>
   );
+}
+
+function describeSchemaRefresh(previous: SchemaNode[], next: SchemaNode[]): { changed: boolean; message: string } {
+  const previousObjects = schemaObjects(previous);
+  const nextObjects = schemaObjects(next);
+  const previousKeys = new Set(previousObjects.map((object) => object.key));
+  const nextKeys = new Set(nextObjects.map((object) => object.key));
+  const added = nextObjects.filter((object) => !previousKeys.has(object.key)).map((object) => object.label);
+  const removed = previousObjects.filter((object) => !nextKeys.has(object.key)).map((object) => object.label);
+  if (added.length === 0 && removed.length === 0) {
+    return { changed: false, message: "Schema is already up to date." };
+  }
+
+  const changes = [
+    added.length > 0 ? `Added ${summarizeSchemaObjects(added)}` : null,
+    removed.length > 0 ? `Removed ${summarizeSchemaObjects(removed)}` : null,
+  ].filter((change): change is string => Boolean(change));
+  return { changed: true, message: `Schema refreshed · ${changes.join(" · ")}.` };
+}
+
+function schemaObjects(nodes: SchemaNode[]): Array<{ key: string; label: string }> {
+  const objects: Array<{ key: string; label: string }> = [];
+  const visit = (node: SchemaNode) => {
+    const qualifiedName = node.schema && node.table ? `${node.schema}.${node.table}` : node.name;
+    objects.push({
+      key: `${node.kind}:${qualifiedName}`,
+      label: `${node.kind} ${qualifiedName}`,
+    });
+    node.children.forEach(visit);
+  };
+  nodes.forEach(visit);
+  return objects.sort((left, right) => left.key.localeCompare(right.key));
+}
+
+function summarizeSchemaObjects(labels: string[]): string {
+  if (labels.length === 1) return labels[0];
+  const visible = labels.slice(0, 3);
+  const remainder = labels.length - visible.length;
+  return `${labels.length} objects: ${visible.join(", ")}${remainder > 0 ? `, and ${remainder} more` : ""}`;
+}
+
+function resolveFullTableSelect(sqlText: string, schemaTree: SchemaNode[]): { schema: string; table: string } | null {
+  const match = SIMPLE_FULL_TABLE_SELECT.exec(sqlText);
+  if (!match) return null;
+  const firstIdentifier = decodeSqlIdentifier(match[1]);
+  const secondIdentifier = match[2] ? decodeSqlIdentifier(match[2]) : null;
+  const requestedSchema = secondIdentifier ? firstIdentifier : null;
+  const requestedTable = secondIdentifier ?? firstIdentifier;
+  const matches: Array<{ schema: string; table: string }> = [];
+  const visit = (node: SchemaNode) => {
+    if (
+      node.kind === "table" &&
+      node.schema &&
+      node.table === requestedTable &&
+      (!requestedSchema || node.schema === requestedSchema)
+    ) {
+      matches.push({ schema: node.schema, table: node.table });
+    }
+    node.children.forEach(visit);
+  };
+  schemaTree.forEach(visit);
+  return matches.length === 1 ? matches[0] : null;
+}
+
+function decodeSqlIdentifier(identifier: string): string {
+  return identifier.startsWith("\"")
+    ? identifier.slice(1, -1).replaceAll("\"\"", "\"")
+    : identifier.toLowerCase();
 }
 
 function errorMessage(reason: unknown): string {
