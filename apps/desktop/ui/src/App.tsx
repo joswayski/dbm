@@ -57,7 +57,7 @@ export default function App() {
   const openTable = useDbmStore((state) => state.openTable);
   const openQuery = useDbmStore((state) => state.openQuery);
   const renameTab = useDbmStore((state) => state.renameTab);
-  const minimizeTab = useDbmStore((state) => state.minimizeTab);
+  const collapseTab = useDbmStore((state) => state.collapseTab);
   const closeTab = useDbmStore((state) => state.closeTab);
   const setActiveTab = useDbmStore((state) => state.setActiveTab);
   const [schemas, setSchemas] = useState<Record<string, SchemaNode[]>>({});
@@ -68,6 +68,7 @@ export default function App() {
     return Number.isFinite(saved) ? Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, saved)) : DEFAULT_SIDEBAR_WIDTH;
   });
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem("dbm.sidebarCollapsed") === "true");
+  const [collapsedConnectionIds, setCollapsedConnectionIds] = useState<Set<string>>(new Set());
   const [mountedTabIds, setMountedTabIds] = useState<Set<string>>(new Set());
   const [renamingTabId, setRenamingTabId] = useState<string | null>(null);
   const [tabTitleDraft, setTabTitleDraft] = useState("");
@@ -96,6 +97,12 @@ export default function App() {
       await connect(profileId);
       const tree = await commands.loadSchemaTree(profileId);
       setSchemas((current) => ({ ...current, [profileId]: tree }));
+      setCollapsedConnectionIds((current) => {
+        if (!current.has(profileId)) return current;
+        const next = new Set(current);
+        next.delete(profileId);
+        return next;
+      });
     } catch (reason) {
       setError(errorMessage(reason));
     }
@@ -104,6 +111,12 @@ export default function App() {
   const handleDisconnect = useCallback(async (profileId: string) => {
     try {
       await disconnect(profileId);
+      setCollapsedConnectionIds((current) => {
+        if (!current.has(profileId)) return current;
+        const next = new Set(current);
+        next.delete(profileId);
+        return next;
+      });
     } catch (reason) {
       setError(errorMessage(reason));
     }
@@ -185,9 +198,18 @@ export default function App() {
     closeTab(tabId);
   };
 
-  const handleMinimizeTab = (tabId: string) => {
+  const handleCollapseTab = (tabId: string) => {
     rememberTab(tabId);
-    minimizeTab(tabId);
+    collapseTab(tabId);
+  };
+
+  const toggleConnectionExpanded = (profileId: string) => {
+    setCollapsedConnectionIds((current) => {
+      const next = new Set(current);
+      if (next.has(profileId)) next.delete(profileId);
+      else next.add(profileId);
+      return next;
+    });
   };
 
   const startRenamingTab = (tabId: string, title: string) => {
@@ -251,9 +273,10 @@ export default function App() {
             const profileId = summary.profile.id;
             const workspace = workspaces[profileId];
             const active = activeProfileId === profileId;
+            const expanded = active && Boolean(workspace) && !collapsedConnectionIds.has(profileId);
             return (
               <div
-                className={`connection-group ${active ? "active" : ""} ${workspace ? "connected" : ""}`}
+                className={`connection-group ${active ? "active" : ""} ${workspace ? "connected" : ""} ${expanded ? "expanded" : ""}`}
                 key={profileId}
                 style={{
                   "--connection-color": summary.profile.color ?? DEFAULT_CONNECTION_COLOR,
@@ -267,8 +290,11 @@ export default function App() {
                   onConnect={() => void handleConnect(profileId)}
                   onDisconnect={() => void handleDisconnect(profileId)}
                   onEdit={() => setModalProfile(summary.profile)}
+                  expandable={active && Boolean(workspace)}
+                  expanded={expanded}
+                  onToggleExpanded={() => toggleConnectionExpanded(profileId)}
                 />
-                {active && workspace ? (
+                {expanded && workspace ? (
                   <div className="workspace-panel">
                     <label className="field-label" htmlFor={`database-select-${profileId}`}>Database</label>
                     <select
@@ -343,13 +369,23 @@ export default function App() {
         <div className="tab-strip">
           {tabs.map((tab) => (
             <div
-              className={`tab ${tab.id === activeTabId ? "active" : ""}`}
+              className={`tab ${tab.id === activeTabId ? "active" : ""} ${tab.collapsed ? "collapsed" : ""}`}
               key={tab.id}
               style={{
                 "--tab-color": profiles.find((summary) => summary.profile.id === tab.profileId)?.profile.color ?? DEFAULT_CONNECTION_COLOR,
               } as CSSProperties}
             >
-              {renamingTabId === tab.id ? (
+              {tab.collapsed ? (
+                <button
+                  className="tab-expand"
+                  onClick={() => handleSetActiveTab(tab.id)}
+                  title={`Expand ${tab.title}`}
+                  aria-label={`Expand ${tab.title}`}
+                >
+                  <span className="tab-collapse-glyph" aria-hidden="true">↦</span>
+                  <span className="collapsed-tab-name">{tab.title}</span>
+                </button>
+              ) : renamingTabId === tab.id ? (
                 <input
                   className="tab-title-input"
                   autoFocus
@@ -377,7 +413,7 @@ export default function App() {
                   <span>{tab.title}</span>
                 </button>
               )}
-              {tab.kind === "query" ? (
+              {!tab.collapsed && tab.kind === "query" ? (
                 <button
                   className="tab-action tab-rename"
                   onClick={() => startRenamingTab(tab.id, tab.title)}
@@ -385,13 +421,13 @@ export default function App() {
                   aria-label={`Rename ${tab.title}`}
                 >✎</button>
               ) : null}
-              {tab.id === activeTabId ? (
+              {!tab.collapsed && tab.id === activeTabId ? (
                 <button
-                  className="tab-action tab-minimize"
-                  onClick={() => handleMinimizeTab(tab.id)}
-                  title={`Minimize ${tab.title}`}
-                  aria-label={`Minimize ${tab.title}`}
-                >−</button>
+                  className="tab-action tab-collapse"
+                  onClick={() => handleCollapseTab(tab.id)}
+                  title={`Collapse ${tab.title}`}
+                  aria-label={`Collapse ${tab.title}`}
+                >↤</button>
               ) : null}
               <button className="tab-close" onClick={() => handleCloseTab(tab.id)} aria-label={`Close ${tab.title}`}>×</button>
             </div>
@@ -453,6 +489,9 @@ function ConnectionItem({
   onConnect,
   onDisconnect,
   onEdit,
+  expandable,
+  expanded,
+  onToggleExpanded,
 }: {
   summary: ProfileSummary;
   connected: boolean;
@@ -461,6 +500,9 @@ function ConnectionItem({
   onConnect: () => void;
   onDisconnect: () => void;
   onEdit: () => void;
+  expandable: boolean;
+  expanded: boolean;
+  onToggleExpanded: () => void;
 }) {
   return (
     <div className={`connection-item ${active ? "active" : ""}`}>
@@ -473,6 +515,13 @@ function ConnectionItem({
         {connected ? <span className="connected-label">connected</span> : null}
       </button>
       <div className="connection-actions">
+        {expandable ? <button
+          className="icon-button subtle connection-toggle"
+          title={expanded ? "Collapse connection" : "Expand connection"}
+          aria-label={expanded ? "Collapse connection" : "Expand connection"}
+          aria-expanded={expanded}
+          onClick={onToggleExpanded}
+        >{expanded ? "⌃" : "⌄"}</button> : null}
         <button className="icon-button subtle" title={connected ? "Disconnect" : "Connect"} onClick={connected ? onDisconnect : onConnect}>{connected ? "●" : "▷"}</button>
         <button className="icon-button subtle" title="Edit connection" onClick={onEdit}>⋯</button>
       </div>
@@ -712,6 +761,16 @@ function ProfileModal({
   const [feedback, setFeedback] = useState<{ kind: "success" | "error" | "info"; message: string } | null>(null);
   const update = <K extends keyof SaveProfileInput>(key: K, value: SaveProfileInput[K]) => setForm((current) => ({ ...current, [key]: value }));
 
+  useEffect(() => {
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      onClose();
+    };
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [onClose]);
+
   const importConnectionUrl = (value: string) => {
     try {
       const imported = parsePostgresConnectionUrl(value);
@@ -759,9 +818,9 @@ function ProfileModal({
 
   return (
     <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <div className="modal-card">
+      <div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="connection-modal-title">
         <div className="modal-header">
-          <div><span className="eyebrow">POSTGRESQL</span><h2>{profile ? "Edit connection" : "New connection"}</h2></div>
+          <div><span className="eyebrow">POSTGRESQL</span><h2 id="connection-modal-title">{profile ? "Edit connection" : "New connection"}</h2></div>
           <button className="icon-button" onClick={onClose} aria-label="Close">×</button>
         </div>
         <div className="form-grid">

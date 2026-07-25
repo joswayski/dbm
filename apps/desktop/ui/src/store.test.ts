@@ -78,7 +78,7 @@ describe("DBM store", () => {
     expect(useDbmStore.getState().activeTabId).toBeNull();
   });
 
-  it("names, renames, and minimizes query tabs without closing them", () => {
+  it("names, renames, and collapses query tabs while activating the next open tab", () => {
     const store = useDbmStore.getState();
     store.openQuery("profile");
     store.openQuery("profile");
@@ -88,10 +88,15 @@ describe("DBM store", () => {
     expect(useDbmStore.getState().activeTabId).toBe(second.id);
 
     useDbmStore.getState().renameTab(second.id, "Revenue check");
-    useDbmStore.getState().minimizeTab(second.id);
+    useDbmStore.getState().collapseTab(second.id);
 
     expect(useDbmStore.getState().tabs.map((tab) => tab.title)).toEqual(["Query 1", "Revenue check"]);
-    expect(useDbmStore.getState().activeTabId).toBeNull();
+    expect(useDbmStore.getState().tabs[1].collapsed).toBe(true);
+    expect(useDbmStore.getState().activeTabId).toBe(first.id);
     expect(useDbmStore.getState().tabs).toHaveLength(2);
+
+    useDbmStore.getState().setActiveTab(second.id);
+    expect(useDbmStore.getState().tabs[1].collapsed).toBe(false);
+    expect(useDbmStore.getState().activeTabId).toBe(second.id);
   });
 });

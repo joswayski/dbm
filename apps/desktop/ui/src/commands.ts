@@ -287,6 +287,18 @@ export async function createCsvExportWriter(suggestedName: string): Promise<CsvE
   };
 }
 
+export async function openExportedFile(path: string): Promise<void> {
+  if (!inTauri()) return;
+  const { openPath } = await import("@tauri-apps/plugin-opener");
+  await openPath(path);
+}
+
+export async function revealExportedFile(path: string): Promise<void> {
+  if (!inTauri()) return;
+  const { revealItemInDir } = await import("@tauri-apps/plugin-opener");
+  await revealItemInDir(path);
+}
+
 function browserTableMetadata(schema: string, table: string): TableMetadata {
   return table === "orders"
     ? {

@@ -53,20 +53,26 @@ describe("App connection and query navigation", () => {
     expect(screen.getByRole("heading", { name: profile.name })).toBeInTheDocument();
     expect(within(topbar!).queryByRole("button", { name: "New query" })).not.toBeInTheDocument();
 
+    fireEvent.click(screen.getByRole("button", { name: "Collapse connection" }));
+    expect(screen.queryByLabelText("Database")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Expand connection" }));
+    await screen.findByLabelText("Database");
+
     const usersTable = await screen.findByRole("button", { name: "users" });
     fireEvent.click(usersTable);
     expect(usersTable).toHaveAttribute("aria-current", "page");
     expect(usersTable).toHaveClass("active");
-    expect(screen.getByRole("button", { name: "Minimize public.users" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Collapse public.users" })).toBeInTheDocument();
     expect(container.querySelector(".tab-color")).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Minimize public.users" }));
-    await waitFor(() => expect(screen.getByRole("heading", { name: profile.name })).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("button", { name: "public.users" }));
 
     fireEvent.click(within(tabStrip!).getByRole("button", { name: "New query" }));
     const queryTab = await screen.findByRole("button", { name: "Query 1" });
     expect(queryTab).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "public.users" }));
+    fireEvent.click(screen.getByRole("button", { name: "Collapse public.users" }));
+    expect(screen.getByRole("button", { name: "Expand public.users" }).closest(".tab")).toHaveClass("collapsed");
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Query 1" })).toBeInTheDocument());
 
     fireEvent.click(screen.getByRole("button", { name: "Rename Query 1" }));
     const renameInput = screen.getByRole("textbox", { name: "Rename Query 1" });
@@ -79,8 +85,18 @@ describe("App connection and query navigation", () => {
     expect(screen.getByRole("button", { name: "Revenue audit" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Revenue audit" }));
-    fireEvent.click(screen.getByRole("button", { name: "Minimize Revenue audit" }));
-    await waitFor(() => expect(screen.getByRole("heading", { name: profile.name })).toBeInTheDocument());
-    expect(screen.getByRole("button", { name: "Revenue audit" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Collapse Revenue audit" }));
+    await waitFor(() => expect(screen.getByRole("heading", { name: "public.users" })).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "Expand Revenue audit" }).closest(".tab")).toHaveClass("collapsed");
+  });
+
+  it("closes the connection popup with Escape", () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "New connection" }));
+    expect(screen.getByRole("dialog", { name: "New connection" })).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "New connection" })).not.toBeInTheDocument();
   });
 });

@@ -193,4 +193,5 @@ export type Tab = {
   schema?: string;
   table?: string;
   sql?: string;
+  collapsed?: boolean;
 };

@@ -19,7 +19,7 @@ type DbmStore = {
   openTable: (profileId: string, schema: string, table: string) => void;
   openQuery: (profileId: string) => void;
   renameTab: (tabId: string, title: string) => void;
-  minimizeTab: (tabId: string) => void;
+  collapseTab: (tabId: string) => void;
   closeTab: (tabId: string) => void;
   setActiveTab: (tabId: string) => void;
 };
@@ -91,7 +91,11 @@ export const useDbmStore = create<DbmStore>((set, get) => ({
   openTable: (profileId, schema, table) => {
     const existing = get().tabs.find((tab) => tab.kind === "table" && tab.profileId === profileId && tab.schema === schema && tab.table === table);
     if (existing) {
-      set({ activeTabId: existing.id, activeProfileId: profileId });
+      set((state) => ({
+        tabs: state.tabs.map((tab) => tab.id === existing.id ? { ...tab, collapsed: false } : tab),
+        activeTabId: existing.id,
+        activeProfileId: profileId,
+      }));
       return;
     }
     const tab: Tab = { id: crypto.randomUUID(), title: `${schema}.${table}`, kind: "table", profileId, schema, table };
@@ -121,22 +125,42 @@ export const useDbmStore = create<DbmStore>((set, get) => ({
       tabs: state.tabs.map((tab) => tab.id === tabId ? { ...tab, title: nextTitle } : tab),
     }));
   },
-  minimizeTab: (tabId) => {
-    set((state) => state.activeTabId === tabId ? { activeTabId: null } : state);
+  collapseTab: (tabId) => {
+    const { tabs, activeTabId } = get();
+    const index = tabs.findIndex((tab) => tab.id === tabId);
+    if (index < 0) return;
+    const nextActiveTab = activeTabId === tabId ? adjacentTab(tabs, index) : null;
+    set((state) => ({
+      tabs: state.tabs.map((tab) => {
+        if (tab.id === tabId) return { ...tab, collapsed: true };
+        if (tab.id === nextActiveTab?.id) return { ...tab, collapsed: false };
+        return tab;
+      }),
+      activeTabId: activeTabId === tabId ? nextActiveTab?.id ?? null : activeTabId,
+      activeProfileId: nextActiveTab?.profileId ?? state.activeProfileId,
+    }));
   },
   closeTab: (tabId) => {
     const { tabs, activeTabId } = get();
     const index = tabs.findIndex((tab) => tab.id === tabId);
     const nextTabs = tabs.filter((tab) => tab.id !== tabId);
-    const nextActiveTab = activeTabId === tabId ? nextTabs[Math.max(index - 1, 0)] ?? null : null;
+    const nextActiveTab = activeTabId === tabId ? adjacentTab(tabs, index) : null;
     set((state) => ({
-      tabs: nextTabs,
+      tabs: nextTabs.map((tab) => tab.id === nextActiveTab?.id ? { ...tab, collapsed: false } : tab),
       activeTabId: activeTabId === tabId ? nextActiveTab?.id ?? null : activeTabId,
       activeProfileId: nextActiveTab?.profileId ?? state.activeProfileId,
     }));
   },
   setActiveTab: (tabId) => {
     const tab = get().tabs.find((candidate) => candidate.id === tabId);
-    if (tab) set({ activeTabId: tabId, activeProfileId: tab.profileId });
+    if (tab) set((state) => ({
+      tabs: state.tabs.map((candidate) => candidate.id === tabId ? { ...candidate, collapsed: false } : candidate),
+      activeTabId: tabId,
+      activeProfileId: tab.profileId,
+    }));
   },
 }));
+
+function adjacentTab(tabs: Tab[], index: number): Tab | null {
+  return tabs.slice(index + 1)[0] ?? tabs.slice(0, index).at(-1) ?? null;
+}

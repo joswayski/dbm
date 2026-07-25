@@ -8,6 +8,8 @@
     "dialog:allow-save",
     "fs:allow-open",
     "fs:allow-remove",
-    "fs:allow-write"
+    "fs:allow-write",
+    "opener:allow-open-path",
+    "opener:allow-reveal-item-in-dir"
   ]
 }
