@@ -82,7 +82,17 @@ type InlineDiffPart = {
   changed: boolean;
 };
 
-export function TableView({ profileId, schema, table }: { profileId: string; schema: string; table: string }) {
+export function TableView({
+  profileId,
+  schema,
+  table,
+  onPendingChange,
+}: {
+  profileId: string;
+  schema: string;
+  table: string;
+  onPendingChange?: (count: number) => void;
+}) {
   const [page, setPage] = useState<TablePage | null>(null);
   const [pageIndex, setPageIndex] = useState(0);
   const [previewLimit, setPreviewLimit] = useState(MAX_PREVIEW_ROWS);
@@ -229,6 +239,12 @@ export function TableView({ profileId, schema, table }: { profileId: string; sch
   const hasFiltersToClear = appliedFilters.length > 0 ||
     filterDrafts.length > 1 ||
     filterDrafts.some((filter) => !filterNeedsValue(filter.operator) || filter.value.trim().length > 0);
+
+  useEffect(() => {
+    onPendingChange?.(pendingCount);
+  }, [onPendingChange, pendingCount]);
+
+  useEffect(() => () => onPendingChange?.(0), [onPendingChange]);
 
   const columnWidth = (column: TableColumn) => {
     if (collapsedColumns.has(column.name)) return COLLAPSED_COLUMN_WIDTH;
@@ -399,6 +415,15 @@ export function TableView({ profileId, schema, table }: { profileId: string; sch
   const applyPreviewLimit = () => {
     const parsed = Number(limitInput);
     const next = Number.isFinite(parsed) ? Math.min(MAX_PREVIEW_ROWS, Math.max(1, Math.floor(parsed))) : previewLimit;
+    setLimitInput(String(next));
+    setPreviewLimit(next);
+    setPageIndex(0);
+  };
+
+  const stepPreviewLimit = (amount: number) => {
+    const parsed = Number(limitInput);
+    const current = Number.isFinite(parsed) ? Math.floor(parsed) : previewLimit;
+    const next = Math.min(MAX_PREVIEW_ROWS, Math.max(1, current + amount));
     setLimitInput(String(next));
     setPreviewLimit(next);
     setPageIndex(0);
@@ -604,7 +629,13 @@ export function TableView({ profileId, schema, table }: { profileId: string; sch
         <div className="table-query-controls">
           <label>
             <span>Preview limit</span>
-            <input className="text-input limit-input" type="number" min="1" max={MAX_PREVIEW_ROWS} value={limitInput} onChange={(event) => setLimitInput(event.target.value)} onBlur={applyPreviewLimit} onKeyDown={(event) => { if (event.key === "Enter") applyPreviewLimit(); }} />
+            <span className="limit-input-wrap">
+              <input className="text-input limit-input" aria-label="Preview limit" type="number" min="1" max={MAX_PREVIEW_ROWS} value={limitInput} onChange={(event) => setLimitInput(event.target.value)} onBlur={applyPreviewLimit} onKeyDown={(event) => { if (event.key === "Enter") applyPreviewLimit(); }} />
+              <span className="limit-stepper">
+                <button type="button" aria-label="Increase preview limit" onMouseDown={(event) => event.preventDefault()} onClick={() => stepPreviewLimit(1)}>▲</button>
+                <button type="button" aria-label="Decrease preview limit" onMouseDown={(event) => event.preventDefault()} onClick={() => stepPreviewLimit(-1)}>▼</button>
+              </span>
+            </span>
           </label>
           <label>
             <span>Sort by</span>

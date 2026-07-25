@@ -24,6 +24,11 @@ const MIN_SIDEBAR_WIDTH = 280;
 const MAX_SIDEBAR_WIDTH = 480;
 const COLLAPSED_SIDEBAR_WIDTH = 48;
 const QUERY_HISTORY_UPDATED_EVENT = "dbm:query-history-updated";
+const SQL_IDENTIFIER = String.raw`(?:"(?:[^"]|"")*"|[A-Za-z_][A-Za-z0-9_$]*)`;
+const SIMPLE_FULL_TABLE_SELECT = new RegExp(
+  String.raw`^\s*select\s+\*\s+from\s+(${SQL_IDENTIFIER})(?:\s*\.\s*(${SQL_IDENTIFIER}))?\s*;?\s*$`,
+  "i",
+);
 
 type QueryHistoryUpdatedDetail = {
   profileId: string;
@@ -483,7 +488,13 @@ export default function App() {
               {shouldMount && tab.kind === "table" && tab.schema && tab.table ? (
                 <TableView profileId={tab.profileId} schema={tab.schema} table={tab.table} />
               ) : shouldMount && tab.kind === "query" ? (
-                <QueryView profileId={tab.profileId} database={database} initialSql={tab.sql ?? "SELECT now();"} title={tab.title} />
+                <QueryView
+                  profileId={tab.profileId}
+                  database={database}
+                  schemaTree={schemas[tab.profileId] ?? []}
+                  initialSql={tab.sql ?? "SELECT now();"}
+                  title={tab.title}
+                />
               ) : null}
             </div>;
           })}
@@ -675,19 +686,24 @@ function activeSqlDecorations(view: EditorView): DecorationSet {
 export function QueryView({
   profileId,
   database = "postgres",
+  schemaTree = [],
   initialSql,
   title = "Query",
 }: {
   profileId: string;
   database?: string;
+  schemaTree?: SchemaNode[];
   initialSql: string;
   title?: string;
 }) {
   const [sqlText, setSqlText] = useState(initialSql);
   const [response, setResponse] = useState<QueryResponse | null>(null);
+  const [executedSql, setExecutedSql] = useState<string | null>(null);
+  const [executionRevision, setExecutionRevision] = useState(0);
   const [history, setHistory] = useState<QueryHistoryEntry[]>([]);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [embeddedPendingCount, setEmbeddedPendingCount] = useState(0);
   const [executionTarget, setExecutionTarget] = useState<SqlExecutionTarget | null>(() => sqlExecutionTarget(initialSql, 0, 0));
   const editorRef = useRef<ReactCodeMirrorRef>(null);
 
@@ -720,6 +736,10 @@ export function QueryView({
 
   const run = useCallback(async (statement?: string) => {
     if (running) return;
+    if (embeddedPendingCount > 0) {
+      setError("Save or discard the pending table changes before running another query.");
+      return;
+    }
     const executableSql = (statement ?? sqlText).trim();
     if (!executableSql) return;
     if (requiresConfirmation(executableSql) && !window.confirm("This query may change or remove many rows. Run it anyway?")) return;
@@ -728,6 +748,8 @@ export function QueryView({
     try {
       const next = await commands.runQuery({ profileId, sql: executableSql, maxRows: 10_000 });
       setResponse(next);
+      setExecutedSql(executableSql);
+      setExecutionRevision((current) => current + 1);
     } catch (reason) {
       setError(errorMessage(reason));
     } finally {
@@ -737,7 +759,7 @@ export function QueryView({
       ));
       setRunning(false);
     }
-  }, [database, profileId, running, sqlText]);
+  }, [database, embeddedPendingCount, profileId, running, sqlText]);
 
   const selectedOrCurrentStatement = useCallback((view?: EditorView) => {
     if (!view) return sqlText.trim();
@@ -765,6 +787,7 @@ export function QueryView({
   };
 
   const runLabel = executionTarget?.kind === "selection" ? "Run selection" : "Run statement";
+  const editableTable = executedSql ? resolveFullTableSelect(executedSql, schemaTree) : null;
 
   return (
     <div className="query-view">
@@ -797,7 +820,31 @@ export function QueryView({
         <aside className="history-panel"><div className="panel-title">History <span>{history.length}</span></div>{history.length === 0 ? <p className="muted">Run a query to start history.</p> : <div className="history-list">{history.slice(0, 100).map((entry) => <button className="history-item" key={entry.id} onClick={() => setSqlText(entry.sql)}><span>{entry.success ? "✓" : "!"}</span><span className="history-sql">{entry.sql.replace(/\s+/g, " ").slice(0, 70)}</span><small>{new Date(entry.executedAt).toLocaleTimeString()}</small></button>)}</div>}</aside>
       </div>
       {error ? <div className="inline-error dismissible-message"><span>{error}</span><button onClick={() => setError(null)} aria-label="Dismiss message">×</button></div> : null}
-      {response ? <div className="result-panel"><div className="result-meta"><span>{response.rowCount} rows{response.affectedRows !== null ? ` · ${response.affectedRows} affected` : ""} · {response.durationMs} ms</span>{response.truncated ? <span className="warning-chip">truncated</span> : null}</div><ResultTable columns={response.columns.map((column) => column.name)} rows={response.rows} /></div> : <div className="query-empty">Results will appear here.</div>}
+      {response ? editableTable ? <div className="result-panel editable-query-result">
+        <div className="result-meta">
+          <span>Table viewer · query completed in {response.durationMs} ms</span>
+          <span className="editable-result-chip">Editable table</span>
+        </div>
+        <TableView
+          key={`${profileId}:${editableTable.schema}:${editableTable.table}:${executionRevision}`}
+          profileId={profileId}
+          schema={editableTable.schema}
+          table={editableTable.table}
+          onPendingChange={setEmbeddedPendingCount}
+        />
+      </div> : <div className="result-panel">
+        <div className="result-meta">
+          <span>{response.rowCount} rows{response.affectedRows !== null ? ` · ${response.affectedRows} affected` : ""} · {response.durationMs} ms</span>
+          <span className="result-meta-actions">
+            {response.truncated ? <span className="warning-chip">truncated</span> : null}
+            {response.columns.length > 0 ? <span
+              className="read-only-result-chip"
+              title="This query does not resolve to one complete table, so DBM cannot safely map edits back to rows."
+            >Read-only result</span> : null}
+          </span>
+        </div>
+        <ResultTable columns={response.columns.map((column) => column.name)} rows={response.rows} />
+      </div> : <div className="query-empty">Results will appear here.</div>}
     </div>
   );
 }
@@ -1026,6 +1073,35 @@ function summarizeSchemaObjects(labels: string[]): string {
   const visible = labels.slice(0, 3);
   const remainder = labels.length - visible.length;
   return `${labels.length} objects: ${visible.join(", ")}${remainder > 0 ? `, and ${remainder} more` : ""}`;
+}
+
+function resolveFullTableSelect(sqlText: string, schemaTree: SchemaNode[]): { schema: string; table: string } | null {
+  const match = SIMPLE_FULL_TABLE_SELECT.exec(sqlText);
+  if (!match) return null;
+  const firstIdentifier = decodeSqlIdentifier(match[1]);
+  const secondIdentifier = match[2] ? decodeSqlIdentifier(match[2]) : null;
+  const requestedSchema = secondIdentifier ? firstIdentifier : null;
+  const requestedTable = secondIdentifier ?? firstIdentifier;
+  const matches: Array<{ schema: string; table: string }> = [];
+  const visit = (node: SchemaNode) => {
+    if (
+      node.kind === "table" &&
+      node.schema &&
+      node.table === requestedTable &&
+      (!requestedSchema || node.schema === requestedSchema)
+    ) {
+      matches.push({ schema: node.schema, table: node.table });
+    }
+    node.children.forEach(visit);
+  };
+  schemaTree.forEach(visit);
+  return matches.length === 1 ? matches[0] : null;
+}
+
+function decodeSqlIdentifier(identifier: string): string {
+  return identifier.startsWith("\"")
+    ? identifier.slice(1, -1).replaceAll("\"\"", "\"")
+    : identifier.toLowerCase();
 }
 
 function errorMessage(reason: unknown): string {

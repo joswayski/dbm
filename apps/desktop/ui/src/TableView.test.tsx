@@ -97,6 +97,12 @@ describe("TableView", () => {
     render(<TableView profileId="preview" schema="public" table="users" />);
     await screen.findByText("person1@example.com");
 
+    const previewLimit = screen.getByRole("spinbutton", { name: "Preview limit" });
+    fireEvent.click(screen.getByRole("button", { name: "Decrease preview limit" }));
+    expect(previewLimit).toHaveValue(199);
+    fireEvent.click(screen.getByRole("button", { name: "Increase preview limit" }));
+    expect(previewLimit).toHaveValue(200);
+
     const sort = screen.getByRole("combobox", { name: "Sort by" });
     expect(sort).toHaveValue("id");
     expect(within(sort).getAllByRole("option", { name: /id/ })).toHaveLength(1);
