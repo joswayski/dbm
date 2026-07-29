@@ -6,6 +6,7 @@ mod models;
 mod postgres;
 mod state;
 mod storage;
+mod updates;
 
 use chrono::Utc;
 use error::{AppError, AppResult};
@@ -282,7 +283,13 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(state)
+        .manage(updates::UpdateCoordinator::default())
+        .setup(|app| {
+            updates::initialize(app.handle());
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             list_profiles,
             save_profile,
@@ -298,6 +305,9 @@ pub fn run() {
             cancel_query,
             list_query_history,
             apply_table_mutations,
+            updates::get_update_status,
+            updates::check_for_updates,
+            updates::install_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running DBM");

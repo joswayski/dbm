@@ -17,7 +17,7 @@ publish the draft until every public-release gate below is enforced and passes.
 | macOS | Sign with a Developer ID Application certificate, notarize with Apple, staple the notarization ticket, and validate the DMG on a clean Mac | CI signs and notarizes the app, notarizes and staples the DMG, and verifies both; clean-Mac validation remains manual |
 | Windows | Authenticode-sign and RFC 3161-timestamp both `dbm.exe` and the NSIS installer with a publicly trusted code-signing identity | Not configured in CI |
 | Linux | Publish the `.deb` and AppImage with `SHA256SUMS` and GitHub build-provenance attestations | Packages are built; integrity metadata is not configured |
-| All platforms | Tie every artifact to the tagged commit, reject an incomplete draft, and test installation on clean supported systems | Not yet enforced by the release workflow |
+| All platforms | Tie every artifact to the tagged commit, reject an incomplete draft, and test installation on clean supported systems | The updater manifest is checked for all three platforms; the complete publication gate is not yet enforced |
 
 Tauri updater signatures, Apple signatures, Windows Authenticode signatures,
 and GitHub attestations solve different problems. One does not replace another:
@@ -27,11 +27,6 @@ and GitHub attestations solve different problems. One does not replace another:
 - A GitHub attestation establishes which repository, commit, and workflow built
   a downloaded artifact.
 - `SHA256SUMS` detects accidental or malicious file changes after publication.
-
-DBM does not currently enable Tauri's updater plugin or create updater
-artifacts, so it does not need `TAURI_SIGNING_PRIVATE_KEY` or
-`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. If an updater is added later, generate a
-dedicated DBM updater keypair rather than reusing Captures' key.
 
 ## GitHub release environment
 
@@ -43,6 +38,34 @@ can access signing credentials.
 Keep private keys and passwords in environment secrets. Store non-secret Azure
 resource identifiers as environment variables. Do not commit credentials,
 exported certificates, or temporary signing files.
+
+## Updater signing
+
+DBM uses a dedicated Tauri updater keypair; it does not reuse Captures' key.
+The updater public key is committed in `tauri.conf.json`. Add these private
+values to the `release` environment:
+
+| Secret | Value |
+| --- | --- |
+| `TAURI_SIGNING_PRIVATE_KEY` | Complete contents of DBM's dedicated updater private key |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Password protecting that private key |
+
+Back up the private key and its password separately in encrypted storage.
+Losing the private key prevents every installed DBM release from authenticating
+future updates. Do not replace the public key after shipping unless an existing
+trusted release first implements a deliberate key rotation.
+
+Release tags must use `vMAJOR.MINOR.PATCH`. The workflow injects that version
+into the packaged app, creates and signs updater artifacts for macOS, Windows,
+and AppImage, and generates `latest.json`. A final job rejects a manifest that
+does not contain matching signed entries for all three platforms. Local builds
+use `tauri.local.conf.json` and omit updater artifacts unless an updater private
+key is explicitly supplied.
+
+The update endpoint uses GitHub's latest release URL. Keep the release as a
+draft while validating it, then publish it as a normal release rather than a
+prerelease. AppImage installations can update in place; `.deb` installations
+open the matching GitHub Release for a manual package update.
 
 ## macOS signing and notarization
 
@@ -215,9 +238,9 @@ not a substitute for signing APT repository metadata.
    replacement binaries.
 4. Require successful macOS signing/notarization, Windows Authenticode signing,
    and Linux integrity/provenance jobs.
-5. Confirm the draft contains the DMG, NSIS installer, `.deb`, AppImage, and
-   `SHA256SUMS`, and that GitHub has a verifiable attestation for every
-   artifact.
+5. Confirm the draft contains the DMG, NSIS installer, `.deb`, AppImage,
+   updater signatures, a complete `latest.json`, and `SHA256SUMS`, and that
+   GitHub has a verifiable attestation for every artifact.
 6. Perform the clean-machine installation checks for macOS, Windows, and
    Ubuntu.
 7. Publish the draft only after every gate passes. If any platform fails,
@@ -228,6 +251,7 @@ not a substitute for signing APT repository metadata.
 - [Apple: Developer ID certificates](https://developer.apple.com/help/account/certificates/create-developer-id-certificates)
 - [Apple: notarizing macOS software](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution)
 - [Tauri: macOS code signing](https://v2.tauri.app/distribute/sign/macos/)
+- [Tauri: updater](https://v2.tauri.app/plugin/updater/)
 - [Microsoft: set up Artifact Signing](https://learn.microsoft.com/azure/artifact-signing/quickstart)
 - [Microsoft: Artifact Signing integrations](https://learn.microsoft.com/azure/artifact-signing/how-to-signing-integrations)
 - [Azure: Artifact Signing GitHub Action](https://github.com/Azure/artifact-signing-action)

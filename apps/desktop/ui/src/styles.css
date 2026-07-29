@@ -101,6 +101,11 @@ body.resizing-sidebar, body.resizing-sidebar * { cursor: col-resize !important; 
 .connection-identity strong, .connection-identity small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .connection-identity strong { color: var(--text); font-size: 12px; }
 .connection-identity small { margin-top: 3px; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9px; }
+.update-control { display: flex; align-items: center; gap: 7px; margin-left: auto; }
+.update-control button { padding: 6px 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: var(--muted); font-size: 10px; }
+.update-control button:hover:not(:disabled) { border-color: var(--accent); color: var(--text); }
+.update-control button.update-available { border-color: color-mix(in srgb, var(--accent) 65%, var(--border)); background: color-mix(in srgb, var(--accent) 12%, var(--panel)); color: var(--accent); }
+.update-control-error { display: grid; width: 17px; height: 17px; place-items: center; border-radius: 50%; background: color-mix(in srgb, var(--danger) 18%, transparent); color: var(--danger); font-size: 10px; font-weight: 800; }
 .topbar-actions, .toolbar-actions, .modal-actions-right { display: flex; align-items: center; gap: 8px; }
 .primary-button, .secondary-button, .danger-button { height: 32px; padding: 0 12px; border-radius: 6px; font-size: 11px; font-weight: 650; }
 .primary-button { border: 1px solid var(--accent-strong); background: var(--accent-strong); color: #03121d; }

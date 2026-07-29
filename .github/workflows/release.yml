@@ -21,6 +21,10 @@ jobs:
           - os: ubuntu-24.04
             args: "--bundles deb,appimage"
     runs-on: ${{ matrix.os }}
+    env:
+      DBM_OFFICIAL_RELEASE: "1"
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -44,6 +48,8 @@ jobs:
             librsvg2-dev \
             pkg-config
       - run: npm ci
+      - name: Prepare the release version and updater credentials
+        run: node scripts/prepare-release-build.mjs "${{ github.ref_name }}"
       - name: Prepare Apple signing and notarization credentials
         if: runner.os == 'macOS'
         env:
@@ -120,8 +126,11 @@ jobs:
           releaseName: DBM ${{ github.ref_name }}
           releaseBody: Cross-platform DBM desktop installers.
           releaseDraft: true
-          prerelease: true
-          args: ${{ matrix.args }}
+          prerelease: false
+          retryAttempts: 5
+          uploadUpdaterJson: true
+          updaterJsonPreferNsis: true
+          args: ${{ matrix.args }} --config src-tauri/tauri.release.conf.json
       - name: Notarize, staple, and validate the macOS release
         if: runner.os == 'macOS'
         env:
@@ -157,3 +166,38 @@ jobs:
           xcrun stapler validate "$dmg"
 
           gh release upload "$GITHUB_REF_NAME" "$dmg" --clobber
+
+  validate-updater:
+    name: Validate updater manifest
+    needs: publish
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download and validate latest.json
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          version="${TAG#v}"
+          gh release download "$TAG" --pattern latest.json
+          jq -e \
+            --arg version "$version" \
+            '
+              .version == $version
+              and (
+                [
+                  .platforms["darwin-aarch64"],
+                  .platforms["windows-x86_64"],
+                  .platforms["linux-x86_64"]
+                ]
+                | all(
+                    type == "object"
+                    and (.url | type == "string" and length > 0)
+                    and (.signature | type == "string" and length > 0)
+                  )
+              )
+            ' \
+            latest.json \
+            >/dev/null

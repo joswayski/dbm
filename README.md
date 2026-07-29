@@ -65,7 +65,10 @@ On Linux, the build creates `.deb` and AppImage packages under
 
 One local build only targets the current operating system. Pushing a version
 tag runs the release workflow on macOS, Windows, and Linux and creates a draft
-GitHub release with all three platforms' installers.
+GitHub release with all three platforms' installers, signed updater artifacts,
+and a validated `latest.json` manifest. Official builds check that manifest
+from the top bar and install authenticated updates in place where the platform
+supports it.
 
 Creating installers is not the same as preparing a public release. Public
 publishing also requires Developer ID signing and notarization on macOS,
@@ -83,6 +86,7 @@ Passwords are stored in the operating system credential store when available.
 - Local connection profiles and query history in an application SQLite database.
 - Passwords through the macOS Keychain, Windows Credential Manager, or Linux
   secret service via `keyring`.
+- Signed in-app updates from published GitHub Releases.
 - Database list, schemas, tables/views, configurable previews up to 200 rows,
   structured multi-filtering, ordering, visible-page CSV copy, and full filtered
   CSV export.

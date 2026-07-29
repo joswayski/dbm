@@ -195,3 +195,29 @@ export type Tab = {
   sql?: string;
   collapsed?: boolean;
 };
+
+export type UpdateStatus =
+  | {
+      state: "idle" | "checking" | "up_to_date";
+      current_version: string;
+    }
+  | {
+      state: "available";
+      current_version: string;
+      version: string;
+      notes: string | null;
+      installable: boolean;
+      manual_download_url: string | null;
+    }
+  | {
+      state: "downloading";
+      current_version: string;
+      version: string;
+      downloaded: number;
+      total: number | null;
+    }
+  | {
+      state: "error";
+      current_version: string;
+      message: string;
+    };
