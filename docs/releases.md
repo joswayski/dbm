@@ -62,10 +62,12 @@ does not contain matching signed entries for all three platforms. Local builds
 use `tauri.local.conf.json` and omit updater artifacts unless an updater private
 key is explicitly supplied.
 
-The update endpoint uses GitHub's latest release URL. Keep the release as a
-draft while validating it, then publish it as a normal release rather than a
-prerelease. AppImage installations can update in place; `.deb` installations
-open the matching GitHub Release for a manual package update.
+The update endpoint uses GitHub's latest release URL. The workflow confirms
+every generated release remains a draft and never publishes automatically.
+Drafts are intentionally absent from the public updater endpoint. When DBM is
+ready to launch, publish a validated draft manually as a normal release rather
+than a prerelease. AppImage installations can update in place; `.deb`
+installations open the matching GitHub Release for a manual package update.
 
 ## macOS signing and notarization
 
@@ -243,7 +245,8 @@ not a substitute for signing APT repository metadata.
    GitHub has a verifiable attestation for every artifact.
 6. Perform the clean-machine installation checks for macOS, Windows, and
    Ubuntu.
-7. Publish the draft only after every gate passes. If any platform fails,
+7. Leave the draft unpublished while DBM is pre-launch. After launch approval,
+   publish it manually only when every gate passes. If any platform fails,
    delete or replace the incomplete draft before retrying.
 
 ## References

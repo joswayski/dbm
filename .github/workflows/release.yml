@@ -8,7 +8,8 @@ permissions:
   contents: write
 
 jobs:
-  publish:
+  build_draft:
+    name: Build draft (${{ matrix.os }})
     environment: release
     strategy:
       fail-fast: false
@@ -167,9 +168,9 @@ jobs:
 
           gh release upload "$GITHUB_REF_NAME" "$dmg" --clobber
 
-  validate-updater:
-    name: Validate updater manifest
-    needs: publish
+  validate_updater:
+    name: Validate draft updater manifest
+    needs: build_draft
     runs-on: ubuntu-24.04
     steps:
       - name: Download and validate latest.json
@@ -201,3 +202,8 @@ jobs:
             ' \
             latest.json \
             >/dev/null
+
+          if [[ "$(gh release view "$TAG" --json isDraft --jq .isDraft)" != "true" ]]; then
+            echo "Release $TAG was unexpectedly published." >&2
+            exit 1
+          fi
