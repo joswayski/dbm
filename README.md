@@ -67,6 +67,13 @@ One local build only targets the current operating system. Pushing a version
 tag runs the release workflow on macOS, Windows, and Linux and creates a draft
 GitHub release with all three platforms' installers.
 
+Creating installers is not the same as preparing a public release. Public
+publishing also requires Developer ID signing and notarization on macOS,
+Authenticode signing on Windows, and checksums plus build-provenance
+attestations for every downloadable artifact. The required account setup,
+workflow gates, and clean-machine acceptance checks are documented in
+[docs/releases.md](docs/releases.md).
+
 DBM never uploads connection profiles, query history, or database results.
 Passwords are stored in the operating system credential store when available.
 
