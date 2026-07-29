@@ -16,6 +16,7 @@ import type {
   TablePage,
   TablePageRequest,
   TableMetadata,
+  UpdateStatus,
   WorkspaceInfo,
 } from "./types";
 
@@ -36,6 +37,34 @@ async function call<T>(command: string, args: Record<string, unknown>, fallback:
     return invoke<T>(command, args);
   }
   return fallback();
+}
+
+export function getUpdateStatus(): Promise<UpdateStatus> {
+  return call("get_update_status", {}, () => ({
+    state: "idle",
+    current_version: "0.1.0",
+  }));
+}
+
+export function checkForUpdates(): Promise<UpdateStatus> {
+  return call("check_for_updates", {}, () => ({
+    state: "up_to_date",
+    current_version: "0.1.0",
+  }));
+}
+
+export function installUpdate(): Promise<void> {
+  return call("install_update", {}, () => {
+    throw new Error("Updates can be installed only from the DBM desktop app.");
+  });
+}
+
+export async function listenForUpdateStatus(
+  onStatus: (status: UpdateStatus) => void,
+): Promise<() => void> {
+  if (!inTauri()) return () => undefined;
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen<UpdateStatus>("dbm:update-status-changed", ({ payload }) => onStatus(payload));
 }
 
 export function listProfiles(): Promise<ProfileSummary[]> {

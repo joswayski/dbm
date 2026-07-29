@@ -133,6 +133,31 @@ describe("App connection and query navigation", () => {
     expect(screen.queryByRole("dialog", { name: "New connection" })).not.toBeInTheDocument();
   });
 
+  it("checks for a signed update from the top bar", async () => {
+    vi.spyOn(commands, "getUpdateStatus").mockResolvedValue({
+      state: "idle",
+      current_version: "0.1.0",
+    });
+    vi.spyOn(commands, "listenForUpdateStatus").mockResolvedValue(() => undefined);
+    const check = vi.spyOn(commands, "checkForUpdates").mockResolvedValue({
+      state: "available",
+      current_version: "0.1.0",
+      version: "0.2.0",
+      notes: "A focused update.",
+      installable: true,
+      manual_download_url: null,
+    });
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Check for updates" }));
+
+    await waitFor(() => expect(check).toHaveBeenCalledOnce());
+    expect(screen.getByRole("button", { name: "Update to 0.2.0" })).toHaveAttribute(
+      "title",
+      "A focused update.",
+    );
+  });
+
   it("tests Save & connect before persisting the profile", async () => {
     const testProfile = vi.spyOn(commands, "testProfile").mockRejectedValueOnce(new Error("Connection refused"));
     const saveProfile = vi.spyOn(commands, "saveProfile");

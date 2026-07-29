@@ -280,6 +280,9 @@ if (!npmCli) {
 
 const args = ["run", "tauri:build", "--workspace", "@dbm/desktop"];
 const tauriArgs = process.argv.slice(2);
+if (!environment.TAURI_SIGNING_PRIVATE_KEY) {
+  tauriArgs.unshift("--config", "src-tauri/tauri.local.conf.json");
+}
 const hasBundleOverride = tauriArgs.some(
   (argument) =>
     argument === "--bundles" ||

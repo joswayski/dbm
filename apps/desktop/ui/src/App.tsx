@@ -15,6 +15,7 @@ import type {
   QueryResponse,
   SaveProfileInput,
   SchemaNode,
+  UpdateStatus,
 } from "./types";
 
 const DEFAULT_CONNECTION_COLOR = "#38bdf8";
@@ -400,6 +401,7 @@ export default function App() {
               </span>
             </div>
           ) : <div className="breadcrumb">No active connection</div>}
+          <UpdateControl />
         </header>
         {error ? <div className="error-banner" role="alert"><span>{error}</span><button onClick={() => setError(null)} aria-label="Dismiss error">×</button></div> : null}
         <div className="tab-strip">
@@ -526,6 +528,83 @@ export default function App() {
         <span>{toast.message}</span>
         <button onClick={() => setToast(null)} aria-label="Dismiss notification">×</button>
       </div> : null}
+    </div>
+  );
+}
+
+function UpdateControl() {
+  const [status, setStatus] = useState<UpdateStatus | null>(null);
+  const [actionError, setActionError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    let unlisten: (() => void) | undefined;
+    void commands.getUpdateStatus()
+      .then((next) => {
+        if (active) setStatus(next);
+      })
+      .catch(() => undefined);
+    void commands.listenForUpdateStatus((next) => {
+      if (active) setStatus(next);
+    }).then((dispose) => {
+      if (active) unlisten = dispose;
+      else dispose();
+    }).catch(() => undefined);
+    return () => {
+      active = false;
+      unlisten?.();
+    };
+  }, []);
+
+  const run = async () => {
+    setActionError("");
+    try {
+      if (status?.state === "available") {
+        if (status.installable) {
+          const confirmed = window.confirm(
+            `Install DBM ${status.version} and restart now? Unsaved query text and pending table edits will be lost.`,
+          );
+          if (!confirmed) return;
+        }
+        await commands.installUpdate();
+      } else {
+        setStatus(await commands.checkForUpdates());
+      }
+    } catch (reason) {
+      setActionError(errorMessage(reason));
+    }
+  };
+
+  const downloading = status?.state === "downloading";
+  const progress = downloading && status.total
+    ? Math.min(100, Math.round((status.downloaded / status.total) * 100))
+    : null;
+  const label = status?.state === "checking"
+    ? "Checking…"
+    : status?.state === "available"
+      ? status.installable ? `Update to ${status.version}` : `Download ${status.version}`
+      : downloading
+        ? progress === null ? "Installing…" : `Installing… ${progress}%`
+        : status?.state === "up_to_date"
+          ? "Up to date"
+          : status?.state === "error" || actionError
+            ? "Retry update"
+            : "Check for updates";
+  const detail = actionError ||
+    (status?.state === "error" ? status.message : status?.state === "available" ? status.notes : "");
+
+  return (
+    <div className="update-control">
+      <button
+        type="button"
+        className={status?.state === "available" ? "update-available" : ""}
+        disabled={status?.state === "checking" || downloading}
+        onClick={() => void run()}
+        title={detail || `Installed version ${status?.current_version ?? "…"}`}
+      >
+        {label}
+      </button>
+      {actionError ? <span className="update-control-error" role="alert" title={actionError}>!</span> : null}
     </div>
   );
 }

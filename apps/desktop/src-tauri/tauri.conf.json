@@ -27,6 +27,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/icon.png",
       "icons/icon.icns",
@@ -36,5 +37,16 @@
     "shortDescription": "A focused, private database manager",
     "longDescription": "DBM is a cross-platform PostgreSQL manager and SQL workbench for personal use.",
     "category": "DeveloperTool"
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDc4QkFEMUU0MTIxREI1NjcKUldSbnRSMFM1Tkc2ZUNGYnNSRVhka2hIUTE3ak1BVVJyZTFxaVBTZ0UrWFk0c2VhVFpiWFdHenUK",
+      "endpoints": [
+        "https://github.com/joswayski/dbm/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }
