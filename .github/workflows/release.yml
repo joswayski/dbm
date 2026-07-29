@@ -9,6 +9,7 @@ permissions:
 
 jobs:
   publish:
+    environment: release
     strategy:
       fail-fast: false
       matrix:
@@ -43,13 +44,116 @@ jobs:
             librsvg2-dev \
             pkg-config
       - run: npm ci
-      - uses: tauri-apps/tauri-action@v0
+      - name: Prepare Apple signing and notarization credentials
+        if: runner.os == 'macOS'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          required=(
+            APPLE_CERTIFICATE
+            APPLE_CERTIFICATE_PASSWORD
+            KEYCHAIN_PASSWORD
+            APPLE_API_ISSUER
+            APPLE_API_KEY
+            APPLE_API_PRIVATE_KEY
+          )
+          for name in "${required[@]}"; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "Missing release environment secret: $name" >&2
+              exit 1
+            fi
+          done
+
+          certificate_path="$RUNNER_TEMP/dbm-developer-id.p12"
+          api_key_path="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY}.p8"
+          keychain="$RUNNER_TEMP/dbm-signing.keychain-db"
+
+          printf '%s' "$APPLE_CERTIFICATE" \
+            | openssl base64 -d -A -out "$certificate_path"
+          printf '%s' "$APPLE_API_PRIVATE_KEY" > "$api_key_path"
+          chmod 600 "$certificate_path" "$api_key_path"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$keychain"
+          security default-keychain -d user -s "$keychain"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$keychain"
+          security set-keychain-settings -t 3600 -u "$keychain"
+          security import "$certificate_path" \
+            -k "$keychain" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s \
+            -k "$KEYCHAIN_PASSWORD" \
+            "$keychain"
+
+          identity="$(
+            security find-identity -v -p codesigning "$keychain" \
+              | awk -F\" '/Developer ID Application/{print $2; exit}'
+          )"
+          if [[ -z "$identity" ]]; then
+            echo "The imported certificate is not a Developer ID Application identity." >&2
+            exit 1
+          fi
+
+          {
+            printf 'APPLE_SIGNING_IDENTITY=%s\n' "$identity"
+            printf 'APPLE_API_ISSUER=%s\n' "$APPLE_API_ISSUER"
+            printf 'APPLE_API_KEY=%s\n' "$APPLE_API_KEY"
+            printf 'APPLE_API_KEY_PATH=%s\n' "$api_key_path"
+          } >> "$GITHUB_ENV"
+
+      - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          projectPath: apps/desktop
           tagName: ${{ github.ref_name }}
           releaseName: DBM ${{ github.ref_name }}
           releaseBody: Cross-platform DBM desktop installers.
           releaseDraft: true
           prerelease: true
           args: ${{ matrix.args }}
+      - name: Notarize, staple, and validate the macOS release
+        if: runner.os == 'macOS'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          app="$(find target -type d -path '*/release/bundle/macos/DBM.app' -print -quit)"
+          dmg="$(find target -type f -path '*/release/bundle/dmg/*.dmg' -print -quit)"
+          if [[ -z "$app" || -z "$dmg" ]]; then
+            echo "Could not find the packaged DBM.app and DMG." >&2
+            exit 1
+          fi
+
+          codesign --verify --deep --strict --verbose=2 "$app"
+          spctl --assess --type execute --verbose=2 "$app"
+          xcrun stapler validate "$app"
+
+          xcrun notarytool submit "$dmg" \
+            --key "$APPLE_API_KEY_PATH" \
+            --key-id "$APPLE_API_KEY" \
+            --issuer "$APPLE_API_ISSUER" \
+            --wait
+          xcrun stapler staple -v "$dmg"
+
+          codesign --verify --strict --verbose=2 "$dmg"
+          spctl --assess \
+            --type open \
+            --context context:primary-signature \
+            --verbose=2 \
+            "$dmg"
+          xcrun stapler validate "$dmg"
+
+          gh release upload "$GITHUB_REF_NAME" "$dmg" --clobber

@@ -14,7 +14,7 @@ publish the draft until every public-release gate below is enforced and passes.
 
 | Platform or concern | Required before publishing | Current state |
 | --- | --- | --- |
-| macOS | Sign with a Developer ID Application certificate, notarize with Apple, staple the notarization ticket, and validate the DMG on a clean Mac | Not configured in CI |
+| macOS | Sign with a Developer ID Application certificate, notarize with Apple, staple the notarization ticket, and validate the DMG on a clean Mac | CI signs and notarizes the app, notarizes and staples the DMG, and verifies both; clean-Mac validation remains manual |
 | Windows | Authenticode-sign and RFC 3161-timestamp both `dbm.exe` and the NSIS installer with a publicly trusted code-signing identity | Not configured in CI |
 | Linux | Publish the `.deb` and AppImage with `SHA256SUMS` and GitHub build-provenance attestations | Packages are built; integrity metadata is not configured |
 | All platforms | Tie every artifact to the tagged commit, reject an incomplete draft, and test installation on clean supported systems | Not yet enforced by the release workflow |
@@ -27,6 +27,11 @@ and GitHub attestations solve different problems. One does not replace another:
 - A GitHub attestation establishes which repository, commit, and workflow built
   a downloaded artifact.
 - `SHA256SUMS` detects accidental or malicious file changes after publication.
+
+DBM does not currently enable Tauri's updater plugin or create updater
+artifacts, so it does not need `TAURI_SIGNING_PRIVATE_KEY` or
+`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. If an updater is added later, generate a
+dedicated DBM updater keypair rather than reusing Captures' key.
 
 ## GitHub release environment
 
@@ -72,10 +77,12 @@ its output.
 | `APPLE_API_KEY` | App Store Connect team API key ID |
 | `APPLE_API_PRIVATE_KEY` | Complete contents of the downloaded `.p8` |
 
-The workflow must decode the certificate and API key only into the runner's
-temporary directory, import the certificate into a temporary keychain, select
-the `Developer ID Application` identity, and let Tauri sign, notarize, and
-staple the bundle. It must fail when any credential is absent.
+The workflow decodes the certificate and API key only into the runner's
+temporary directory, imports the certificate into a temporary keychain,
+selects the `Developer ID Application` identity, and lets Tauri sign, notarize,
+and staple the app. It then separately notarizes and staples the final DMG,
+replaces the initially uploaded DMG with that final artifact, and fails when
+any credential or validation is missing.
 
 Before publishing, verify the signature, Gatekeeper assessment, and stapled
 ticket:
@@ -84,6 +91,8 @@ ticket:
 codesign --verify --deep --strict --verbose=2 DBM.app
 spctl --assess --type execute --verbose=2 DBM.app
 xcrun stapler validate DBM.app
+codesign --verify --strict --verbose=2 DBM.dmg
+spctl --assess --type open --context context:primary-signature --verbose=2 DBM.dmg
 xcrun stapler validate DBM.dmg
 ```
 
