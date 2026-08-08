@@ -43,7 +43,31 @@ describe("QueryView", () => {
 
     expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Run statement/ })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Refresh" })).toBeDisabled();
     expect(document.querySelector(".cm-active-sql-line")).toBeInTheDocument();
+  });
+
+  it("refreshes by re-running the last executed statement", async () => {
+    const runQuery = vi.spyOn(commands, "runQuery");
+    render(<QueryView profileId="preview" initialSql="SELECT now();\n\nSELECT 1;" />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Run statement/ }));
+    await waitFor(() => expect(runQuery).toHaveBeenCalledWith({
+      profileId: "preview",
+      sql: "SELECT now();",
+      maxRows: 10_000,
+    }));
+
+    const refresh = screen.getByRole("button", { name: "Refresh" });
+    expect(refresh).toBeEnabled();
+    fireEvent.click(refresh);
+
+    await waitFor(() => expect(runQuery).toHaveBeenCalledTimes(2));
+    expect(runQuery).toHaveBeenLastCalledWith({
+      profileId: "preview",
+      sql: "SELECT now();",
+      maxRows: 10_000,
+    });
   });
 
   it("shares database-scoped history live across query tabs", async () => {

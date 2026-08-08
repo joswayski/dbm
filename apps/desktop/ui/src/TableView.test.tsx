@@ -93,6 +93,40 @@ describe("TableView", () => {
     expect(screen.queryByRole("button", { name: "Clear" })).not.toBeInTheDocument();
   });
 
+  it("reloads the current page from the Refresh toolbar button", async () => {
+    const loadTablePage = vi.spyOn(commands, "loadTablePage");
+    render(<TableView profileId="preview" schema="public" table="users" />);
+    await screen.findByText("person1@example.com");
+    expect(loadTablePage).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => expect(loadTablePage).toHaveBeenCalledTimes(2));
+    expect(loadTablePage).toHaveBeenLastCalledWith(expect.objectContaining({
+      profileId: "preview",
+      schema: "public",
+      table: "users",
+      offset: 0,
+    }));
+  });
+
+  it("blocks refresh while there are pending row changes", async () => {
+    const loadTablePage = vi.spyOn(commands, "loadTablePage");
+    render(<TableView profileId="preview" schema="public" table="users" />);
+
+    const email = await screen.findByText("person1@example.com");
+    const row = email.closest("tr");
+    fireEvent.doubleClick(email.closest("td")!);
+    const editor = within(row!).getByRole("textbox");
+    fireEvent.change(editor, { target: { value: "pending@example.com" } });
+    fireEvent.blur(editor);
+    await waitFor(() => expect(screen.getByText("1 pending change")).toBeInTheDocument());
+    const loadsAfterEdit = loadTablePage.mock.calls.length;
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    expect(await screen.findByText("Save or discard pending row changes before refreshing.")).toBeInTheDocument();
+    expect(loadTablePage).toHaveBeenCalledTimes(loadsAfterEdit);
+  });
+
   it("uses the primary key as the single default sort and exposes its direction", async () => {
     render(<TableView profileId="preview" schema="public" table="users" />);
     await screen.findByText("person1@example.com");

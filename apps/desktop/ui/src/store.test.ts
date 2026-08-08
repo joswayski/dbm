@@ -99,4 +99,38 @@ describe("DBM store", () => {
     expect(useDbmStore.getState().tabs[1].collapsed).toBe(false);
     expect(useDbmStore.getState().activeTabId).toBe(second.id);
   });
+
+  it("opens a query tab when connecting so the workbench is ready immediately", async () => {
+    const profile = await commands.saveProfile({
+      name: "Ready to query",
+      color: "#22c55e",
+      host: "localhost",
+      port: 5432,
+      username: "postgres",
+      defaultDatabase: "postgres",
+      tlsMode: "disabled",
+      caCertPath: null,
+      ssh: null,
+      readOnly: false,
+    });
+
+    await useDbmStore.getState().connect(profile.id);
+
+    const state = useDbmStore.getState();
+    expect(state.activeProfileId).toBe(profile.id);
+    expect(state.workspaces[profile.id]).toBeDefined();
+    expect(state.tabs).toHaveLength(1);
+    expect(state.tabs[0]).toMatchObject({
+      kind: "query",
+      profileId: profile.id,
+      title: "Query 1",
+      sql: "SELECT now();",
+    });
+    expect(state.activeTabId).toBe(state.tabs[0].id);
+
+    await useDbmStore.getState().connect(profile.id);
+    const afterReconnect = useDbmStore.getState();
+    expect(afterReconnect.tabs).toHaveLength(1);
+    expect(afterReconnect.activeTabId).toBe(afterReconnect.tabs[0].id);
+  });
 });

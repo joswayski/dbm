@@ -580,6 +580,18 @@ export function TableView({
       <div className="view-toolbar">
         <div><span className="eyebrow">TABLE</span><h2>{schema}.{table}</h2></div>
         <div className="toolbar-actions">
+          <button
+            className="secondary-button"
+            onClick={() => {
+              if (pendingCount > 0) {
+                setError("Save or discard pending row changes before refreshing.");
+                return;
+              }
+              void load();
+            }}
+            disabled={!page || loading}
+            title="Reload the current page with the same filters and sort"
+          >{loading ? "Refreshing…" : "Refresh"}</button>
           <button className="secondary-button" onClick={() => void copyEntries(copyableEntries, "visible")} disabled={!page || loading} title="Copies only the current preview page">Copy visible ({copyableEntries.length})</button>
           <button className="secondary-button" onClick={() => void exportAllRows()} disabled={!page || loading || exporting} title="Prompts for a location and exports every filtered row">{exportLabel}</button>
           {selectedEntries.length > 0 ? <div className="selection-actions">

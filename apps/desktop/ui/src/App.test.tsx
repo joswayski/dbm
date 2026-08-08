@@ -55,7 +55,9 @@ describe("App connection and query navigation", () => {
     expect(connectionButton).toHaveAttribute("aria-current", "page");
     expect(main).not.toHaveClass("connection-themed");
     expect(main).toHaveStyle("--connection-color: #ef4444");
-    expect(screen.getByRole("heading", { name: profile.name })).toBeInTheDocument();
+    // Connecting opens a query tab immediately so the user can run SQL right away.
+    expect(await screen.findByRole("heading", { name: "Query 1" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Query 1" })).toBeInTheDocument();
     expect(within(topbar!).queryByRole("button", { name: "New query" })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Collapse connection" }));
@@ -69,7 +71,7 @@ describe("App connection and query navigation", () => {
     expect(screen.queryByRole("menuitem", { name: "Disconnect" })).not.toBeInTheDocument();
 
     const usersTable = await screen.findByRole("button", { name: "users" });
-    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    fireEvent.click(within(sidebar!).getByRole("button", { name: "Refresh" }));
     expect(await screen.findByText("Schema is already up to date.")).toBeInTheDocument();
 
     vi.spyOn(commands, "loadSchemaTree").mockResolvedValueOnce([{
@@ -83,7 +85,7 @@ describe("App connection and query navigation", () => {
         { name: "audit_log", kind: "table", schema: "public", table: "audit_log", children: [] },
       ],
     }]);
-    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    fireEvent.click(within(sidebar!).getByRole("button", { name: "Refresh" }));
     expect(await screen.findByText("Schema refreshed · Added table public.audit_log.")).toBeInTheDocument();
     expect(await screen.findByRole("button", { name: "audit_log" })).toBeInTheDocument();
 
@@ -94,16 +96,17 @@ describe("App connection and query navigation", () => {
     expect(container.querySelector(".tab-color")).not.toBeInTheDocument();
 
     fireEvent.click(within(tabStrip!).getByRole("button", { name: "New query" }));
-    const queryTab = await screen.findByRole("button", { name: "Query 1" });
-    expect(queryTab).toBeInTheDocument();
+    const secondQueryTab = await screen.findByRole("button", { name: "Query 2" });
+    expect(secondQueryTab).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Query 1" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "public.users" }));
     fireEvent.click(screen.getByRole("button", { name: "Collapse public.users" }));
     expect(screen.getByRole("button", { name: "Expand public.users" }).closest(".tab")).toHaveClass("collapsed");
-    await waitFor(() => expect(screen.getByRole("heading", { name: "Query 1" })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Query 2" })).toBeInTheDocument());
 
-    fireEvent.click(screen.getByRole("button", { name: "Rename Query 1" }));
-    const renameInput = screen.getByRole("textbox", { name: "Rename Query 1" });
+    fireEvent.click(screen.getByRole("button", { name: "Rename Query 2" }));
+    const renameInput = screen.getByRole("textbox", { name: "Rename Query 2" });
     fireEvent.change(renameInput, { target: { value: "Revenue audit" } });
     fireEvent.keyDown(renameInput, { key: "Enter" });
     expect(await screen.findByRole("button", { name: "Revenue audit" })).toBeInTheDocument();
