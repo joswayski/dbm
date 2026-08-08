@@ -61,11 +61,39 @@ export const useDbmStore = create<DbmStore>((set, get) => ({
   },
   connect: async (profileId) => {
     const workspace = await commands.connectProfile(profileId);
-    set((state) => ({
+    const state = get();
+    const existingQuery = [...state.tabs]
+      .reverse()
+      .find((tab) => tab.kind === "query" && tab.profileId === profileId);
+    if (existingQuery) {
+      set({
+        workspaces: { ...state.workspaces, [profileId]: workspace },
+        activeProfileId: profileId,
+        tabs: state.tabs.map((tab) => tab.id === existingQuery.id ? { ...tab, collapsed: false } : tab),
+        activeTabId: existingQuery.id,
+      });
+      return;
+    }
+    const existingTitles = new Set(
+      state.tabs
+        .filter((tab) => tab.kind === "query" && tab.profileId === profileId)
+        .map((tab) => tab.title),
+    );
+    let queryNumber = 1;
+    while (existingTitles.has(`Query ${queryNumber}`)) queryNumber += 1;
+    const tab: Tab = {
+      id: crypto.randomUUID(),
+      title: `Query ${queryNumber}`,
+      kind: "query",
+      profileId,
+      sql: "SELECT now();",
+    };
+    set({
       workspaces: { ...state.workspaces, [profileId]: workspace },
       activeProfileId: profileId,
-      activeTabId: state.activeProfileId === profileId ? state.activeTabId : null,
-    }));
+      tabs: [...state.tabs, tab],
+      activeTabId: tab.id,
+    });
   },
   selectProfile: (profileId) => {
     if (get().profiles.some((summary) => summary.profile.id === profileId)) {

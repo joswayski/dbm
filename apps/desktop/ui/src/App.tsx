@@ -913,6 +913,14 @@ export function QueryView({
               onClick={() => void commands.cancelQuery().catch((reason: unknown) => setError(errorMessage(reason)))}
             >Cancel</button>
           ) : null}
+          <button
+            className="secondary-button"
+            onClick={() => void run(executedSql ?? undefined)}
+            disabled={running || !executedSql || embeddedPendingCount > 0}
+            title={executedSql
+              ? "Re-run the last executed statement for fresh results"
+              : "Run a statement first to enable refresh"}
+          >{running && executedSql ? "Refreshing…" : "Refresh"}</button>
           <button className="primary-button" onClick={runFromEditor} disabled={running || !executionTarget}>
             {running ? "Running…" : runLabel}<kbd>⌘↵</kbd>
           </button>
