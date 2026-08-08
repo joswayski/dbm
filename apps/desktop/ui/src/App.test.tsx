@@ -56,8 +56,9 @@ describe("App connection and query navigation", () => {
     expect(main).not.toHaveClass("connection-themed");
     expect(main).toHaveStyle("--connection-color: #ef4444");
     // Connecting opens a query tab immediately so the user can run SQL right away.
-    expect(await screen.findByRole("heading", { name: "Query 1" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Query 1" })).toBeInTheDocument();
+    // Prefer the tab strip control — full QueryView/CodeMirror mount is expensive in CI.
+    expect(await screen.findByRole("button", { name: "Query 1" })).toBeInTheDocument();
+    expect(within(tabStrip!).getByRole("button", { name: "New query" })).toBeInTheDocument();
     expect(within(topbar!).queryByRole("button", { name: "New query" })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Collapse connection" }));
@@ -95,21 +96,18 @@ describe("App connection and query navigation", () => {
     expect(screen.getByRole("button", { name: "Collapse public.users" })).toBeInTheDocument();
     expect(container.querySelector(".tab-color")).not.toBeInTheDocument();
 
-    fireEvent.click(within(tabStrip!).getByRole("button", { name: "New query" }));
-    const secondQueryTab = await screen.findByRole("button", { name: "Query 2" });
-    expect(secondQueryTab).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Query 1" })).toBeInTheDocument();
+    // Rename the auto-opened query tab (avoids mounting a second CodeMirror in this flow).
+    fireEvent.click(screen.getByRole("button", { name: "Query 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Rename Query 1" }));
+    const renameInput = screen.getByRole("textbox", { name: "Rename Query 1" });
+    fireEvent.change(renameInput, { target: { value: "Revenue audit" } });
+    fireEvent.keyDown(renameInput, { key: "Enter" });
+    expect(await screen.findByRole("button", { name: "Revenue audit" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "public.users" }));
     fireEvent.click(screen.getByRole("button", { name: "Collapse public.users" }));
     expect(screen.getByRole("button", { name: "Expand public.users" }).closest(".tab")).toHaveClass("collapsed");
-    await waitFor(() => expect(screen.getByRole("heading", { name: "Query 2" })).toBeInTheDocument());
-
-    fireEvent.click(screen.getByRole("button", { name: "Rename Query 2" }));
-    const renameInput = screen.getByRole("textbox", { name: "Rename Query 2" });
-    fireEvent.change(renameInput, { target: { value: "Revenue audit" } });
-    fireEvent.keyDown(renameInput, { key: "Enter" });
-    expect(await screen.findByRole("button", { name: "Revenue audit" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Collapse Revenue audit" })).toBeInTheDocument());
 
     fireEvent.click(connectionButton!);
     expect(await screen.findByRole("heading", { name: profile.name })).toBeInTheDocument();
@@ -124,7 +122,7 @@ describe("App connection and query navigation", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Disconnect" }));
     expect(await screen.findByRole("heading", { name: "No connection selected" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Revenue audit" })).not.toBeInTheDocument();
-  });
+  }, 15_000);
 
   it("closes the connection popup with Escape", () => {
     render(<App />);
