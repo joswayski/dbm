@@ -136,4 +136,117 @@ describe("DBM store", () => {
     expect(afterReconnect.tabs).toHaveLength(1);
     expect(afterReconnect.activeTabId).toBe(afterReconnect.tabs[0].id);
   });
+
+  it("keeps the current table tab when reconnecting the same profile", async () => {
+    const profile = await commands.saveProfile({
+      name: "Keep table on reconnect",
+      color: "#38bdf8",
+      engine: "postgres",
+      host: "localhost",
+      port: 5432,
+      username: "postgres",
+      defaultDatabase: "postgres",
+      tlsMode: "disabled",
+      caCertPath: null,
+      ssh: null,
+      readOnly: false,
+    });
+    await useDbmStore.getState().connect(profile.id);
+    useDbmStore.getState().openTable(profile.id, "public", "users");
+    const tableTabId = useDbmStore.getState().activeTabId;
+
+    await useDbmStore.getState().connect(profile.id);
+
+    const state = useDbmStore.getState();
+    expect(state.tabs).toHaveLength(2);
+    expect(state.activeTabId).toBe(tableTabId);
+    expect(state.tabs.find((tab) => tab.id === tableTabId)).toMatchObject({
+      kind: "table",
+      schema: "public",
+      table: "users",
+    });
+  });
+
+  it("selects a connected profile without dumping its open workbench tabs", async () => {
+    const first = await commands.saveProfile({
+      name: "First",
+      color: "#38bdf8",
+      engine: "postgres",
+      host: "localhost",
+      port: 5432,
+      username: "postgres",
+      defaultDatabase: "postgres",
+      tlsMode: "disabled",
+      caCertPath: null,
+      ssh: null,
+      readOnly: false,
+    });
+    const second = await commands.saveProfile({
+      name: "Second",
+      color: "#ef4444",
+      engine: "postgres",
+      host: "localhost",
+      port: 5432,
+      username: "postgres",
+      defaultDatabase: "postgres",
+      tlsMode: "disabled",
+      caCertPath: null,
+      ssh: null,
+      readOnly: false,
+    });
+    await useDbmStore.getState().loadProfiles();
+    await useDbmStore.getState().connect(first.id);
+    useDbmStore.getState().openTable(first.id, "public", "users");
+    const firstTableId = useDbmStore.getState().activeTabId;
+    await useDbmStore.getState().connect(second.id);
+    const secondQueryId = useDbmStore.getState().activeTabId;
+
+    useDbmStore.getState().selectProfile(first.id);
+    expect(useDbmStore.getState().activeProfileId).toBe(first.id);
+    expect(useDbmStore.getState().activeTabId).toBe(firstTableId);
+
+    useDbmStore.getState().selectProfile(second.id);
+    expect(useDbmStore.getState().activeProfileId).toBe(second.id);
+    expect(useDbmStore.getState().activeTabId).toBe(secondQueryId);
+
+    useDbmStore.getState().closeTab(firstTableId!);
+    useDbmStore.getState().closeTab(useDbmStore.getState().tabs.find((tab) => tab.profileId === first.id)!.id);
+    useDbmStore.getState().selectProfile(first.id);
+    const restored = useDbmStore.getState();
+    expect(restored.activeProfileId).toBe(first.id);
+    expect(restored.tabs.filter((tab) => tab.profileId === first.id)).toHaveLength(1);
+    expect(restored.tabs.find((tab) => tab.id === restored.activeTabId)).toMatchObject({
+      kind: "query",
+      profileId: first.id,
+      title: "Query 1",
+    });
+  });
+
+  it("closes a deleted profile's tabs and workspace", async () => {
+    const profile = await commands.saveProfile({
+      name: "Delete me",
+      color: "#f59e0b",
+      engine: "postgres",
+      host: "localhost",
+      port: 5432,
+      username: "postgres",
+      defaultDatabase: "postgres",
+      tlsMode: "disabled",
+      caCertPath: null,
+      ssh: null,
+      readOnly: false,
+    });
+    await useDbmStore.getState().connect(profile.id);
+    useDbmStore.getState().openTable(profile.id, "public", "users");
+    expect(useDbmStore.getState().tabs).toHaveLength(2);
+
+    await useDbmStore.getState().removeProfile(profile.id);
+
+    const state = useDbmStore.getState();
+    expect(state.profiles.some((summary) => summary.profile.id === profile.id)).toBe(false);
+    expect(state.workspaces[profile.id]).toBeUndefined();
+    expect(state.tabs).toHaveLength(0);
+    expect(state.activeProfileId).toBeNull();
+    expect(state.activeTabId).toBeNull();
+  });
 });

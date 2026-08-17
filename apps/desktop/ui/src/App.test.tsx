@@ -111,7 +111,7 @@ describe("App connection and query navigation", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Collapse Revenue audit" })).toBeInTheDocument());
 
     fireEvent.click(connectionButton!);
-    expect(await screen.findByRole("heading", { name: profile.name })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Collapse Revenue audit" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Revenue audit" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Revenue audit" }));
@@ -124,6 +124,34 @@ describe("App connection and query navigation", () => {
     expect(await screen.findByRole("heading", { name: "No connection selected" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Revenue audit" })).not.toBeInTheDocument();
   }, 15_000);
+
+  it("asks before deleting a saved connection", async () => {
+    const profile = await commands.saveProfile({
+      name: "Disposable",
+      color: "#64748b",
+      engine: "postgres",
+      host: "localhost",
+      port: 5432,
+      username: "postgres",
+      defaultDatabase: "postgres",
+      tlsMode: "disabled",
+      caCertPath: null,
+      ssh: null,
+      readOnly: false,
+    });
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const deleteProfile = vi.spyOn(commands, "deleteProfile");
+    render(<App />);
+
+    await screen.findByText(profile.name);
+    fireEvent.click(screen.getByRole("button", { name: `Connection actions for ${profile.name}` }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit connection" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining(profile.name));
+    expect(deleteProfile).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog", { name: "Edit connection" })).toBeInTheDocument();
+  });
 
   it("closes the connection popup with Escape", () => {
     render(<App />);

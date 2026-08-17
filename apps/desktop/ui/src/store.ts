@@ -50,55 +50,22 @@ export const useDbmStore = create<DbmStore>((set, get) => ({
   },
   removeProfile: async (profileId) => {
     await commands.deleteProfile(profileId);
-    const { workspaces, activeProfileId } = get();
-    const nextWorkspaces = { ...workspaces };
-    delete nextWorkspaces[profileId];
-    set({
-      profiles: await commands.listProfiles(),
-      workspaces: nextWorkspaces,
-      activeProfileId: activeProfileId === profileId ? null : activeProfileId,
-    });
+    const profiles = await commands.listProfiles();
+    set((state) => ({
+      profiles,
+      ...closedProfileWorkspace(state, profileId),
+    }));
   },
   connect: async (profileId) => {
     const workspace = await commands.connectProfile(profileId);
-    const state = get();
-    const existingQuery = [...state.tabs]
-      .reverse()
-      .find((tab) => tab.kind === "query" && tab.profileId === profileId);
-    if (existingQuery) {
-      set({
-        workspaces: { ...state.workspaces, [profileId]: workspace },
-        activeProfileId: profileId,
-        tabs: state.tabs.map((tab) => tab.id === existingQuery.id ? { ...tab, collapsed: false } : tab),
-        activeTabId: existingQuery.id,
-      });
-      return;
-    }
-    const existingTitles = new Set(
-      state.tabs
-        .filter((tab) => tab.kind === "query" && tab.profileId === profileId)
-        .map((tab) => tab.title),
-    );
-    let queryNumber = 1;
-    while (existingTitles.has(`Query ${queryNumber}`)) queryNumber += 1;
-    const tab: Tab = {
-      id: crypto.randomUUID(),
-      title: `Query ${queryNumber}`,
-      kind: "query",
-      profileId,
-      sql: "SELECT now();",
-    };
-    set({
+    set((state) => ({
       workspaces: { ...state.workspaces, [profileId]: workspace },
-      activeProfileId: profileId,
-      tabs: [...state.tabs, tab],
-      activeTabId: tab.id,
-    });
+      ...activatedProfileWorkbench(state, profileId),
+    }));
   },
   selectProfile: (profileId) => {
-    if (get().profiles.some((summary) => summary.profile.id === profileId)) {
-      set({ activeProfileId: profileId, activeTabId: null });
-    }
+    if (!get().profiles.some((summary) => summary.profile.id === profileId)) return;
+    set((state) => activatedProfileWorkbench(state, profileId));
   },
   switchDatabase: async (profileId, database) => {
     const workspace = await commands.connectDatabase(profileId, database);
@@ -106,21 +73,13 @@ export const useDbmStore = create<DbmStore>((set, get) => ({
   },
   disconnect: async (profileId) => {
     await commands.disconnectWorkspace(profileId);
-    const { workspaces } = get();
-    const nextWorkspaces = { ...workspaces };
-    delete nextWorkspaces[profileId];
-    set((state) => ({
-      workspaces: nextWorkspaces,
-      activeProfileId: state.activeProfileId === profileId ? null : state.activeProfileId,
-      tabs: state.tabs.filter((tab) => tab.profileId !== profileId),
-      activeTabId: state.activeProfileId === profileId ? null : state.activeTabId,
-    }));
+    set((state) => closedProfileWorkspace(state, profileId));
   },
   openTable: (profileId, schema, table) => {
     const existing = get().tabs.find((tab) => tab.kind === "table" && tab.profileId === profileId && tab.schema === schema && tab.table === table);
     if (existing) {
       set((state) => ({
-        tabs: state.tabs.map((tab) => tab.id === existing.id ? { ...tab, collapsed: false } : tab),
+        tabs: revealTab(state.tabs, existing.id),
         activeTabId: existing.id,
         activeProfileId: profileId,
       }));
@@ -130,21 +89,10 @@ export const useDbmStore = create<DbmStore>((set, get) => ({
     set((state) => ({ tabs: [...state.tabs, tab], activeTabId: tab.id, activeProfileId: profileId }));
   },
   openQuery: (profileId) => {
-    const existingTitles = new Set(
-      get().tabs
-        .filter((tab) => tab.kind === "query" && tab.profileId === profileId)
-        .map((tab) => tab.title),
-    );
-    let queryNumber = 1;
-    while (existingTitles.has(`Query ${queryNumber}`)) queryNumber += 1;
-    const tab: Tab = {
-      id: crypto.randomUUID(),
-      title: `Query ${queryNumber}`,
-      kind: "query",
-      profileId,
-      sql: "SELECT now();",
-    };
-    set((state) => ({ tabs: [...state.tabs, tab], activeTabId: tab.id, activeProfileId: profileId }));
+    set((state) => {
+      const tab = createQueryTab(profileId, state.tabs);
+      return { tabs: [...state.tabs, tab], activeTabId: tab.id, activeProfileId: profileId };
+    });
   },
   renameTab: (tabId, title) => {
     const nextTitle = title.trim();
@@ -191,4 +139,74 @@ export const useDbmStore = create<DbmStore>((set, get) => ({
 
 function adjacentTab(tabs: Tab[], index: number): Tab | null {
   return tabs.slice(index + 1)[0] ?? tabs.slice(0, index).at(-1) ?? null;
+}
+
+function latestProfileTab(tabs: Tab[], profileId: string): Tab | undefined {
+  return [...tabs].reverse().find((tab) => tab.profileId === profileId);
+}
+
+function revealTab(tabs: Tab[], tabId: string): Tab[] {
+  return tabs.map((tab) => tab.id === tabId ? { ...tab, collapsed: false } : tab);
+}
+
+function createQueryTab(profileId: string, tabs: Tab[]): Tab {
+  const existingTitles = new Set(
+    tabs
+      .filter((tab) => tab.kind === "query" && tab.profileId === profileId)
+      .map((tab) => tab.title),
+  );
+  let queryNumber = 1;
+  while (existingTitles.has(`Query ${queryNumber}`)) queryNumber += 1;
+  return {
+    id: crypto.randomUUID(),
+    title: `Query ${queryNumber}`,
+    kind: "query",
+    profileId,
+    sql: "SELECT now();",
+  };
+}
+
+function activatedProfileWorkbench(
+  state: Pick<DbmStore, "tabs" | "activeTabId" | "activeProfileId">,
+  profileId: string,
+): Pick<DbmStore, "tabs" | "activeTabId" | "activeProfileId"> {
+  const currentTab = state.tabs.find((tab) => tab.id === state.activeTabId);
+  if (currentTab?.profileId === profileId) {
+    return {
+      tabs: state.tabs,
+      activeTabId: currentTab.id,
+      activeProfileId: profileId,
+    };
+  }
+
+  const nextTab = latestProfileTab(state.tabs, profileId);
+  if (nextTab) {
+    return {
+      tabs: revealTab(state.tabs, nextTab.id),
+      activeTabId: nextTab.id,
+      activeProfileId: profileId,
+    };
+  }
+
+  const tab = createQueryTab(profileId, state.tabs);
+  return {
+    tabs: [...state.tabs, tab],
+    activeTabId: tab.id,
+    activeProfileId: profileId,
+  };
+}
+
+function closedProfileWorkspace(
+  state: Pick<DbmStore, "workspaces" | "tabs" | "activeTabId" | "activeProfileId">,
+  profileId: string,
+): Pick<DbmStore, "workspaces" | "tabs" | "activeTabId" | "activeProfileId"> {
+  const workspaces = { ...state.workspaces };
+  delete workspaces[profileId];
+  const leavingActiveProfile = state.activeProfileId === profileId;
+  return {
+    workspaces,
+    tabs: state.tabs.filter((tab) => tab.profileId !== profileId),
+    activeProfileId: leavingActiveProfile ? null : state.activeProfileId,
+    activeTabId: leavingActiveProfile ? null : state.activeTabId,
+  };
 }

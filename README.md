@@ -96,7 +96,10 @@ Passwords are stored in the operating system credential store when available.
   edits are guarded by `xmin` optimistic concurrency; MySQL edits match on the
   primary key. Read-only profile mode blocks GUI writes on both engines.
 - SQL tabs using CodeMirror, query result grids, a 10,000-row safety cap, and
-  per-profile history.
+  per-profile history. Connecting a profile opens a query tab so you can run
+  SQL immediately.
+- Refresh on table previews and query results: reload the current page and
+  filters, or re-run the last executed statement, without re-authoring them.
 
 The browser preview used by Vite has a small in-memory mock so the layout can be
 worked on without launching Tauri. The real desktop app uses the Rust commands.
@@ -104,10 +107,10 @@ worked on without launching Tauri. The real desktop app uses the Rust commands.
 ## Deliberate follow-ups
 
 SSH jump-host transport, query cancellation with dedicated sessions, Redis
-(including Sentinel/Cluster), encrypted profile sync, and signed auto-updates
-are kept out of this first vertical slice. The profile model already reserves
-the SSH shape, but the backend returns a clear unsupported-transport error
-until the forwarding implementation is added and tested on all three OSes.
+(including Sentinel/Cluster), and encrypted profile sync are kept out of this
+first vertical slice. The profile model already reserves the SSH shape, but
+the backend returns a clear unsupported-transport error until the forwarding
+implementation is added and tested on all three OSes.
 
 ## Local data
 

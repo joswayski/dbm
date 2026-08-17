@@ -560,6 +560,10 @@ export default function App() {
           onClose={() => setModalProfile(undefined)}
           onSave={handleSaveProfile}
           onDelete={modalProfile ? async () => {
+            const confirmed = window.confirm(
+              `Delete connection “${modalProfile.name}”? Saved password and query history for this profile will be removed.`,
+            );
+            if (!confirmed) return;
             try {
               await removeProfile(modalProfile.id);
               setModalProfile(undefined);
@@ -972,7 +976,7 @@ export function QueryView({
               : "Run a statement first to enable refresh"}
           >{running && executedSql ? "Refreshing…" : "Refresh"}</button>
           <button className="primary-button" onClick={runFromEditor} disabled={running || !executionTarget}>
-            {running ? "Running…" : runLabel}<kbd>⌘↵</kbd>
+            {running ? "Running…" : runLabel}<kbd>{runShortcutGlyph()}</kbd>
           </button>
         </div>
       </div>
@@ -1290,6 +1294,15 @@ function decodeSqlIdentifier(identifier: string): string {
   if (identifier.startsWith("\"")) return identifier.slice(1, -1).replaceAll("\"\"", "\"");
   if (identifier.startsWith("`")) return identifier.slice(1, -1).replaceAll("``", "`");
   return identifier.toLowerCase();
+}
+
+function runShortcutGlyph(): string {
+  return isApplePlatform() ? "⌘↵" : "Ctrl+↵";
+}
+
+function isApplePlatform(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return /Mac|iPhone|iPad|iPod/.test(navigator.platform) || /Mac OS X/.test(navigator.userAgent);
 }
 
 function errorMessage(reason: unknown): string {
