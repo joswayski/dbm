@@ -12,6 +12,7 @@ rust-version = "1.94"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 directories = "6"
 keyring = "4.1"
+mysql_async = { version = "0.37", default-features = false, features = ["minimal", "native-tls-tls"] }
 native-tls = "0.2"
 postgres-native-tls = "0.5"
 rusqlite = { version = "0.38", features = ["bundled"] }

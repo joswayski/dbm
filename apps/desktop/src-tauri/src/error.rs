@@ -62,6 +62,15 @@ impl From<tokio_postgres::Error> for AppError {
     }
 }
 
+impl From<mysql_async::Error> for AppError {
+    fn from(error: mysql_async::Error) -> Self {
+        if let mysql_async::Error::Server(server) = &error {
+            return Self::Database(format!("{} (SQLSTATE {})", server.message, server.state));
+        }
+        Self::database(&error)
+    }
+}
+
 impl From<keyring::Error> for AppError {
     fn from(error: keyring::Error) -> Self {
         Self::Credential(error.to_string())

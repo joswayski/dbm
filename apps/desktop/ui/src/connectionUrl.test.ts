@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { parsePostgresConnectionUrl } from "./connectionUrl";
+import { parseConnectionUrl, parseMysqlConnectionUrl, parsePostgresConnectionUrl } from "./connectionUrl";
 
-describe("parsePostgresConnectionUrl", () => {
+describe("parseConnectionUrl", () => {
   it("imports Railway-style PostgreSQL URLs", () => {
     expect(parsePostgresConnectionUrl("postgresql://postgres:PASSWORD@caboose.proxy.rlwy.net:57394/railway")).toEqual({
+      engine: "postgres",
       host: "caboose.proxy.rlwy.net",
       port: 57394,
       username: "postgres",
@@ -17,6 +18,7 @@ describe("parsePostgresConnectionUrl", () => {
 
   it("decodes credentials and maps sslmode", () => {
     expect(parsePostgresConnectionUrl("postgres://user%40example.com:p%40ss@localhost/my%20db?sslmode=require")).toMatchObject({
+      engine: "postgres",
       username: "user@example.com",
       password: "p@ss",
       defaultDatabase: "my db",
@@ -24,8 +26,32 @@ describe("parsePostgresConnectionUrl", () => {
     });
   });
 
-  it("rejects non-PostgreSQL URLs", () => {
-    expect(() => parsePostgresConnectionUrl("redis://localhost:6379")).toThrow(
+  it("imports MySQL and MariaDB URLs", () => {
+    expect(parseMysqlConnectionUrl("mysql://root:secret@caboose.proxy.rlwy.net:3306/railway?ssl-mode=REQUIRED")).toEqual({
+      engine: "mysql",
+      host: "caboose.proxy.rlwy.net",
+      port: 3306,
+      username: "root",
+      defaultDatabase: "railway",
+      tlsMode: "required",
+      password: "secret",
+      suggestedName: "railway @ caboose.proxy.rlwy.net",
+    });
+    expect(parseConnectionUrl("mariadb://app@localhost/analytics")).toMatchObject({
+      engine: "mysql",
+      host: "localhost",
+      port: 3306,
+      username: "app",
+      defaultDatabase: "analytics",
+      tlsMode: "preferred",
+    });
+  });
+
+  it("rejects unsupported protocols", () => {
+    expect(() => parseConnectionUrl("redis://localhost:6379")).toThrow(
+      "The connection URL must begin with postgres://, postgresql://, mysql://, or mariadb://.",
+    );
+    expect(() => parsePostgresConnectionUrl("mysql://root@localhost/app")).toThrow(
       "The connection URL must begin with postgres:// or postgresql://.",
     );
   });

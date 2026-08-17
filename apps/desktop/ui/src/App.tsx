@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from "react";
 import CodeMirror, { Decoration, ViewPlugin, type DecorationSet, type EditorView, type ReactCodeMirrorRef, type ViewUpdate } from "@uiw/react-codemirror";
-import { sql } from "@codemirror/lang-sql";
+import { MySQL, PostgreSQL, sql } from "@codemirror/lang-sql";
 
 import * as commands from "./commands";
-import { parsePostgresConnectionUrl } from "./connectionUrl";
+import { parseConnectionUrl } from "./connectionUrl";
 import { sqlExecutionTarget, type SqlExecutionTarget } from "./sqlSelection";
 import { useDbmStore } from "./store";
 import { TableView } from "./TableView";
 import type {
   ConnectionProfile,
+  DatabaseEngine,
   JsonValue,
   ProfileSummary,
   QueryHistoryEntry,
@@ -25,7 +26,7 @@ const MIN_SIDEBAR_WIDTH = 280;
 const MAX_SIDEBAR_WIDTH = 480;
 const COLLAPSED_SIDEBAR_WIDTH = 48;
 const QUERY_HISTORY_UPDATED_EVENT = "dbm:query-history-updated";
-const SQL_IDENTIFIER = String.raw`(?:"(?:[^"]|"")*"|[A-Za-z_][A-Za-z0-9_$]*)`;
+const SQL_IDENTIFIER = String.raw`(?:"(?:[^"]|"")*"|` + "`(?:[^`]|``)*`" + String.raw`|[A-Za-z_][A-Za-z0-9_$]*)`;
 const SIMPLE_FULL_TABLE_SELECT = new RegExp(
   String.raw`^\s*select\s+\*\s+from\s+(${SQL_IDENTIFIER})(?:\s*\.\s*(${SQL_IDENTIFIER}))?\s*;?\s*$`,
   "i",
@@ -36,20 +37,62 @@ type QueryHistoryUpdatedDetail = {
   database: string;
 };
 
+const ENGINE_PRESETS: Record<DatabaseEngine, {
+  label: string;
+  name: string;
+  port: number;
+  username: string;
+  defaultDatabase: string;
+  urlPlaceholder: string;
+}> = {
+  postgres: {
+    label: "PostgreSQL",
+    name: "Local PostgreSQL",
+    port: 5432,
+    username: "postgres",
+    defaultDatabase: "postgres",
+    urlPlaceholder: "postgresql://user:password@host:5432/database",
+  },
+  mysql: {
+    label: "MySQL",
+    name: "Local MySQL",
+    port: 3306,
+    username: "root",
+    defaultDatabase: "mysql",
+    urlPlaceholder: "mysql://user:password@host:3306/database",
+  },
+};
+
 function defaultProfile(profile?: ConnectionProfile): SaveProfileInput {
+  const engine = profile?.engine ?? "postgres";
+  const preset = ENGINE_PRESETS[engine];
   return {
     id: profile?.id,
-    name: profile?.name ?? "Local PostgreSQL",
+    name: profile?.name ?? preset.name,
     color: profile?.color ?? DEFAULT_CONNECTION_COLOR,
+    engine,
     host: profile?.host ?? "localhost",
-    port: profile?.port ?? 5432,
-    username: profile?.username ?? "postgres",
-    defaultDatabase: profile?.defaultDatabase ?? "postgres",
+    port: profile?.port ?? preset.port,
+    username: profile?.username ?? preset.username,
+    defaultDatabase: profile?.defaultDatabase ?? preset.defaultDatabase,
     tlsMode: profile?.tlsMode ?? "preferred",
     caCertPath: profile?.caCertPath ?? null,
     ssh: profile?.ssh ?? null,
     readOnly: profile?.readOnly ?? false,
     password: null,
+  };
+}
+
+function applyEngineDefaults(form: SaveProfileInput, engine: DatabaseEngine): SaveProfileInput {
+  const previous = ENGINE_PRESETS[form.engine];
+  const next = ENGINE_PRESETS[engine];
+  return {
+    ...form,
+    engine,
+    name: form.name === previous.name ? next.name : form.name,
+    port: form.port === previous.port ? next.port : form.port,
+    username: form.username === previous.username ? next.username : form.username,
+    defaultDatabase: form.defaultDatabase === previous.defaultDatabase ? next.defaultDatabase : form.defaultDatabase,
   };
 }
 
@@ -482,9 +525,10 @@ export default function App() {
         <section className="content-pane">
           {tabs.map((tab) => {
             const shouldMount = tab.id === activeTabId || mountedTabIds.has(tab.id);
-            const database = workspaces[tab.profileId]?.profile.defaultDatabase ??
-              profiles.find((summary) => summary.profile.id === tab.profileId)?.profile.defaultDatabase ??
-              "postgres";
+            const tabProfile = workspaces[tab.profileId]?.profile
+              ?? profiles.find((summary) => summary.profile.id === tab.profileId)?.profile;
+            const database = tabProfile?.defaultDatabase
+              ?? (tabProfile?.engine === "mysql" ? "mysql" : "postgres");
             return <div className={`tab-pane ${tab.id === activeTabId ? "active" : ""}`} key={tab.id} aria-hidden={tab.id !== activeTabId}>
               {shouldMount && tab.kind === "table" && tab.schema && tab.table ? (
                 <TableView profileId={tab.profileId} schema={tab.schema} table={tab.table} />
@@ -492,6 +536,7 @@ export default function App() {
                 <QueryView
                   profileId={tab.profileId}
                   database={database}
+                  engine={tabProfile?.engine ?? "postgres"}
                   schemaTree={schemas[tab.profileId] ?? []}
                   initialSql={tab.sql ?? "SELECT now();"}
                   title={tab.title}
@@ -665,7 +710,7 @@ function ConnectionItem({
           <span className="connection-color" style={{ background: summary.profile.color ?? DEFAULT_CONNECTION_COLOR, color: summary.profile.color ?? DEFAULT_CONNECTION_COLOR }} />
           <span className="connection-copy">
             <strong>{summary.profile.name}</strong>
-            <small>{summary.profile.username}@{summary.profile.host}</small>
+            <small>{ENGINE_PRESETS[summary.profile.engine ?? "postgres"].label} · {summary.profile.username}@{summary.profile.host}</small>
           </span>
         </button>
         <div className="connection-actions">
@@ -803,12 +848,14 @@ function activeSqlDecorations(view: EditorView): DecorationSet {
 export function QueryView({
   profileId,
   database = "postgres",
+  engine = "postgres",
   schemaTree = [],
   initialSql,
   title = "Query",
 }: {
   profileId: string;
   database?: string;
+  engine?: DatabaseEngine;
   schemaTree?: SchemaNode[];
   initialSql: string;
   title?: string;
@@ -884,7 +931,10 @@ export function QueryView({
     return sqlExecutionTarget(view.state.doc.toString(), selection.from, selection.to)?.sql ?? "";
   }, [sqlText]);
 
-  const editorExtensions = useMemo(() => [sql(), activeSqlStatement], []);
+  const editorExtensions = useMemo(
+    () => [sql({ dialect: engine === "mysql" ? MySQL : PostgreSQL }), activeSqlStatement],
+    [engine],
+  );
 
   const runFromEditor = () => {
     void run(selectedOrCurrentStatement(editorRef.current?.view));
@@ -1010,10 +1060,11 @@ function ProfileModal({
 
   const importConnectionUrl = (value: string) => {
     try {
-      const imported = parsePostgresConnectionUrl(value);
+      const imported = parseConnectionUrl(value);
       setForm((current) => ({
         ...current,
-        name: !profile && (!current.name.trim() || current.name === "Local PostgreSQL")
+        engine: imported.engine,
+        name: !profile && (!current.name.trim() || current.name === ENGINE_PRESETS[current.engine].name)
           ? imported.suggestedName
           : current.name,
         host: imported.host,
@@ -1060,10 +1111,26 @@ function ProfileModal({
     <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="connection-modal-title">
         <div className="modal-header">
-          <div><span className="eyebrow">POSTGRESQL</span><h2 id="connection-modal-title">{profile ? "Edit connection" : "New connection"}</h2></div>
+          <div><span className="eyebrow">{ENGINE_PRESETS[form.engine].label.toUpperCase()}</span><h2 id="connection-modal-title">{profile ? "Edit connection" : "New connection"}</h2></div>
           <button className="icon-button" onClick={onClose} aria-label="Close">×</button>
         </div>
         <div className="form-grid">
+          <div className="form-field full">
+            <span>Database engine</span>
+            <div className="engine-picker" role="group" aria-label="Database engine">
+              {(["postgres", "mysql"] as const).map((engine) => (
+                <button
+                  key={engine}
+                  type="button"
+                  className={`engine-option ${form.engine === engine ? "selected" : ""}`}
+                  aria-pressed={form.engine === engine}
+                  onClick={() => setForm((current) => applyEngineDefaults(current, engine))}
+                >
+                  {ENGINE_PRESETS[engine].label}
+                </button>
+              ))}
+            </div>
+          </div>
           <label className="form-field full">
             <span>Connection URL</span>
             <div className="url-field">
@@ -1081,14 +1148,14 @@ function ProfileModal({
                 autoComplete="off"
                 autoCapitalize="none"
                 spellCheck={false}
-                placeholder="postgresql://user:password@host:5432/database"
+                placeholder={ENGINE_PRESETS[form.engine].urlPlaceholder}
               />
               <button className="secondary-button" onClick={() => importConnectionUrl(connectionUrl)} disabled={!connectionUrl.trim()}>Import URL</button>
             </div>
           </label>
           <label className="form-field full">
             <span>Name</span>
-            <input className="text-input" value={form.name} onChange={(event) => update("name", event.target.value)} placeholder="Local PostgreSQL" />
+            <input className="text-input" value={form.name} onChange={(event) => update("name", event.target.value)} placeholder={ENGINE_PRESETS[form.engine].name} />
           </label>
           <div className="form-field full">
             <span>Connection color</span>
@@ -1224,9 +1291,9 @@ function resolveFullTableSelect(sqlText: string, schemaTree: SchemaNode[]): { sc
 }
 
 function decodeSqlIdentifier(identifier: string): string {
-  return identifier.startsWith("\"")
-    ? identifier.slice(1, -1).replaceAll("\"\"", "\"")
-    : identifier.toLowerCase();
+  if (identifier.startsWith("\"")) return identifier.slice(1, -1).replaceAll("\"\"", "\"");
+  if (identifier.startsWith("`")) return identifier.slice(1, -1).replaceAll("``", "`");
+  return identifier.toLowerCase();
 }
 
 function runShortcutGlyph(): string {

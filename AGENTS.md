@@ -3,7 +3,7 @@
 ## Product
 
 - DBM is a local-first desktop database manager (TablePlus / DataGrip style) for macOS, Windows, and Linux.
-- The first milestone is PostgreSQL: saved connections, schema exploration, paginated table browsing, SQL workbench tabs, PK-backed edits, and safe local profile storage.
+- The current milestone is PostgreSQL and MySQL: saved connections, schema exploration, paginated table browsing, SQL workbench tabs, PK-backed edits, and safe local profile storage.
 - Clearly separate current features from roadmap ideas. Do not present Redis, SSH jump hosts, encrypted profile sync, or other follow-ups as shipped unless the repository already implements them.
 - Prefer TablePlus/DataGrip-like defaults when UX is ambiguous: fast path to query, obvious refresh, non-destructive confirms for bulk writes.
 
@@ -11,7 +11,7 @@
 
 - `apps/desktop` contains the Tauri desktop application (`@dbm/desktop`) and its React UI.
 - `apps/desktop/ui/src` is the React frontend (Vite, Zustand, CodeMirror SQL editor).
-- `apps/desktop/src-tauri/src` is the Rust backend (Postgres, keyring, local SQLite storage, updates).
+- `apps/desktop/src-tauri/src` is the Rust backend (Postgres, MySQL, keyring, local SQLite storage, updates).
 - `docs/releases.md` contains public-release signing, notarization, and publishing requirements.
 - `scripts` contains build and install helpers.
 - There is no separate monorepo package for the UI; frontend and backend live under `apps/desktop`.
@@ -38,7 +38,7 @@
 
 - **Local-only:** connection profiles, query history, and results stay on the machine. Passwords live only in the OS keyring / credential store, never in the app SQLite file.
 - **Connect → query:** opening a connection should land the user in a SQL query tab so they can run statements immediately (schema tree remains in the sidebar). Selecting an already-connected profile should keep or restore that profile's workbench, not dump the user on the empty welcome pane. Deleting or disconnecting a profile must close its tabs.
-- **Table tabs:** paginated previews, filters, ordering, CSV copy/export, PK-backed edits with `xmin` concurrency, read-only profiles.
+- **Table tabs:** paginated previews, filters, ordering, CSV copy/export, PK-backed edits (PostgreSQL `xmin` concurrency; MySQL primary-key matching), read-only profiles.
 - **Query tabs:** run statement under cursor or selection (⌘/Ctrl+Enter), history per profile+database, results capped (10k rows). Simple `SELECT * FROM table` can open the editable table viewer.
 - **Refresh:** table and query result views should be re-fetchable without re-authoring filters or SQL (toolbar Refresh).
 - SSH jump hosts, Redis, and encrypted profile sync are intentional non-goals until documented otherwise.

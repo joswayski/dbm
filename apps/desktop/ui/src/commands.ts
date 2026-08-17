@@ -79,6 +79,7 @@ export function saveProfile(input: SaveProfileInput): Promise<ConnectionProfile>
       id: input.id ?? crypto.randomUUID(),
       name: input.name,
       color: input.color,
+      engine: input.engine,
       host: input.host,
       port: input.port,
       username: input.username,
@@ -116,7 +117,8 @@ export function connectProfile(profileId: string): Promise<WorkspaceInfo> {
   return call("connect_profile", { profileId }, () => {
     const summary = browserProfiles.find((item) => item.profile.id === profileId);
     if (!summary) throw new Error("Profile not found");
-    const databases: DatabaseRef[] = [...new Set([summary.profile.defaultDatabase, "postgres"])]
+    const fallback = summary.profile.engine === "mysql" ? "mysql" : "postgres";
+    const databases: DatabaseRef[] = [...new Set([summary.profile.defaultDatabase, fallback])]
       .map((name) => ({ name, isTemplate: false, isConnectable: true }));
     return { profile: summary.profile, databases };
   });
@@ -154,7 +156,23 @@ const browserSchema: SchemaNode[] = [
 ];
 
 export function loadSchemaTree(profileId: string): Promise<SchemaNode[]> {
-  return call("load_schema_tree", { profileId }, () => browserSchema);
+  return call("load_schema_tree", { profileId }, () => {
+    const summary = browserProfiles.find((item) => item.profile.id === profileId);
+    if (summary?.profile.engine === "mysql") {
+      const database = summary.profile.defaultDatabase;
+      return [{
+        name: database,
+        kind: "schema",
+        schema: database,
+        table: null,
+        children: [
+          { name: "users", kind: "table", schema: database, table: "users", children: [] },
+          { name: "orders", kind: "table", schema: database, table: "orders", children: [] },
+        ],
+      }];
+    }
+    return browserSchema;
+  });
 }
 
 export function loadTablePage(request: TablePageRequest): Promise<TablePage> {
@@ -188,7 +206,7 @@ export function runQuery(request: QueryRequest): Promise<QueryResponse> {
     const entry: QueryHistoryEntry = {
       id: crypto.randomUUID(),
       profileId: request.profileId,
-      database: "postgres",
+      database: browserProfiles.find((item) => item.profile.id === request.profileId)?.profile.defaultDatabase ?? "postgres",
       sql: request.sql,
       executedAt: now,
       durationMs: 2,

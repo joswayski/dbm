@@ -3,6 +3,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DatabaseEngine {
+    #[default]
+    Postgres,
+    Mysql,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TlsMode {
@@ -29,6 +37,8 @@ pub struct ConnectionProfile {
     pub id: Uuid,
     pub name: String,
     pub color: Option<String>,
+    #[serde(default)]
+    pub engine: DatabaseEngine,
     pub host: String,
     pub port: u16,
     pub username: String,
@@ -47,6 +57,8 @@ pub struct SaveProfileInput {
     pub id: Option<Uuid>,
     pub name: String,
     pub color: Option<String>,
+    #[serde(default)]
+    pub engine: DatabaseEngine,
     pub host: String,
     pub port: u16,
     pub username: String,
