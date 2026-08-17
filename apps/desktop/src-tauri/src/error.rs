@@ -71,6 +71,12 @@ impl From<mysql_async::Error> for AppError {
     }
 }
 
+impl From<redis::RedisError> for AppError {
+    fn from(error: redis::RedisError) -> Self {
+        Self::database(&error)
+    }
+}
+
 impl From<keyring::Error> for AppError {
     fn from(error: keyring::Error) -> Self {
         Self::Credential(error.to_string())

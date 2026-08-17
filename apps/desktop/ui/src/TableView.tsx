@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties, type Mous
 import { createPortal } from "react-dom";
 
 import * as commands from "./commands";
+import { useDbmStore } from "./store";
 import type {
   FilterCondition,
   FilterOperator,
@@ -119,6 +120,9 @@ export function TableView({
   const [exporting, setExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
   const [exportResult, setExportResult] = useState<ExportResult | null>(null);
+  const openTable = useDbmStore((state) => state.openTable);
+  const redisKeyListing = schema === "keys";
+  const redisKeyView = ["string", "hash", "list", "set", "zset", "stream"].includes(schema);
   const filtersInitialized = useRef(false);
   const gridRef = useRef<HTMLDivElement>(null);
   const previewCloseTimer = useRef<number | null>(null);
@@ -579,7 +583,7 @@ export function TableView({
   return (
     <div className="table-view">
       <div className="view-toolbar">
-        <div><span className="eyebrow">TABLE</span><h2>{schema}.{table}</h2></div>
+        <div><span className="eyebrow">{redisKeyListing ? "KEYS" : redisKeyView ? schema.toUpperCase() : "TABLE"}</span><h2>{redisKeyListing ? (table === "all" ? "all keys" : `${table} keys`) : redisKeyView ? table : `${schema}.${table}`}</h2></div>
         <div className="toolbar-actions">
           <button
             className="secondary-button"
@@ -603,6 +607,16 @@ export function TableView({
               onClick={(event) => { event.stopPropagation(); setSelectionMenuOpen((open) => !open); }}
             >{selectedEntries.length} selected <span aria-hidden="true">⌄</span></button>
             {selectionMenuOpen ? <div className="selection-actions-menu" role="menu" onClick={(event) => event.stopPropagation()}>
+              {redisKeyListing ? <button role="menuitem" onClick={() => {
+                const keyIndex = page?.metadata.columns.findIndex((column) => column.name === "key") ?? 0;
+                const typeIndex = page?.metadata.columns.findIndex((column) => column.name === "type") ?? 1;
+                selectedEntries.forEach((entry) => {
+                  const key = String(entry.values[keyIndex] ?? "");
+                  const keyType = String(entry.values[typeIndex] ?? "string");
+                  if (key) openTable(profileId, keyType, key);
+                });
+                setSelectionMenuOpen(false);
+              }}>Open selected key{selectedEntries.length === 1 ? "" : "s"}</button> : null}
               <button role="menuitem" onClick={() => { void copyEntries(selectedEntries, "selected"); setSelectionMenuOpen(false); }}>Copy selected as CSV</button>
               {editable ? <button role="menuitem" className={allSelectedDeleted ? "" : "danger"} onClick={stageDeleteForSelected}>{allSelectedDeleted ? "Undo staged deletion" : `Stage ${selectedEntries.length === 1 ? "row" : `${selectedEntries.length} rows`} for deletion`}</button> : null}
               <button role="menuitem" onClick={() => { setSelectedRows(new Set()); setSelectionAnchor(null); setSelectionMenuOpen(false); }}>Clear selection</button>

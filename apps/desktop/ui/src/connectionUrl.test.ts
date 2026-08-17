@@ -47,9 +47,37 @@ describe("parseConnectionUrl", () => {
     });
   });
 
+  it("imports Redis and Valkey URLs without requiring a username", () => {
+    expect(parseConnectionUrl("redis://localhost:6379/2")).toEqual({
+      engine: "redis",
+      host: "localhost",
+      port: 6379,
+      username: "",
+      defaultDatabase: "2",
+      tlsMode: "preferred",
+      password: undefined,
+      suggestedName: "2 @ localhost",
+    });
+    expect(parseConnectionUrl("rediss://default:secret@cache.example:6380/0")).toMatchObject({
+      engine: "redis",
+      host: "cache.example",
+      port: 6380,
+      username: "default",
+      defaultDatabase: "0",
+      tlsMode: "required",
+      password: "secret",
+    });
+    expect(parseConnectionUrl("valkey://127.0.0.1/0")).toMatchObject({
+      engine: "redis",
+      host: "127.0.0.1",
+      port: 6379,
+      defaultDatabase: "0",
+    });
+  });
+
   it("rejects unsupported protocols", () => {
-    expect(() => parseConnectionUrl("redis://localhost:6379")).toThrow(
-      "The connection URL must begin with postgres://, postgresql://, mysql://, or mariadb://.",
+    expect(() => parseConnectionUrl("mongodb://localhost:27017")).toThrow(
+      "The connection URL must begin with postgres://, postgresql://, mysql://, mariadb://, redis://, rediss://, valkey://, or valkeys://.",
     );
     expect(() => parsePostgresConnectionUrl("mysql://root@localhost/app")).toThrow(
       "The connection URL must begin with postgres:// or postgresql://.",
