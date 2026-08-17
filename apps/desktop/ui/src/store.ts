@@ -1,7 +1,7 @@
 import { create } from "zustand";
 
 import * as commands from "./commands";
-import type { ConnectionProfile, ProfileSummary, Tab, WorkspaceInfo } from "./types";
+import type { ConnectionProfile, DatabaseEngine, ProfileSummary, Tab, WorkspaceInfo } from "./types";
 
 type DbmStore = {
   profiles: ProfileSummary[];
@@ -85,12 +85,12 @@ export const useDbmStore = create<DbmStore>((set, get) => ({
       }));
       return;
     }
-    const tab: Tab = { id: crypto.randomUUID(), title: `${schema}.${table}`, kind: "table", profileId, schema, table };
+    const tab: Tab = { id: crypto.randomUUID(), title: tableTitle(schema, table), kind: "table", profileId, schema, table };
     set((state) => ({ tabs: [...state.tabs, tab], activeTabId: tab.id, activeProfileId: profileId }));
   },
   openQuery: (profileId) => {
     set((state) => {
-      const tab = createQueryTab(profileId, state.tabs);
+      const tab = createQueryTab(profileId, state.tabs, engineForProfile(state, profileId));
       return { tabs: [...state.tabs, tab], activeTabId: tab.id, activeProfileId: profileId };
     });
   },
@@ -149,7 +149,7 @@ function revealTab(tabs: Tab[], tabId: string): Tab[] {
   return tabs.map((tab) => tab.id === tabId ? { ...tab, collapsed: false } : tab);
 }
 
-function createQueryTab(profileId: string, tabs: Tab[]): Tab {
+function createQueryTab(profileId: string, tabs: Tab[], engine: DatabaseEngine = "postgres"): Tab {
   const existingTitles = new Set(
     tabs
       .filter((tab) => tab.kind === "query" && tab.profileId === profileId)
@@ -162,12 +162,27 @@ function createQueryTab(profileId: string, tabs: Tab[]): Tab {
     title: `Query ${queryNumber}`,
     kind: "query",
     profileId,
-    sql: "SELECT now();",
+    sql: engine === "redis" ? "PING" : "SELECT now();",
   };
 }
 
+function engineForProfile(
+  state: Pick<DbmStore, "profiles" | "workspaces">,
+  profileId: string,
+): DatabaseEngine {
+  return state.workspaces[profileId]?.profile.engine
+    ?? state.profiles.find((summary) => summary.profile.id === profileId)?.profile.engine
+    ?? "postgres";
+}
+
+function tableTitle(schema: string, table: string): string {
+  if (schema === "keys") return table === "all" ? "all keys" : `${table} keys`;
+  if (["string", "hash", "list", "set", "zset", "stream"].includes(schema)) return table;
+  return `${schema}.${table}`;
+}
+
 function activatedProfileWorkbench(
-  state: Pick<DbmStore, "tabs" | "activeTabId" | "activeProfileId">,
+  state: Pick<DbmStore, "profiles" | "workspaces" | "tabs" | "activeTabId" | "activeProfileId">,
   profileId: string,
 ): Pick<DbmStore, "tabs" | "activeTabId" | "activeProfileId"> {
   const currentTab = state.tabs.find((tab) => tab.id === state.activeTabId);
@@ -188,7 +203,7 @@ function activatedProfileWorkbench(
     };
   }
 
-  const tab = createQueryTab(profileId, state.tabs);
+  const tab = createQueryTab(profileId, state.tabs, engineForProfile(state, profileId));
   return {
     tabs: [...state.tabs, tab],
     activeTabId: tab.id,

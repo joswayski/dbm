@@ -5,13 +5,14 @@ mod keyring_store;
 mod models;
 mod mysql;
 mod postgres;
+mod redis_session;
 mod session;
 mod state;
 mod storage;
 mod updates;
 
 use chrono::Utc;
-use error::{AppError, AppResult};
+use error::AppResult;
 use models::{
     ConnectionProfile, MutationBatch, ProfileSummary, QueryHistoryEntry, QueryRequest,
     SaveProfileInput, TablePageRequest, WorkspaceInfo,
@@ -42,19 +43,7 @@ fn profile_for_test(state: &AppState, input: &SaveProfileInput) -> AppResult<Con
         created_at: existing.as_ref().map_or(now, |profile| profile.created_at),
         updated_at: now,
     };
-    if profile.name.is_empty() || profile.host.is_empty() || profile.username.is_empty() {
-        return Err(AppError::InvalidInput(
-            "name, host, and username are required".into(),
-        ));
-    }
-    if profile.default_database.is_empty() {
-        return Err(AppError::InvalidInput("database is required".into()));
-    }
-    if profile.port == 0 {
-        return Err(AppError::InvalidInput(
-            "port must be between 1 and 65535".into(),
-        ));
-    }
+    profile.validate()?;
     Ok(profile)
 }
 

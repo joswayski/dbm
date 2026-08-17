@@ -107,8 +107,8 @@ export function deleteProfile(profileId: string): Promise<void> {
 
 export function testProfile(input: SaveProfileInput): Promise<void> {
   return call("test_profile", { input }, async () => {
-    if (!input.host || !input.username) {
-      throw new Error("Host and username are required");
+    if (!input.host || (input.engine !== "redis" && !input.username)) {
+      throw new Error(input.engine === "redis" ? "Host is required" : "Host and username are required");
     }
   });
 }
@@ -117,7 +117,7 @@ export function connectProfile(profileId: string): Promise<WorkspaceInfo> {
   return call("connect_profile", { profileId }, () => {
     const summary = browserProfiles.find((item) => item.profile.id === profileId);
     if (!summary) throw new Error("Profile not found");
-    const fallback = summary.profile.engine === "mysql" ? "mysql" : "postgres";
+    const fallback = summary.profile.engine === "redis" ? "0" : summary.profile.engine === "mysql" ? "mysql" : "postgres";
     const databases: DatabaseRef[] = [...new Set([summary.profile.defaultDatabase, fallback])]
       .map((name) => ({ name, isTemplate: false, isConnectable: true }));
     return { profile: summary.profile, databases };
@@ -158,6 +158,19 @@ const browserSchema: SchemaNode[] = [
 export function loadSchemaTree(profileId: string): Promise<SchemaNode[]> {
   return call("load_schema_tree", { profileId }, () => {
     const summary = browserProfiles.find((item) => item.profile.id === profileId);
+    if (summary?.profile.engine === "redis") {
+      return [{
+        name: "keys",
+        kind: "schema",
+        schema: "keys",
+        table: null,
+        children: [
+          { name: "all", kind: "table", schema: "keys", table: "all", children: [] },
+          { name: "string", kind: "table", schema: "keys", table: "string", children: [] },
+          { name: "hash", kind: "table", schema: "keys", table: "hash", children: [] },
+        ],
+      }];
+    }
     if (summary?.profile.engine === "mysql") {
       const database = summary.profile.defaultDatabase;
       return [{
@@ -177,6 +190,9 @@ export function loadSchemaTree(profileId: string): Promise<SchemaNode[]> {
 
 export function loadTablePage(request: TablePageRequest): Promise<TablePage> {
   return call("load_table_page", { request }, () => {
+    if (request.schema === "keys" || ["string", "hash", "list", "set", "zset", "stream"].includes(request.schema)) {
+      return browserRedisPage(request);
+    }
     const metadata = browserTableMetadata(request.schema, request.table);
     const rows = (browserRows[request.table] ?? [])
       .filter((row) => request.filters.every((filter) => browserFilterMatches(row, metadata, filter)))
@@ -213,6 +229,17 @@ export function runQuery(request: QueryRequest): Promise<QueryResponse> {
       success: true,
     };
     browserHistory.unshift(entry);
+    if (/^\s*ping\b/i.test(request.sql)) {
+      return {
+        columns: [{ name: "result", dataType: "string" }],
+        rows: [["PONG"]],
+        rowCount: 1,
+        affectedRows: null,
+        durationMs: 2,
+        truncated: false,
+        notices: [],
+      };
+    }
     if (/^\s*(select|show|with|values)/i.test(request.sql)) {
       return {
         columns: [{ name: "result", dataType: "text" }],
@@ -350,6 +377,73 @@ export async function revealExportedFile(path: string): Promise<void> {
   if (!inTauri()) return;
   const { revealItemInDir } = await import("@tauri-apps/plugin-opener");
   await revealItemInDir(path);
+}
+
+function browserRedisPage(request: TablePageRequest): TablePage {
+  if (request.schema === "keys") {
+    const metadata: TableMetadata = {
+      schema: "keys",
+      table: request.table,
+      columns: [
+        { name: "key", dataType: "string", nullable: false, defaultValue: null, ordinal: 1 },
+        { name: "type", dataType: "string", nullable: false, defaultValue: null, ordinal: 2 },
+        { name: "ttl", dataType: "integer", nullable: true, defaultValue: null, ordinal: 3 },
+        { name: "length", dataType: "integer", nullable: true, defaultValue: null, ordinal: 4 },
+        { name: "value", dataType: "string", nullable: true, defaultValue: null, ordinal: 5 },
+      ],
+      primaryKey: ["key"],
+      hasXmin: false,
+    };
+    const rows: JsonValue[][] = [
+      ["session:1", "string", 60, 5, "hello"],
+      ["user:1", "hash", null, 2, null],
+    ].filter((row) => request.table === "all" || row[1] === request.table)
+      .filter((row) => request.filters.every((filter) => browserFilterMatches(row, metadata, filter)));
+    const pageRows = rows.slice(request.offset, request.offset + request.limit);
+    return {
+      metadata,
+      columns: metadata.columns.map((column) => column.name),
+      rows: pageRows,
+      totalRows: rows.length,
+      offset: request.offset,
+      limit: request.limit,
+      hasMore: request.offset + pageRows.length < rows.length,
+    };
+  }
+
+  const metadata: TableMetadata = request.schema === "hash"
+    ? {
+        schema: request.schema,
+        table: request.table,
+        columns: [
+          { name: "field", dataType: "string", nullable: false, defaultValue: null, ordinal: 1 },
+          { name: "value", dataType: "string", nullable: true, defaultValue: null, ordinal: 2 },
+        ],
+        primaryKey: ["field"],
+        hasXmin: false,
+      }
+    : {
+        schema: request.schema,
+        table: request.table,
+        columns: [
+          { name: "field", dataType: "string", nullable: false, defaultValue: null, ordinal: 1 },
+          { name: "value", dataType: "string", nullable: true, defaultValue: null, ordinal: 2 },
+        ],
+        primaryKey: ["field"],
+        hasXmin: false,
+      };
+  const rows: JsonValue[][] = request.schema === "hash"
+    ? [["name", "Jose"], ["email", "jose@example.com"]]
+    : [["value", "hello"]];
+  return {
+    metadata,
+    columns: metadata.columns.map((column) => column.name),
+    rows,
+    totalRows: rows.length,
+    offset: request.offset,
+    limit: request.limit,
+    hasMore: false,
+  };
 }
 
 function browserTableMetadata(schema: string, table: string): TableMetadata {

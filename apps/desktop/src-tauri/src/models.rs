@@ -3,12 +3,15 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
+use crate::error::{AppError, AppResult};
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum DatabaseEngine {
     #[default]
     Postgres,
     Mysql,
+    Redis,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -49,6 +52,62 @@ pub struct ConnectionProfile {
     pub read_only: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+impl ConnectionProfile {
+    pub fn validate(&self) -> AppResult<()> {
+        if self.name.is_empty() || self.host.is_empty() {
+            return Err(AppError::InvalidInput(
+                if matches!(self.engine, DatabaseEngine::Redis) {
+                    "name and host are required"
+                } else {
+                    "name, host, and username are required"
+                }
+                .into(),
+            ));
+        }
+        match self.engine {
+            DatabaseEngine::Redis => {
+                if self.default_database.is_empty() {
+                    return Err(AppError::InvalidInput("database index is required".into()));
+                }
+                if parse_redis_database(&self.default_database).is_err() {
+                    return Err(AppError::InvalidInput(
+                        "Redis database must be a non-negative integer".into(),
+                    ));
+                }
+            }
+            DatabaseEngine::Postgres | DatabaseEngine::Mysql => {
+                if self.username.is_empty() {
+                    return Err(AppError::InvalidInput(
+                        "name, host, and username are required".into(),
+                    ));
+                }
+                if self.default_database.is_empty() {
+                    return Err(AppError::InvalidInput("database is required".into()));
+                }
+            }
+        }
+        if self.port == 0 {
+            return Err(AppError::InvalidInput(
+                "port must be between 1 and 65535".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+pub fn parse_redis_database(value: &str) -> Result<i64, ()> {
+    let trimmed = value.trim();
+    let digits = trimmed
+        .strip_prefix("db")
+        .or_else(|| trimmed.strip_prefix("DB"))
+        .unwrap_or(trimmed);
+    digits
+        .parse::<i64>()
+        .ok()
+        .filter(|index| *index >= 0)
+        .ok_or(())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

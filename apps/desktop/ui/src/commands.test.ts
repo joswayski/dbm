@@ -38,6 +38,36 @@ describe("command adapters", () => {
     }]);
   });
 
+  it("exposes Redis key folders in the browser preview", async () => {
+    const profile = await saveProfile({
+      name: "Cache",
+      color: "#22c55e",
+      engine: "redis",
+      host: "localhost",
+      port: 6379,
+      username: "",
+      defaultDatabase: "0",
+      tlsMode: "disabled",
+      caCertPath: null,
+      ssh: null,
+      readOnly: false,
+    });
+    const workspace = await connectProfile(profile.id);
+    expect(workspace.databases.map((database) => database.name)).toEqual(["0"]);
+    const tree = await loadSchemaTree(profile.id);
+    expect(tree[0]?.schema).toBe("keys");
+    const page = await loadTablePage({
+      profileId: profile.id,
+      schema: "keys",
+      table: "string",
+      offset: 0,
+      limit: 50,
+      filters: [],
+      orderBy: null,
+    });
+    expect(page.rows.map((row) => row[0])).toEqual(["session:1"]);
+  });
+
   it("keeps browser preview profiles local", async () => {
     const profile = await saveProfile({
       name: "Test profile",

@@ -199,6 +199,18 @@ describe("App connection and query navigation", () => {
     expect(screen.getByDisplayValue("root")).toBeInTheDocument();
   });
 
+  it("switches new-connection defaults to Redis / Valkey", () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "New connection" }));
+    fireEvent.click(screen.getByRole("button", { name: "Redis / Valkey" }));
+    expect(screen.getByRole("heading", { name: "New connection" }).closest(".modal-card")).toHaveTextContent("REDIS / VALKEY");
+    expect(screen.getByPlaceholderText("redis://localhost:6379/0")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Local Redis")).toBeInTheDocument();
+    expect(screen.getByDisplayValue(6379)).toBeInTheDocument();
+    expect(screen.getByText("Database index")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("0")).toBeInTheDocument();
+  });
+
   it("tests Save & connect before persisting the profile", async () => {
     const testProfile = vi.spyOn(commands, "testProfile").mockRejectedValueOnce(new Error("Connection refused"));
     const saveProfile = vi.spyOn(commands, "saveProfile");

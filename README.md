@@ -1,10 +1,10 @@
 # DBM
 
 DBM is a local-first desktop database manager for macOS, Windows, and Linux.
-It currently supports PostgreSQL and MySQL (including MariaDB-compatible
-servers): saved connections, database and schema exploration, paginated table
-browsing, SQL execution, and safe local profile storage. Redis and other
-protocol adapters remain planned follow-ups.
+It currently supports PostgreSQL, MySQL (including MariaDB-compatible
+servers), and Redis/Valkey: saved connections, database and schema or key
+exploration, paginated browsing, SQL or Redis command execution, and safe
+local profile storage.
 
 ## Development
 
@@ -82,7 +82,9 @@ Passwords are stored in the operating system credential store when available.
 
 ## What is implemented
 
-- PostgreSQL and MySQL direct connections with disabled, preferred, or required TLS.
+- PostgreSQL, MySQL, and Redis/Valkey direct connections with disabled,
+  preferred, or required TLS. Redis and Valkey use the same RESP protocol;
+  import `redis://`, `rediss://`, `valkey://`, or `valkeys://` URLs.
 - Local connection profiles and query history in an application SQLite database.
 - Passwords through the macOS Keychain, Windows Credential Manager, or Linux
   secret service via `keyring`.
@@ -94,10 +96,13 @@ Passwords are stored in the operating system credential store when available.
   selection for staged edits and deletes.
 - Inline edits and staged deletes for primary-key-backed tables. PostgreSQL
   edits are guarded by `xmin` optimistic concurrency; MySQL edits match on the
-  primary key. Read-only profile mode blocks GUI writes on both engines.
+  primary key. Redis key listings and hash/list/set/zset/stream values can be
+  edited or deleted from the grid. Read-only profile mode blocks GUI writes
+  and Redis write commands.
 - SQL tabs using CodeMirror, query result grids, a 10,000-row safety cap, and
-  per-profile history. Connecting a profile opens a query tab so you can run
-  SQL immediately.
+  per-profile history. Redis connections open a command workbench instead
+  (`PING`, `HGETALL`, `SCAN`, …). Connecting a profile opens a query tab so
+  you can run a statement immediately.
 - Refresh on table previews and query results: reload the current page and
   filters, or re-run the last executed statement, without re-authoring them.
 
@@ -107,9 +112,9 @@ worked on without launching Tauri. The real desktop app uses the Rust commands.
 ## Deliberate follow-ups
 
 SSH jump-host transport, query cancellation with dedicated sessions, Redis
-(including Sentinel/Cluster), and encrypted profile sync are kept out of this
-first vertical slice. The profile model already reserves the SSH shape, but
-the backend returns a clear unsupported-transport error until the forwarding
+Sentinel/Cluster, and encrypted profile sync are kept out of this vertical
+slice. The profile model already reserves the SSH shape, but the backend
+returns a clear unsupported-transport error until the forwarding
 implementation is added and tested on all three OSes.
 
 ## Local data

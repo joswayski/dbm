@@ -13,6 +13,7 @@ export type ImportedPostgresConnection = ImportedConnection;
 const ENGINE_DEFAULTS: Record<DatabaseEngine, { port: number; database: string; label: string }> = {
   postgres: { port: 5432, database: "postgres", label: "PostgreSQL" },
   mysql: { port: 3306, database: "mysql", label: "MySQL" },
+  redis: { port: 6379, database: "0", label: "Redis" },
 };
 
 export function parseConnectionUrl(value: string): ImportedConnection {
@@ -27,14 +28,16 @@ export function parseConnectionUrl(value: string): ImportedConnection {
 
   const engine = engineFromProtocol(url.protocol);
   if (!engine) {
-    throw new Error("The connection URL must begin with postgres://, postgresql://, mysql://, or mariadb://.");
+    throw new Error("The connection URL must begin with postgres://, postgresql://, mysql://, mariadb://, redis://, rediss://, valkey://, or valkeys://.");
   }
 
   const defaults = ENGINE_DEFAULTS[engine];
   const host = stripIpv6Brackets(url.hostname);
   const username = decode(url.username, "username");
-  if (!host || !username) {
-    throw new Error("The connection URL must include a host and username.");
+  if (!host || (engine !== "redis" && !username)) {
+    throw new Error(engine === "redis"
+      ? "The connection URL must include a host."
+      : "The connection URL must include a host and username.");
   }
 
   const port = url.port ? Number(url.port) : defaults.port;
@@ -51,7 +54,9 @@ export function parseConnectionUrl(value: string): ImportedConnection {
     port,
     username,
     defaultDatabase,
-    tlsMode: tlsModeFromUrl(url),
+    tlsMode: engine === "redis" && (url.protocol === "rediss:" || url.protocol === "valkeys:")
+      ? "required"
+      : tlsModeFromUrl(url),
     password,
     suggestedName: `${defaultDatabase} @ ${host}`,
   };
@@ -73,9 +78,18 @@ export function parseMysqlConnectionUrl(value: string): ImportedConnection {
   return imported;
 }
 
+export function parseRedisConnectionUrl(value: string): ImportedConnection {
+  const imported = parseConnectionUrl(value);
+  if (imported.engine !== "redis") {
+    throw new Error("The connection URL must begin with redis://, rediss://, valkey://, or valkeys://.");
+  }
+  return imported;
+}
+
 function engineFromProtocol(protocol: string): DatabaseEngine | null {
   if (protocol === "postgres:" || protocol === "postgresql:") return "postgres";
   if (protocol === "mysql:" || protocol === "mariadb:") return "mysql";
+  if (protocol === "redis:" || protocol === "rediss:" || protocol === "valkey:" || protocol === "valkeys:") return "redis";
   return null;
 }
 

@@ -6,7 +6,7 @@ export type JsonValue =
   | JsonValue[]
   | { [key: string]: JsonValue };
 
-export type DatabaseEngine = "postgres" | "mysql";
+export type DatabaseEngine = "postgres" | "mysql" | "redis";
 
 export type TlsMode = "disabled" | "preferred" | "required";
 
