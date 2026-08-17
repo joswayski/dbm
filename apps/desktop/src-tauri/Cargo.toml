@@ -21,6 +21,7 @@ tauri-build = { version = "2", features = [] }
 chrono.workspace = true
 directories.workspace = true
 keyring.workspace = true
+mysql_async.workspace = true
 native-tls.workspace = true
 parking_lot = "0.12"
 postgres-native-tls.workspace = true

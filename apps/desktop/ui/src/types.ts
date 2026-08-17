@@ -6,6 +6,8 @@ export type JsonValue =
   | JsonValue[]
   | { [key: string]: JsonValue };
 
+export type DatabaseEngine = "postgres" | "mysql";
+
 export type TlsMode = "disabled" | "preferred" | "required";
 
 export type SshConfig = {
@@ -21,6 +23,7 @@ export type ConnectionProfile = {
   id: string;
   name: string;
   color: string | null;
+  engine: DatabaseEngine;
   host: string;
   port: number;
   username: string;
@@ -37,6 +40,7 @@ export type SaveProfileInput = {
   id?: string;
   name: string;
   color: string | null;
+  engine: DatabaseEngine;
   host: string;
   port: number;
   username: string;

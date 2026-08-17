@@ -3,7 +3,9 @@
 mod error;
 mod keyring_store;
 mod models;
+mod mysql;
 mod postgres;
+mod session;
 mod state;
 mod storage;
 mod updates;
@@ -28,6 +30,7 @@ fn profile_for_test(state: &AppState, input: &SaveProfileInput) -> AppResult<Con
         id: input.id.unwrap_or_else(Uuid::new_v4),
         name: input.name.trim().to_owned(),
         color: input.color.clone(),
+        engine: input.engine,
         host: input.host.trim().to_owned(),
         port: input.port,
         username: input.username.trim().to_owned(),
@@ -110,10 +113,11 @@ async fn test_profile(
                 .id
                 .and_then(|id| state.credentials.get_password(id).ok().flatten())
         });
-    postgres::PgSession::connect(profile, password)
+    let session = session::DbSession::connect(profile, password)
         .await
-        .map(|_| ())
-        .map_err(command_error)
+        .map_err(command_error)?;
+    session.close().await;
+    Ok(())
 }
 
 #[tauri::command]

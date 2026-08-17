@@ -259,7 +259,7 @@ export function TableView({
       original,
       changes: [...original],
       primaryKey: page.metadata.primaryKey.map((key) => original[visibleColumns.findIndex((column) => column.name === key)]),
-      xmin: toStringValue(row[visibleColumns.length]),
+      xmin: toStringValue(row[visibleColumns.length] ?? null),
       deleted: false,
     };
   };
@@ -955,8 +955,9 @@ function parseCell(value: string): JsonValue {
   return value;
 }
 
-function toStringValue(value: JsonValue): string | null {
-  return value === null ? null : String(value);
+function toStringValue(value: JsonValue | undefined): string | null {
+  if (value === null || value === undefined) return null;
+  return String(value);
 }
 
 function fileName(path: string): string {

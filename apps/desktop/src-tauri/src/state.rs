@@ -7,13 +7,13 @@ use uuid::Uuid;
 use crate::error::{AppError, AppResult};
 use crate::keyring_store::CredentialStore;
 use crate::models::{ConnectionProfile, ProfileSummary, SaveProfileInput};
-use crate::postgres::PgSession;
+use crate::session::DbSession;
 use crate::storage::LocalStore;
 
 pub struct AppState {
     pub store: LocalStore,
     pub credentials: CredentialStore,
-    pub sessions: Mutex<HashMap<Uuid, Arc<PgSession>>>,
+    pub sessions: Mutex<HashMap<Uuid, Arc<DbSession>>>,
 }
 
 impl AppState {
@@ -25,7 +25,7 @@ impl AppState {
         })
     }
 
-    pub async fn session(&self, profile_id: Uuid) -> AppResult<Arc<PgSession>> {
+    pub async fn session(&self, profile_id: Uuid) -> AppResult<Arc<DbSession>> {
         self.sessions
             .lock()
             .await
@@ -49,18 +49,24 @@ impl AppState {
             .collect())
     }
 
-    pub async fn connect(&self, profile: ConnectionProfile) -> AppResult<Arc<PgSession>> {
+    pub async fn connect(&self, profile: ConnectionProfile) -> AppResult<Arc<DbSession>> {
         let password = self.credentials.get_password(profile.id)?;
-        let session = Arc::new(PgSession::connect(profile.clone(), password).await?);
-        self.sessions
-            .lock()
-            .await
-            .insert(profile.id, session.clone());
+        let session = Arc::new(DbSession::connect(profile.clone(), password).await?);
+        let previous = {
+            let mut sessions = self.sessions.lock().await;
+            sessions.insert(profile.id, session.clone())
+        };
+        if let Some(previous) = previous {
+            previous.close().await;
+        }
         Ok(session)
     }
 
     pub async fn disconnect(&self, profile_id: Uuid) {
-        self.sessions.lock().await.remove(&profile_id);
+        let previous = self.sessions.lock().await.remove(&profile_id);
+        if let Some(previous) = previous {
+            previous.close().await;
+        }
     }
 
     pub fn save_profile(&self, input: SaveProfileInput) -> AppResult<ConnectionProfile> {

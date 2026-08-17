@@ -18,6 +18,7 @@ describe("DBM store", () => {
     const profile = await commands.saveProfile({
       name: "Keep my tabs",
       color: "#38bdf8",
+      engine: "postgres",
       host: "localhost",
       port: 5432,
       username: "postgres",
@@ -64,6 +65,7 @@ describe("DBM store", () => {
     const saved = await useDbmStore.getState().saveProfile({
       name: "Selected after save",
       color: "#ef4444",
+      engine: "postgres",
       host: "localhost",
       port: 5432,
       username: "postgres",
@@ -104,6 +106,7 @@ describe("DBM store", () => {
     const profile = await commands.saveProfile({
       name: "Ready to query",
       color: "#22c55e",
+      engine: "postgres",
       host: "localhost",
       port: 5432,
       username: "postgres",

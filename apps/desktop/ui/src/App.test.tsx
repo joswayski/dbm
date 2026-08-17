@@ -25,6 +25,7 @@ describe("App connection and query navigation", () => {
     const profile = await commands.saveProfile({
       name: "Unified connection",
       color: "#ef4444",
+      engine: "postgres",
       host: "localhost",
       port: 5432,
       username: "postgres",
@@ -157,6 +158,17 @@ describe("App connection and query navigation", () => {
       "title",
       "A focused update.",
     );
+  });
+
+  it("switches new-connection defaults to MySQL", () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "New connection" }));
+    fireEvent.click(screen.getByRole("button", { name: "MySQL" }));
+    expect(screen.getByRole("heading", { name: "New connection" }).closest(".modal-card")).toHaveTextContent("MYSQL");
+    expect(screen.getByPlaceholderText("mysql://user:password@host:3306/database")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Local MySQL")).toBeInTheDocument();
+    expect(screen.getByDisplayValue(3306)).toBeInTheDocument();
+    expect(screen.getByDisplayValue("root")).toBeInTheDocument();
   });
 
   it("tests Save & connect before persisting the profile", async () => {

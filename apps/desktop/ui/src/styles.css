@@ -361,6 +361,10 @@ body.resizing-column, body.resizing-column * { cursor: col-resize !important; us
 .form-field { display: flex; flex-direction: column; gap: 6px; }
 .form-field span, .checkbox-field span { color: #aebfd2; font-size: 10px; }
 .form-field.full, .checkbox-field.full { grid-column: 1 / -1; }
+.engine-picker { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.engine-option { height: 34px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: var(--text); font-size: 12px; font-weight: 650; }
+.engine-option:hover { border-color: var(--border-strong); background: var(--panel-hover); }
+.engine-option.selected { border-color: var(--accent); color: var(--accent); box-shadow: 0 0 0 2px rgba(56, 189, 248, .11); }
 .url-field { display: flex; gap: 8px; }
 .url-field .text-input { min-width: 0; flex: 1; }
 .url-field .secondary-button { flex: 0 0 auto; }

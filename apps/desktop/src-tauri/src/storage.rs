@@ -9,7 +9,9 @@ use rusqlite::{Connection, OptionalExtension, params};
 use uuid::Uuid;
 
 use crate::error::{AppError, AppResult};
-use crate::models::{ConnectionProfile, QueryHistoryEntry, SaveProfileInput, SshConfig, TlsMode};
+use crate::models::{
+    ConnectionProfile, DatabaseEngine, QueryHistoryEntry, SaveProfileInput, SshConfig, TlsMode,
+};
 
 #[derive(Debug, Clone)]
 pub struct LocalStore {
@@ -51,6 +53,7 @@ impl LocalStore {
                  id TEXT PRIMARY KEY NOT NULL,
                  name TEXT NOT NULL,
                  color TEXT,
+                 engine TEXT NOT NULL DEFAULT 'postgres',
                  host TEXT NOT NULL,
                  port INTEGER NOT NULL,
                  username TEXT NOT NULL,
@@ -76,13 +79,19 @@ impl LocalStore {
              CREATE INDEX IF NOT EXISTS query_history_profile_database_time
                  ON query_history(profile_id, database_name, executed_at DESC);",
         )?;
+        ensure_column(
+            &connection,
+            "profiles",
+            "engine",
+            "TEXT NOT NULL DEFAULT 'postgres'",
+        )?;
         Ok(())
     }
 
     pub fn list_profiles(&self) -> AppResult<Vec<ConnectionProfile>> {
         let connection = self.open()?;
         let mut statement = connection.prepare(
-            "SELECT id, name, color, host, port, username, default_database,
+            "SELECT id, name, color, engine, host, port, username, default_database,
                     tls_mode, ca_cert_path, ssh_json, read_only, created_at, updated_at
              FROM profiles ORDER BY name COLLATE NOCASE, id",
         )?;
@@ -93,7 +102,7 @@ impl LocalStore {
     pub fn get_profile(&self, id: Uuid) -> AppResult<Option<ConnectionProfile>> {
         let connection = self.open()?;
         let mut statement = connection.prepare(
-            "SELECT id, name, color, host, port, username, default_database,
+            "SELECT id, name, color, engine, host, port, username, default_database,
                     tls_mode, ca_cert_path, ssh_json, read_only, created_at, updated_at
              FROM profiles WHERE id = ?1",
         )?;
@@ -113,6 +122,7 @@ impl LocalStore {
             id,
             name: input.name.trim().to_owned(),
             color: input.color.clone(),
+            engine: input.engine,
             host: input.host.trim().to_owned(),
             port: input.port,
             username: input.username.trim().to_owned(),
@@ -147,12 +157,13 @@ impl LocalStore {
         let connection = self.open()?;
         connection.execute(
             "INSERT INTO profiles (
-                id, name, color, host, port, username, default_database, tls_mode,
+                id, name, color, engine, host, port, username, default_database, tls_mode,
                 ca_cert_path, ssh_json, read_only, created_at, updated_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
              ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
                 color = excluded.color,
+                engine = excluded.engine,
                 host = excluded.host,
                 port = excluded.port,
                 username = excluded.username,
@@ -166,6 +177,7 @@ impl LocalStore {
                 profile.id.to_string(),
                 profile.name,
                 profile.color,
+                engine_to_string(&profile.engine),
                 profile.host,
                 i64::from(profile.port),
                 profile.username,
@@ -239,18 +251,22 @@ impl LocalStore {
 }
 
 fn profile_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ConnectionProfile> {
-    let tls_mode = match row.get::<_, String>(7)?.as_str() {
+    let engine = match row.get::<_, String>(3)?.as_str() {
+        "mysql" => DatabaseEngine::Mysql,
+        _ => DatabaseEngine::Postgres,
+    };
+    let tls_mode = match row.get::<_, String>(8)?.as_str() {
         "disabled" => TlsMode::Disabled,
         "required" => TlsMode::Required,
         _ => TlsMode::Preferred,
     };
     let ssh = row
-        .get::<_, Option<String>>(9)?
+        .get::<_, Option<String>>(10)?
         .map(|json| serde_json::from_str::<SshConfig>(&json))
         .transpose()
         .map_err(|error| {
             rusqlite::Error::FromSqlConversionFailure(
-                9,
+                10,
                 rusqlite::types::Type::Text,
                 Box::new(error),
             )
@@ -259,16 +275,17 @@ fn profile_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ConnectionProfi
         id: parse_uuid(row.get::<_, String>(0)?)?,
         name: row.get(1)?,
         color: row.get(2)?,
-        host: row.get(3)?,
-        port: u16::try_from(row.get::<_, i64>(4)?).unwrap_or(5432),
-        username: row.get(5)?,
-        default_database: row.get(6)?,
+        engine,
+        host: row.get(4)?,
+        port: u16::try_from(row.get::<_, i64>(5)?).unwrap_or_else(|_| default_port(&engine)),
+        username: row.get(6)?,
+        default_database: row.get(7)?,
         tls_mode,
-        ca_cert_path: row.get(8)?,
+        ca_cert_path: row.get(9)?,
         ssh,
-        read_only: row.get::<_, i64>(10)? != 0,
-        created_at: parse_datetime(row.get::<_, String>(11)?)?,
-        updated_at: parse_datetime(row.get::<_, String>(12)?)?,
+        read_only: row.get::<_, i64>(11)? != 0,
+        created_at: parse_datetime(row.get::<_, String>(12)?)?,
+        updated_at: parse_datetime(row.get::<_, String>(13)?)?,
     })
 }
 
@@ -310,6 +327,40 @@ fn tls_mode_to_string(mode: &TlsMode) -> &'static str {
     }
 }
 
+fn engine_to_string(engine: &DatabaseEngine) -> &'static str {
+    match engine {
+        DatabaseEngine::Postgres => "postgres",
+        DatabaseEngine::Mysql => "mysql",
+    }
+}
+
+fn default_port(engine: &DatabaseEngine) -> u16 {
+    match engine {
+        DatabaseEngine::Postgres => 5432,
+        DatabaseEngine::Mysql => 3306,
+    }
+}
+
+fn ensure_column(
+    connection: &Connection,
+    table: &str,
+    column: &str,
+    definition: &str,
+) -> AppResult<()> {
+    let mut statement = connection.prepare(&format!("PRAGMA table_info({table})"))?;
+    let exists = statement
+        .query_map([], |row| row.get::<_, String>(1))?
+        .filter_map(Result::ok)
+        .any(|name| name == column);
+    if !exists {
+        connection.execute(
+            &format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"),
+            [],
+        )?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -321,6 +372,7 @@ mod tests {
             id: None,
             name: "Local".into(),
             color: Some("#22c55e".into()),
+            engine: DatabaseEngine::Postgres,
             host: "localhost".into(),
             port: 5432,
             username: "postgres".into(),
@@ -334,6 +386,60 @@ mod tests {
         let profile = store.save_profile(&input).expect("save");
         let profiles = store.list_profiles().expect("list");
         assert_eq!(profiles, vec![profile]);
+        std::fs::remove_file(path).expect("remove temp db");
+    }
+
+    #[test]
+    fn mysql_profiles_round_trip_and_legacy_rows_default_to_postgres() {
+        let path = std::env::temp_dir().join(format!("dbm-test-{}.sqlite3", Uuid::new_v4()));
+        let store = LocalStore::from_path(&path).expect("store");
+        let mysql = store
+            .save_profile(&SaveProfileInput {
+                id: None,
+                name: "Railway MySQL".into(),
+                color: None,
+                engine: DatabaseEngine::Mysql,
+                host: "caboose.proxy.rlwy.net".into(),
+                port: 3306,
+                username: "root".into(),
+                default_database: "railway".into(),
+                tls_mode: TlsMode::Required,
+                ca_cert_path: None,
+                ssh: None,
+                read_only: true,
+                password: None,
+            })
+            .expect("save mysql");
+        assert_eq!(mysql.engine, DatabaseEngine::Mysql);
+        assert_eq!(
+            store
+                .get_profile(mysql.id)
+                .expect("get")
+                .expect("found")
+                .engine,
+            DatabaseEngine::Mysql
+        );
+
+        let connection = rusqlite::Connection::open(&path).expect("open");
+        connection
+            .execute(
+                "INSERT INTO profiles (
+                    id, name, color, host, port, username, default_database, tls_mode,
+                    ca_cert_path, ssh_json, read_only, created_at, updated_at
+                 ) VALUES (?1, 'Legacy', NULL, 'localhost', 5432, 'postgres', 'postgres',
+                           'preferred', NULL, NULL, 0, ?2, ?2)",
+                params![Uuid::new_v4().to_string(), Utc::now().to_rfc3339()],
+            )
+            .expect("insert legacy without engine");
+        drop(connection);
+
+        let profiles = store.list_profiles().expect("list after legacy insert");
+        assert!(
+            profiles
+                .iter()
+                .any(|profile| profile.name == "Legacy"
+                    && profile.engine == DatabaseEngine::Postgres)
+        );
         std::fs::remove_file(path).expect("remove temp db");
     }
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { applyTableMutations, listProfiles, loadTablePage, saveProfile, toDisplayValue } from "./commands";
+import { applyTableMutations, connectProfile, listProfiles, loadSchemaTree, loadTablePage, saveProfile, toDisplayValue } from "./commands";
 
 describe("command adapters", () => {
   it("formats nullable and structured values for grids", () => {
@@ -9,10 +9,40 @@ describe("command adapters", () => {
     expect(toDisplayValue("hello")).toBe("hello");
   });
 
+  it("keeps MySQL preview profiles on the MySQL schema tree", async () => {
+    const profile = await saveProfile({
+      name: "MySQL preview",
+      color: "#22c55e",
+      engine: "mysql",
+      host: "localhost",
+      port: 3306,
+      username: "root",
+      defaultDatabase: "app",
+      tlsMode: "disabled",
+      caCertPath: null,
+      ssh: null,
+      readOnly: false,
+    });
+    const workspace = await connectProfile(profile.id);
+    expect(workspace.databases.map((database) => database.name)).toEqual(["app", "mysql"]);
+    const tree = await loadSchemaTree(profile.id);
+    expect(tree).toEqual([{
+      name: "app",
+      kind: "schema",
+      schema: "app",
+      table: null,
+      children: [
+        { name: "users", kind: "table", schema: "app", table: "users", children: [] },
+        { name: "orders", kind: "table", schema: "app", table: "orders", children: [] },
+      ],
+    }]);
+  });
+
   it("keeps browser preview profiles local", async () => {
     const profile = await saveProfile({
       name: "Test profile",
       color: "#38bdf8",
+      engine: "postgres",
       host: "localhost",
       port: 5432,
       username: "postgres",
@@ -50,6 +80,7 @@ describe("command adapters", () => {
     const profile = await saveProfile({
       name: "Mutation preview",
       color: "#38bdf8",
+      engine: "postgres",
       host: "localhost",
       port: 5432,
       username: "postgres",
