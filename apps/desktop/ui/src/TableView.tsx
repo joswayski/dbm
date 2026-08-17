@@ -18,6 +18,7 @@ const EXPORT_PAGE_SIZE = 1_000;
 const LARGE_EXPORT_WARNING_ROWS = 100_000;
 const COLLAPSED_COLUMN_WIDTH = 76;
 const PENDING_EXPORT_ERROR = "Save or discard pending row changes before exporting.";
+const PENDING_REFRESH_ERROR = "Save or discard pending row changes before refreshing.";
 
 const FILTER_OPERATORS: Array<{ value: FilterOperator; label: string }> = [
   { value: "equals", label: "Equals" },
@@ -401,7 +402,7 @@ export function TableView({
     setEditing(null);
     setChangePreview(null);
     setNotice(null);
-    setError((current) => current === PENDING_EXPORT_ERROR ? null : current);
+    setError((current) => current === PENDING_EXPORT_ERROR || current === PENDING_REFRESH_ERROR ? null : current);
   };
 
   const toggleSort = (column: string) => {
@@ -584,12 +585,12 @@ export function TableView({
             className="secondary-button"
             onClick={() => {
               if (pendingCount > 0) {
-                setError("Save or discard pending row changes before refreshing.");
+                setError(PENDING_REFRESH_ERROR);
                 return;
               }
               void load();
             }}
-            disabled={!page || loading}
+            disabled={loading}
             title="Reload the current page with the same filters and sort"
           >{loading ? "Refreshing…" : "Refresh"}</button>
           <button className="secondary-button" onClick={() => void copyEntries(copyableEntries, "visible")} disabled={!page || loading} title="Copies only the current preview page">Copy visible ({copyableEntries.length})</button>

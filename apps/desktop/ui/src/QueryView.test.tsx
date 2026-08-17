@@ -68,6 +68,20 @@ describe("QueryView", () => {
       sql: "SELECT now();",
       maxRows: 10_000,
     });
+
+    const editor = screen.getByRole("textbox");
+    const view = EditorView.findFromDOM(editor);
+    expect(view).not.toBeNull();
+    act(() => view!.dispatch({
+      changes: { from: 0, to: view!.state.doc.length, insert: "SELECT 1;" },
+    }));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => expect(runQuery).toHaveBeenCalledTimes(3));
+    expect(runQuery).toHaveBeenLastCalledWith({
+      profileId: "preview",
+      sql: "SELECT now();",
+      maxRows: 10_000,
+    });
   });
 
   it("shares database-scoped history live across query tabs", async () => {
