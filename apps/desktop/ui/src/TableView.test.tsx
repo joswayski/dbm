@@ -125,6 +125,26 @@ describe("TableView", () => {
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
     expect(await screen.findByText("Save or discard pending row changes before refreshing.")).toBeInTheDocument();
     expect(loadTablePage).toHaveBeenCalledTimes(loadsAfterEdit);
+
+    const pendingWarning = screen.getByText("1 pending change").closest<HTMLElement>(".pending-changes");
+    expect(pendingWarning).not.toBeNull();
+    fireEvent.click(within(pendingWarning!).getByRole("button", { name: "Discard changes" }));
+    expect(screen.queryByText("Save or discard pending row changes before refreshing.")).not.toBeInTheDocument();
+  });
+
+  it("lets Refresh retry after the first page load fails", async () => {
+    const loadTablePage = vi.spyOn(commands, "loadTablePage");
+    loadTablePage.mockRejectedValueOnce(new Error("connection reset"));
+
+    render(<TableView profileId="preview" schema="public" table="users" />);
+    expect(await screen.findByText("connection reset")).toBeInTheDocument();
+    expect(screen.queryByText("person1@example.com")).not.toBeInTheDocument();
+
+    const refresh = screen.getByRole("button", { name: "Refresh" });
+    expect(refresh).toBeEnabled();
+    fireEvent.click(refresh);
+    expect(await screen.findByText("person1@example.com")).toBeInTheDocument();
+    expect(loadTablePage).toHaveBeenCalledTimes(2);
   });
 
   it("uses the primary key as the single default sort and exposes its direction", async () => {

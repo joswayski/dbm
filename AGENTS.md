@@ -37,7 +37,7 @@
 ## Product behavior to preserve
 
 - **Local-only:** connection profiles, query history, and results stay on the machine. Passwords live only in the OS keyring / credential store, never in the app SQLite file.
-- **Connect → query:** opening a connection should land the user in a SQL query tab so they can run statements immediately (schema tree remains in the sidebar).
+- **Connect → query:** opening a connection should land the user in a SQL query tab so they can run statements immediately (schema tree remains in the sidebar). Selecting an already-connected profile should keep or restore that profile's workbench, not dump the user on the empty welcome pane. Deleting or disconnecting a profile must close its tabs.
 - **Table tabs:** paginated previews, filters, ordering, CSV copy/export, PK-backed edits with `xmin` concurrency, read-only profiles.
 - **Query tabs:** run statement under cursor or selection (⌘/Ctrl+Enter), history per profile+database, results capped (10k rows). Simple `SELECT * FROM table` can open the editable table viewer.
 - **Refresh:** table and query result views should be re-fetchable without re-authoring filters or SQL (toolbar Refresh).
