@@ -46,7 +46,7 @@ const CONNECTION_COLORS = ["#38bdf8", "#22c55e", "#a78bfa", "#f59e0b", "#ef4444"
 const DEFAULT_SIDEBAR_WIDTH = 272;
 const MIN_SIDEBAR_WIDTH = 232;
 const MAX_SIDEBAR_WIDTH = 440;
-const COLLAPSED_SIDEBAR_WIDTH = 52;
+const COLLAPSED_SIDEBAR_WIDTH = 56;
 const QUERY_HISTORY_UPDATED_EVENT = "dbm:query-history-updated";
 const SQL_IDENTIFIER = String.raw`(?:"(?:[^"]|"")*"|` + "`(?:[^`]|``)*`" + String.raw`|[A-Za-z_][A-Za-z0-9_$]*)`;
 const SIMPLE_FULL_TABLE_SELECT = new RegExp(
@@ -353,11 +353,13 @@ export default function App() {
         style={{ width: sidebarCollapsed ? COLLAPSED_SIDEBAR_WIDTH : sidebarWidth, minWidth: sidebarCollapsed ? COLLAPSED_SIDEBAR_WIDTH : sidebarWidth }}
       >
         <div className="brand-row">
-          {!sidebarCollapsed ? <div className="brand-mark"><BrandMark size={18} /></div> : null}
-          {!sidebarCollapsed ? <div className="brand-copy">
-            <strong>DBM</strong>
-            <span>Local workbench</span>
-          </div> : null}
+          <div className="brand-mark"><BrandMark size={18} /></div>
+          {!sidebarCollapsed ? (
+            <div className="brand-copy">
+              <strong>DBM</strong>
+              <span>Local workbench</span>
+            </div>
+          ) : null}
           <button
             className="sidebar-collapse-button"
             onClick={() => setSidebarCollapsed((value) => !value)}
@@ -1032,7 +1034,7 @@ export function QueryView({
   return (
     <div className="query-view">
       <div className="view-toolbar">
-        <div><span className="eyebrow">Query</span><h2>{title}</h2></div>
+        <div><h2>{title}</h2></div>
         <div className="toolbar-actions">
           {running ? (
             <button
@@ -1053,7 +1055,7 @@ export function QueryView({
           </button>
         </div>
       </div>
-      <div className="query-workspace">
+      <div className={`query-workspace ${response ? "has-results" : "no-results"}`}>
         <div className="query-layout">
         <div className="editor-panel" onKeyDownCapture={handleEditorKeyDownCapture}>
           <CodeMirror ref={editorRef} className="query-code-editor" value={sqlText} height="100%" theme="dark" extensions={editorExtensions} onChange={setSqlText} onUpdate={handleEditorUpdate} basicSetup={{ lineNumbers: true, foldGutter: false }} />

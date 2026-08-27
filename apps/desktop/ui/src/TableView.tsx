@@ -596,7 +596,7 @@ export function TableView({
   return (
     <div className="table-view">
       <div className="view-toolbar">
-        <div><span className="eyebrow">Table</span><h2>{schema}.{table}</h2></div>
+        <div><h2>{schema}.{table}</h2></div>
         <div className="toolbar-actions">
           <button
             className="secondary-button"
