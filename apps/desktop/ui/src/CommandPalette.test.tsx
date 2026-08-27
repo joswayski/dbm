@@ -71,11 +71,18 @@ describe("command palette", () => {
     expect(screen.queryByRole("dialog", { name: "Command palette" })).not.toBeInTheDocument();
   }, 15_000);
 
-  it("switches appearance from the settings menu", async () => {
+  it("switches appearance from the settings menu with the keyboard", async () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Light" }));
+    const menu = screen.getByRole("menu", { name: "Settings" });
+    expect(screen.getByRole("menuitem", { name: "Match system" })).toHaveFocus();
+    fireEvent.keyDown(menu, { key: "ArrowDown" });
+    expect(screen.getByRole("menuitem", { name: "Dark" })).toHaveFocus();
+    fireEvent.keyDown(menu, { key: "ArrowDown" });
+    const light = screen.getByRole("menuitem", { name: "Light" });
+    expect(light).toHaveFocus();
+    fireEvent.click(light);
 
     expect(document.documentElement.dataset.appearance).toBe("light");
     expect(window.localStorage.getItem("dbm.appearance")).toBe("light");

@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from "react";
+import { useEffect, useRef, type ButtonHTMLAttributes, type InputHTMLAttributes, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type SelectHTMLAttributes } from "react";
 
 import { IconCheck, IconX } from "./icons";
 
@@ -248,6 +248,8 @@ export function MenuItem({
   );
 }
 
+/** A `role="menu"` surface: focuses its first item on open and moves focus with
+    the arrow keys, so menus are usable without pointing at them. */
 export function Menu({
   align = "end",
   label,
@@ -257,8 +259,35 @@ export function Menu({
   label?: string;
   children: ReactNode;
 }) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    ref.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+  }, []);
+
+  const moveFocus = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const keys = ["ArrowDown", "ArrowUp", "Home", "End"];
+    if (!keys.includes(event.key)) return;
+    const items = Array.from(ref.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []);
+    if (items.length === 0) return;
+    event.preventDefault();
+    const current = items.indexOf(document.activeElement as HTMLElement);
+    const next = event.key === "ArrowDown"
+      ? (current + 1) % items.length
+      : event.key === "ArrowUp"
+        ? (current - 1 + items.length + (current < 0 ? 1 : 0)) % items.length
+        : event.key === "Home" ? 0 : items.length - 1;
+    items[next]?.focus();
+  };
+
   return (
-    <div className={["menu", align === "start" ? "menu-left" : ""].filter(Boolean).join(" ")} role="menu" aria-label={label}>
+    <div
+      ref={ref}
+      className={["menu", align === "start" ? "menu-left" : ""].filter(Boolean).join(" ")}
+      role="menu"
+      aria-label={label}
+      onKeyDown={moveFocus}
+    >
       {children}
     </div>
   );
