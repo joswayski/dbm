@@ -161,36 +161,36 @@ export default function App() {
     await handleConnect(saved.id);
   }, [handleConnect, saveProfile]);
 
-  const rememberTab = (tabId: string | null) => {
+  /** Keeps a tab's view mounted once it has been shown, so switching tabs does
+      not throw away loaded rows or unsaved SQL. */
+  const rememberTab = useCallback((tabId: string | null) => {
     if (!tabId) return;
     setMountedTabIds((current) => {
       if (current.has(tabId)) return current;
       return new Set(current).add(tabId);
     });
-  };
+  }, []);
 
-  const rememberActiveTab = () => rememberTab(activeTabId);
-
-  const handleSelectProfile = (profileId: string, connected: boolean) => {
-    rememberActiveTab();
+  const handleSelectProfile = useCallback((profileId: string, connected: boolean) => {
+    rememberTab(activeTabId);
     if (connected) selectProfile(profileId);
     else void handleConnect(profileId);
-  };
+  }, [activeTabId, handleConnect, rememberTab, selectProfile]);
 
-  const handleOpenTable = (profileId: string, schema: string, table: string) => {
-    rememberActiveTab();
+  const handleOpenTable = useCallback((profileId: string, schema: string, table: string) => {
+    rememberTab(activeTabId);
     openTable(profileId, schema, table);
-  };
+  }, [activeTabId, openTable, rememberTab]);
 
-  const handleOpenQuery = (profileId: string) => {
-    rememberActiveTab();
+  const handleOpenQuery = useCallback((profileId: string) => {
+    rememberTab(activeTabId);
     openQuery(profileId);
-  };
+  }, [activeTabId, openQuery, rememberTab]);
 
-  const handleSetActiveTab = (tabId: string) => {
-    rememberActiveTab();
+  const handleSetActiveTab = useCallback((tabId: string) => {
+    rememberTab(activeTabId);
     setActiveTab(tabId);
-  };
+  }, [activeTabId, rememberTab, setActiveTab]);
 
   const handleCloseTab = (tabId: string) => {
     setMountedTabIds((current) => {
@@ -348,14 +348,17 @@ export default function App() {
     });
 
     return items;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     activeProfileId,
     activeTabId,
     activeWorkspace,
     handleDatabaseChange,
     handleDisconnect,
+    handleOpenQuery,
+    handleOpenTable,
     handleRefreshSchema,
+    handleSelectProfile,
+    handleSetActiveTab,
     profiles,
     schemas,
     selectedProfile,
@@ -387,8 +390,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeProfileId, activeWorkspace, tabs]);
+  }, [activeProfileId, activeWorkspace, handleOpenQuery, handleSetActiveTab, tabs]);
 
   return (
     <div className="app-shell" style={connectionStyle}>
