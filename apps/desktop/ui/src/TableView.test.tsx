@@ -88,7 +88,7 @@ describe("TableView", () => {
     fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
 
     await waitFor(() => expect(screen.getByRole("button", { name: /Copy visible/ })).not.toBeDisabled());
-    expect(screen.getByRole("button", { name: "Apply filters" })).toHaveClass("primary-button");
+    expect(screen.getByRole("button", { name: "Apply filters" })).toHaveClass("btn-primary");
     expect(screen.queryByRole("button", { name: "Remove filter" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Clear" })).not.toBeInTheDocument();
   });
@@ -220,7 +220,7 @@ describe("TableView", () => {
     fireEvent.blur(editor);
 
     fireEvent.contextMenu(rows[1]);
-    fireEvent.click(screen.getByRole("button", { name: "Stage row for deletion" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Stage row for deletion" }));
     expect(rows[1]).toHaveClass("deleted-row");
 
     fireEvent.mouseEnter(rows[0]);

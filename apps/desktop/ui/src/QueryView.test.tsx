@@ -2,8 +2,8 @@ import { EditorView } from "@uiw/react-codemirror";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { QueryView } from "./App";
 import * as commands from "./commands";
+import { QueryView } from "./QueryView";
 import type { QueryResponse, SchemaNode } from "./types";
 
 const schemaTree: SchemaNode[] = [{

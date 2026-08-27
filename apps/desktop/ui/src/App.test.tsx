@@ -192,7 +192,8 @@ describe("App connection and query navigation", () => {
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: "New connection" }));
     fireEvent.click(screen.getByRole("button", { name: "MySQL" }));
-    expect(screen.getByRole("heading", { name: "New connection" }).closest(".modal-card")).toHaveTextContent("MYSQL");
+    expect(screen.getByRole("button", { name: "MySQL" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "PostgreSQL" })).toHaveAttribute("aria-pressed", "false");
     expect(screen.getByPlaceholderText("mysql://user:password@host:3306/database")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("Local MySQL")).toBeInTheDocument();
     expect(screen.getByDisplayValue(3306)).toBeInTheDocument();
