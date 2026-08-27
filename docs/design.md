@@ -91,22 +91,27 @@ Rules:
   connection with its color, the database path in monospace, then update state,
   appearance, and the command palette affordance.
 - **Sidebar** is one scroll region: connections, then the active connection's
-  database picker and schema tree with a filter field. Resizable (264–460px) and
-  collapsible to a 52px rail.
+  database picker and schema tree with a filter field. Resizable (240–460px) and
+  collapsible to a 52px rail of connection dots.
 - **Tab strip** is monochrome; the connection color is a 2px underline on the
   active tab plus a dot on each tab, so a tab from the wrong database is obvious.
 - **View toolbar** is the single place a view exposes actions. Left: what you are
   looking at. Right: refresh, overflow, primary action.
 - **Status bar** absorbs the ambient facts that used to clutter the content area:
-  connection state, engine, row and column counts, selection, pending changes,
-  and the local-only guarantee.
+  connection state, engine, the database path, read-only mode, open tab count,
+  the local-only guarantee, and the command palette shortcut. Row, column, and
+  selection counts stay with the grid they describe.
 
 ## Component inventory
 
-Primitives (`ui.tsx`): `Button` (primary/secondary/ghost/danger + `tone="accent"`),
-`IconButton`, `Segmented`, `TextField`, `SelectField`, `CheckboxField`, `Menu`,
-`Chip`, `Kbd`, `Sheet`, `Toast`, `EmptyState`, `Spinner`, `Tooltip` (CSS-driven,
-`data-tooltip`).
+Primitives (`ui.tsx`): `Button` (primary / secondary / ghost / danger),
+`IconButton`, `Segmented`, `Field`, `TextField`, `SelectField`, `CheckboxField`,
+`Menu` + `MenuItem` / `MenuLabel` / `MenuSeparator`, `Badge`, `Count`, `Kbd`,
+`Sheet`, `EmptyState`, `Notice`. Supporting modules: `icons.tsx` (SVG icon set),
+`useDismiss.ts` (outside-pointer and Escape dismissal), `platform.ts` (shortcut
+glyphs), `appearance.ts` (appearance store), `editorTheme.ts` (CodeMirror theme
+built from the tokens). Tooltips are CSS-driven through `data-tooltip`, and the
+spinner is a CSS class so it can sit inside any button.
 
 Surfaces:
 
