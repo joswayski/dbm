@@ -137,6 +137,32 @@ describe("DBM store", () => {
     expect(afterReconnect.activeTabId).toBe(afterReconnect.tabs[0].id);
   });
 
+  it("opens a Redis command tab with PING when connecting", async () => {
+    const profile = await commands.saveProfile({
+      name: "Ready to redis",
+      color: "#a78bfa",
+      engine: "redis",
+      host: "localhost",
+      port: 6379,
+      username: "default",
+      defaultDatabase: "0",
+      tlsMode: "disabled",
+      caCertPath: null,
+      ssh: null,
+      readOnly: false,
+    });
+
+    await useDbmStore.getState().connect(profile.id);
+
+    const state = useDbmStore.getState();
+    expect(state.tabs[0]).toMatchObject({
+      kind: "query",
+      profileId: profile.id,
+      title: "Query 1",
+      sql: "PING",
+    });
+  });
+
   it("keeps the current table tab when reconnecting the same profile", async () => {
     const profile = await commands.saveProfile({
       name: "Keep table on reconnect",

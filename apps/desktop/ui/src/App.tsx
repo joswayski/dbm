@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from "react";
 import CodeMirror, { Decoration, ViewPlugin, type DecorationSet, type EditorView, type ReactCodeMirrorRef, type ViewUpdate } from "@uiw/react-codemirror";
-import { MySQL, PostgreSQL, sql } from "@codemirror/lang-sql";
+import { MySQL, PostgreSQL, SQLDialect, sql } from "@codemirror/lang-sql";
 
 import * as commands from "./commands";
 import { parseConnectionUrl } from "./connectionUrl";
-import { sqlExecutionTarget, type SqlExecutionTarget } from "./sqlSelection";
+import { lineExecutionTarget, sqlExecutionTarget, type SqlExecutionTarget } from "./sqlSelection";
 import { useDbmStore } from "./store";
 import { TableView } from "./TableView";
 import type {
@@ -61,6 +61,14 @@ const ENGINE_PRESETS: Record<DatabaseEngine, {
     defaultDatabase: "mysql",
     urlPlaceholder: "mysql://user:password@host:3306/database",
   },
+  redis: {
+    label: "Redis",
+    name: "Local Redis",
+    port: 6379,
+    username: "default",
+    defaultDatabase: "0",
+    urlPlaceholder: "redis://default:password@host:6379/0",
+  },
 };
 
 function defaultProfile(profile?: ConnectionProfile): SaveProfileInput {
@@ -82,6 +90,20 @@ function defaultProfile(profile?: ConnectionProfile): SaveProfileInput {
     password: null,
   };
 }
+
+function fallbackDatabase(engine?: DatabaseEngine): string {
+  if (engine === "mysql") return "mysql";
+  if (engine === "redis") return "0";
+  return "postgres";
+}
+
+function defaultQueryText(engine?: DatabaseEngine): string {
+  return engine === "redis" ? "PING" : "SELECT now();";
+}
+
+const REDIS_DIALECT = SQLDialect.define({
+  keywords: "acl append asking auth bgsave bitcount bitop bitpos blmove blmpop blpop brpop brpoplpush bzmpop bzpopmax bzpopmin client cluster command config copy dbsize decr decrby del discard dump echo eval evalsha exec exists expire expireat expiretime flushall flushdb geoadd geodist geohash geopos georadius georadiusbymember geosearch get getdel getex getrange getset hdel hello hexists hget hgetall hincrby hincrbyfloat hkeys hlen hmget hmset hrandfield hscan hset hsetnx hstrlen hvals incr incrby incrbyfloat info keys lastsave lcs lindex linsert llen lmove lmpop lpop lpos lpush lpushx lrange lrem lset ltrim memory mget migrate module move mset msetnx multi object persist pexpire pexpireat pfadd pfcount pfmerge ping psetex psubscribe pttl publish pubsub punsubscribe randomkey readonly readwrite rename renamenx replicaof restore role rpop rpoplpush rpush rpushx sadd save scan scard sdiff sdiffstore select set setex setnx setrange sinter sinterstore sismember slowlog smembers smismember smove sort spop srandmember srem sscan strlen substr sunion sunionstore swapdb time touch ttl type unlink unsubscribe unwatch wait watch xack xadd xautoclaim xclaim xdel xgroup xinfo xlen xpending xrange xread xreadgroup xrevrange xtrim zadd zcard zcount zdiff zdiffstore zincrby zinter zintercard zinterstore zlexcount zmpop zmscore zpopmax zpopmin zrandmember zrange zrangebylex zrangebyscore zrangestore zrank zrem zremrangebylex zremrangebyrank zremrangebyscore zrevrange zrevrangebylex zrevrangebyscore zrevrank zscan zscore zunion zunionstore",
+});
 
 function applyEngineDefaults(form: SaveProfileInput, engine: DatabaseEngine): SaveProfileInput {
   const previous = ENGINE_PRESETS[form.engine];
@@ -204,7 +226,11 @@ export default function App() {
       const previous = schemas[profileId] ?? [];
       const next = await commands.loadSchemaTree(profileId);
       setSchemas((current) => ({ ...current, [profileId]: next }));
-      const summary = describeSchemaRefresh(previous, next);
+      const summary = describeSchemaRefresh(
+        previous,
+        next,
+        workspaces[profileId]?.profile.engine === "redis" ? "Keyspace" : "Schema",
+      );
       setToast({
         kind: summary.changed ? "success" : "info",
         message: summary.message,
@@ -214,7 +240,7 @@ export default function App() {
     } finally {
       setRefreshingSchemaId(null);
     }
-  }, [schemas]);
+  }, [schemas, workspaces]);
 
   const handleSaveProfile = useCallback(async (input: SaveProfileInput) => {
     const saved = await saveProfile(input);
@@ -377,7 +403,9 @@ export default function App() {
                 />
                 {expanded && workspace ? (
                   <div className="workspace-panel">
-                    <label className="field-label" htmlFor={`database-select-${profileId}`}>Database</label>
+                    <label className="field-label" htmlFor={`database-select-${profileId}`}>
+                      {summary.profile.engine === "redis" ? "Database index" : "Database"}
+                    </label>
                     <select
                       id={`database-select-${profileId}`}
                       className="select-input"
@@ -387,7 +415,7 @@ export default function App() {
                       {workspace.databases.map((database) => <option key={database.name}>{database.name}</option>)}
                     </select>
                     <div className="schema-heading">
-                      <span>Schema</span>
+                      <span>{summary.profile.engine === "redis" ? "Keyspace" : "Schema"}</span>
                       <button
                         className="text-button"
                         onClick={() => void handleRefreshSchema(profileId)}
@@ -440,7 +468,9 @@ export default function App() {
               <span className="connection-identity-dot" />
               <span>
                 <strong>{activeViewProfile.name}</strong>
-                <small>{activeViewProfile.username}@{activeViewProfile.host}:{activeViewProfile.port}/{activeViewProfile.defaultDatabase}</small>
+                <small>{activeViewProfile.username
+                  ? `${activeViewProfile.username}@${activeViewProfile.host}:${activeViewProfile.port}/${activeViewProfile.defaultDatabase}`
+                  : `${activeViewProfile.host}:${activeViewProfile.port}/${activeViewProfile.defaultDatabase}`}</small>
               </span>
             </div>
           ) : <div className="breadcrumb">No active connection</div>}
@@ -527,8 +557,7 @@ export default function App() {
             const shouldMount = tab.id === activeTabId || mountedTabIds.has(tab.id);
             const tabProfile = workspaces[tab.profileId]?.profile
               ?? profiles.find((summary) => summary.profile.id === tab.profileId)?.profile;
-            const database = tabProfile?.defaultDatabase
-              ?? (tabProfile?.engine === "mysql" ? "mysql" : "postgres");
+            const database = tabProfile?.defaultDatabase ?? fallbackDatabase(tabProfile?.engine);
             return <div className={`tab-pane ${tab.id === activeTabId ? "active" : ""}`} key={tab.id} aria-hidden={tab.id !== activeTabId}>
               {shouldMount && tab.kind === "table" && tab.schema && tab.table ? (
                 <TableView profileId={tab.profileId} schema={tab.schema} table={tab.table} />
@@ -538,7 +567,7 @@ export default function App() {
                   database={database}
                   engine={tabProfile?.engine ?? "postgres"}
                   schemaTree={schemas[tab.profileId] ?? []}
-                  initialSql={tab.sql ?? "SELECT now();"}
+                  initialSql={tab.sql ?? defaultQueryText(tabProfile?.engine)}
                   title={tab.title}
                 />
               ) : null}
@@ -710,7 +739,9 @@ function ConnectionItem({
           <span className="connection-color" style={{ background: summary.profile.color ?? DEFAULT_CONNECTION_COLOR, color: summary.profile.color ?? DEFAULT_CONNECTION_COLOR }} />
           <span className="connection-copy">
             <strong>{summary.profile.name}</strong>
-            <small>{ENGINE_PRESETS[summary.profile.engine ?? "postgres"].label} · {summary.profile.username}@{summary.profile.host}</small>
+            <small>{ENGINE_PRESETS[summary.profile.engine ?? "postgres"].label} · {summary.profile.username
+              ? `${summary.profile.username}@${summary.profile.host}`
+              : summary.profile.host}</small>
           </span>
         </button>
         <div className="connection-actions">
@@ -771,7 +802,7 @@ function SchemaBranch({
           else setOpen((value) => !value);
         }}>
         <span className="tree-caret" aria-hidden="true">{isTable ? "▧" : open ? "⌄" : "›"}</span>
-        <span className={`schema-icon ${node.kind}`} aria-hidden="true">{isTable ? "T" : "S"}</span>
+        <span className={`schema-icon ${node.kind}`} aria-hidden="true">{isTable ? (node.kind === "key" ? "K" : "T") : "S"}</span>
         <span className="truncate">{node.name}</span>
       </button>
       {open && node.children.length > 0 ? node.children.map((child) => (
@@ -811,24 +842,30 @@ function Welcome({
   );
 }
 
-const activeSqlStatement = ViewPlugin.fromClass(class {
-  decorations: DecorationSet;
+function activeStatementPlugin(engine: DatabaseEngine) {
+  return ViewPlugin.fromClass(class {
+    decorations: DecorationSet;
 
-  constructor(view: EditorView) {
-    this.decorations = activeSqlDecorations(view);
-  }
+    constructor(view: EditorView) {
+      this.decorations = activeStatementDecorations(view, engine);
+    }
 
-  update(update: ViewUpdate) {
-    if (update.docChanged || update.selectionSet) this.decorations = activeSqlDecorations(update.view);
-  }
-}, {
-  decorations: (plugin) => plugin.decorations,
-});
+    update(update: ViewUpdate) {
+      if (update.docChanged || update.selectionSet) {
+        this.decorations = activeStatementDecorations(update.view, engine);
+      }
+    }
+  }, {
+    decorations: (plugin) => plugin.decorations,
+  });
+}
 
-function activeSqlDecorations(view: EditorView): DecorationSet {
+function activeStatementDecorations(view: EditorView, engine: DatabaseEngine): DecorationSet {
   const selection = view.state.selection.main;
   if (!selection.empty) return Decoration.none;
-  const target = sqlExecutionTarget(view.state.doc.toString(), selection.from, selection.to);
+  const target = engine === "redis"
+    ? lineExecutionTarget(view.state.doc.toString(), selection.from, selection.to)
+    : sqlExecutionTarget(view.state.doc.toString(), selection.from, selection.to);
   if (!target) return Decoration.none;
 
   const firstLine = view.state.doc.lineAt(target.from);
@@ -868,7 +905,9 @@ export function QueryView({
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [embeddedPendingCount, setEmbeddedPendingCount] = useState(0);
-  const [executionTarget, setExecutionTarget] = useState<SqlExecutionTarget | null>(() => sqlExecutionTarget(initialSql, 0, 0));
+  const [executionTarget, setExecutionTarget] = useState<SqlExecutionTarget | null>(() => (
+    engine === "redis" ? lineExecutionTarget(initialSql, 0, 0) : sqlExecutionTarget(initialSql, 0, 0)
+  ));
   const editorRef = useRef<ReactCodeMirrorRef>(null);
 
   const refreshHistory = useCallback(async () => {
@@ -906,7 +945,7 @@ export function QueryView({
     }
     const executableSql = (statement ?? sqlText).trim();
     if (!executableSql) return;
-    if (requiresConfirmation(executableSql) && !window.confirm("This query may change or remove many rows. Run it anyway?")) return;
+    if (requiresConfirmation(executableSql, engine) && !window.confirm("This query may change or remove many rows. Run it anyway?")) return;
     setRunning(true);
     setError(null);
     try {
@@ -923,16 +962,22 @@ export function QueryView({
       ));
       setRunning(false);
     }
-  }, [database, embeddedPendingCount, profileId, running, sqlText]);
+  }, [database, embeddedPendingCount, engine, profileId, running, sqlText]);
 
   const selectedOrCurrentStatement = useCallback((view?: EditorView) => {
     if (!view) return sqlText.trim();
     const selection = view.state.selection.main;
-    return sqlExecutionTarget(view.state.doc.toString(), selection.from, selection.to)?.sql ?? "";
-  }, [sqlText]);
+    const target = engine === "redis"
+      ? lineExecutionTarget(view.state.doc.toString(), selection.from, selection.to)
+      : sqlExecutionTarget(view.state.doc.toString(), selection.from, selection.to);
+    return target?.sql ?? "";
+  }, [engine, sqlText]);
 
   const editorExtensions = useMemo(
-    () => [sql({ dialect: engine === "mysql" ? MySQL : PostgreSQL }), activeSqlStatement],
+    () => [
+      sql({ dialect: engine === "mysql" ? MySQL : engine === "redis" ? REDIS_DIALECT : PostgreSQL }),
+      activeStatementPlugin(engine),
+    ],
     [engine],
   );
 
@@ -950,16 +995,22 @@ export function QueryView({
   const handleEditorUpdate = (update: ViewUpdate) => {
     if (!update.docChanged && !update.selectionSet) return;
     const selection = update.state.selection.main;
-    setExecutionTarget(sqlExecutionTarget(update.state.doc.toString(), selection.from, selection.to));
+    setExecutionTarget(
+      engine === "redis"
+        ? lineExecutionTarget(update.state.doc.toString(), selection.from, selection.to)
+        : sqlExecutionTarget(update.state.doc.toString(), selection.from, selection.to),
+    );
   };
 
-  const runLabel = executionTarget?.kind === "selection" ? "Run selection" : "Run statement";
+  const runLabel = executionTarget?.kind === "selection"
+    ? "Run selection"
+    : engine === "redis" ? "Run command" : "Run statement";
   const editableTable = executedSql ? resolveFullTableSelect(executedSql, schemaTree) : null;
 
   return (
     <div className="query-view">
       <div className="view-toolbar">
-        <div><span className="eyebrow">SQL WORKBENCH</span><h2>{title}</h2></div>
+        <div><span className="eyebrow">{engine === "redis" ? "REDIS WORKBENCH" : "SQL WORKBENCH"}</span><h2>{title}</h2></div>
         <div className="toolbar-actions">
           {running ? (
             <button
@@ -988,9 +1039,11 @@ export function QueryView({
             onMouseDown={(event) => event.preventDefault()}
             onClick={runFromEditor}
             disabled={running}
-            title="Run the selected SQL (Command/Ctrl+Enter)"
+            title={engine === "redis" ? "Run the selected command (Command/Ctrl+Enter)" : "Run the selected SQL (Command/Ctrl+Enter)"}
           ><span aria-hidden="true">▶</span> Run selection</button> : null}
-          <div className="editor-hint">The outlined statement or selected SQL will run · Command/Ctrl+Enter · results capped at 10,000 rows</div>
+          <div className="editor-hint">{engine === "redis"
+            ? "The outlined command or selection will run · Command/Ctrl+Enter · results capped at 10,000 rows"
+            : "The outlined statement or selected SQL will run · Command/Ctrl+Enter · results capped at 10,000 rows"}</div>
         </div>
         <aside className="history-panel"><div className="panel-title">History <span>{history.length}</span></div>{history.length === 0 ? <p className="muted">Run a query to start history.</p> : <div className="history-list">{history.slice(0, 100).map((entry) => <button className="history-item" key={entry.id} onClick={() => setSqlText(entry.sql)}><span>{entry.success ? "✓" : "!"}</span><span className="history-sql">{entry.sql.replace(/\s+/g, " ").slice(0, 70)}</span><small>{new Date(entry.executedAt).toLocaleTimeString()}</small></button>)}</div>}</aside>
       </div>
@@ -1118,7 +1171,7 @@ function ProfileModal({
           <div className="form-field full">
             <span>Database engine</span>
             <div className="engine-picker" role="group" aria-label="Database engine">
-              {(["postgres", "mysql"] as const).map((engine) => (
+              {(["postgres", "mysql", "redis"] as const).map((engine) => (
                 <button
                   key={engine}
                   type="button"
@@ -1184,12 +1237,12 @@ function ProfileModal({
             <input className="text-input" type="number" value={form.port} onChange={(event) => update("port", Number(event.target.value))} />
           </label>
           <label className="form-field">
-            <span>Username</span>
-            <input className="text-input" value={form.username} onChange={(event) => update("username", event.target.value)} />
+            <span>{form.engine === "redis" ? "Username (ACL, optional)" : "Username"}</span>
+            <input className="text-input" value={form.username} onChange={(event) => update("username", event.target.value)} placeholder={form.engine === "redis" ? "default" : undefined} />
           </label>
           <label className="form-field">
-            <span>Database</span>
-            <input className="text-input" value={form.defaultDatabase} onChange={(event) => update("defaultDatabase", event.target.value)} />
+            <span>{form.engine === "redis" ? "Database index" : "Database"}</span>
+            <input className="text-input" value={form.defaultDatabase} onChange={(event) => update("defaultDatabase", event.target.value)} placeholder={form.engine === "redis" ? "0" : undefined} />
           </label>
           <label className="form-field">
             <span>Password</span>
@@ -1228,7 +1281,7 @@ function ProfileModal({
   );
 }
 
-function describeSchemaRefresh(previous: SchemaNode[], next: SchemaNode[]): { changed: boolean; message: string } {
+function describeSchemaRefresh(previous: SchemaNode[], next: SchemaNode[], kind = "Schema"): { changed: boolean; message: string } {
   const previousObjects = schemaObjects(previous);
   const nextObjects = schemaObjects(next);
   const previousKeys = new Set(previousObjects.map((object) => object.key));
@@ -1236,14 +1289,14 @@ function describeSchemaRefresh(previous: SchemaNode[], next: SchemaNode[]): { ch
   const added = nextObjects.filter((object) => !previousKeys.has(object.key)).map((object) => object.label);
   const removed = previousObjects.filter((object) => !nextKeys.has(object.key)).map((object) => object.label);
   if (added.length === 0 && removed.length === 0) {
-    return { changed: false, message: "Schema is already up to date." };
+    return { changed: false, message: `${kind} is already up to date.` };
   }
 
   const changes = [
     added.length > 0 ? `Added ${summarizeSchemaObjects(added)}` : null,
     removed.length > 0 ? `Removed ${summarizeSchemaObjects(removed)}` : null,
   ].filter((change): change is string => Boolean(change));
-  return { changed: true, message: `Schema refreshed · ${changes.join(" · ")}.` };
+  return { changed: true, message: `${kind} refreshed · ${changes.join(" · ")}.` };
 }
 
 function schemaObjects(nodes: SchemaNode[]): Array<{ key: string; label: string }> {
@@ -1277,7 +1330,7 @@ function resolveFullTableSelect(sqlText: string, schemaTree: SchemaNode[]): { sc
   const matches: Array<{ schema: string; table: string }> = [];
   const visit = (node: SchemaNode) => {
     if (
-      node.kind === "table" &&
+      (node.kind === "table" || node.kind === "key") &&
       node.schema &&
       node.table === requestedTable &&
       (!requestedSchema || node.schema === requestedSchema)
@@ -1313,7 +1366,10 @@ function errorMessage(reason: unknown): string {
   return message;
 }
 
-function requiresConfirmation(sqlText: string): boolean {
+function requiresConfirmation(sqlText: string, engine: DatabaseEngine = "postgres"): boolean {
+  if (engine === "redis") {
+    return /^\s*(flushall|flushdb)\b/i.test(sqlText);
+  }
   const normalized = sqlText.replace(/--[^\n]*/g, " ").replace(/\/\*[\s\S]*?\*\//g, " ");
   return /\b(drop|truncate)\b/i.test(normalized) ||
     /\b(delete|update)\b/i.test(normalized) && !/\bwhere\b/i.test(normalized);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { sqlExecutionTarget, sqlStatementAtCursor, sqlToRun } from "./sqlSelection";
+import { lineExecutionTarget, sqlExecutionTarget, sqlStatementAtCursor, sqlToRun } from "./sqlSelection";
 
 describe("sqlToRun", () => {
   it("runs the selected SQL exactly instead of the entire editor", () => {
@@ -36,5 +36,23 @@ describe("sqlToRun", () => {
 
     expect(sqlStatementAtCursor(sql, sql.indexOf("body;still"))).toContain("SELECT $$body;still body$$;");
     expect(sqlStatementAtCursor(sql, sql.lastIndexOf("3"))).toContain("SELECT 3;");
+  });
+});
+
+describe("lineExecutionTarget", () => {
+  it("runs the current Redis command line when there is no selection", () => {
+    const text = "PING\n\nGET greeting";
+    expect(lineExecutionTarget(text, 0, 0)).toEqual({
+      from: 0,
+      to: 4,
+      sql: "PING",
+      kind: "statement",
+    });
+    expect(lineExecutionTarget(text, text.indexOf("GET"), text.indexOf("GET"))).toEqual({
+      from: 6,
+      to: text.length,
+      sql: "GET greeting",
+      kind: "statement",
+    });
   });
 });

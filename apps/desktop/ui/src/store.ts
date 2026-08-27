@@ -1,7 +1,7 @@
 import { create } from "zustand";
 
 import * as commands from "./commands";
-import type { ConnectionProfile, ProfileSummary, Tab, WorkspaceInfo } from "./types";
+import type { ConnectionProfile, DatabaseEngine, ProfileSummary, Tab, WorkspaceInfo } from "./types";
 
 type DbmStore = {
   profiles: ProfileSummary[];
@@ -58,10 +58,13 @@ export const useDbmStore = create<DbmStore>((set, get) => ({
   },
   connect: async (profileId) => {
     const workspace = await commands.connectProfile(profileId);
-    set((state) => ({
-      workspaces: { ...state.workspaces, [profileId]: workspace },
-      ...activatedProfileWorkbench(state, profileId),
-    }));
+    set((state) => {
+      const workspaces = { ...state.workspaces, [profileId]: workspace };
+      return {
+        workspaces,
+        ...activatedProfileWorkbench({ ...state, workspaces }, profileId),
+      };
+    });
   },
   selectProfile: (profileId) => {
     if (!get().profiles.some((summary) => summary.profile.id === profileId)) return;
@@ -90,7 +93,8 @@ export const useDbmStore = create<DbmStore>((set, get) => ({
   },
   openQuery: (profileId) => {
     set((state) => {
-      const tab = createQueryTab(profileId, state.tabs);
+      const engine = profileEngine(state, profileId);
+      const tab = createQueryTab(profileId, state.tabs, engine);
       return { tabs: [...state.tabs, tab], activeTabId: tab.id, activeProfileId: profileId };
     });
   },
@@ -149,7 +153,7 @@ function revealTab(tabs: Tab[], tabId: string): Tab[] {
   return tabs.map((tab) => tab.id === tabId ? { ...tab, collapsed: false } : tab);
 }
 
-function createQueryTab(profileId: string, tabs: Tab[]): Tab {
+function createQueryTab(profileId: string, tabs: Tab[], engine: DatabaseEngine = "postgres"): Tab {
   const existingTitles = new Set(
     tabs
       .filter((tab) => tab.kind === "query" && tab.profileId === profileId)
@@ -162,12 +166,21 @@ function createQueryTab(profileId: string, tabs: Tab[]): Tab {
     title: `Query ${queryNumber}`,
     kind: "query",
     profileId,
-    sql: "SELECT now();",
+    sql: engine === "redis" ? "PING" : "SELECT now();",
   };
 }
 
+function profileEngine(
+  state: Pick<DbmStore, "workspaces" | "profiles">,
+  profileId: string,
+): DatabaseEngine {
+  return state.workspaces[profileId]?.profile.engine
+    ?? state.profiles.find((summary) => summary.profile.id === profileId)?.profile.engine
+    ?? "postgres";
+}
+
 function activatedProfileWorkbench(
-  state: Pick<DbmStore, "tabs" | "activeTabId" | "activeProfileId">,
+  state: Pick<DbmStore, "tabs" | "activeTabId" | "activeProfileId" | "workspaces" | "profiles">,
   profileId: string,
 ): Pick<DbmStore, "tabs" | "activeTabId" | "activeProfileId"> {
   const currentTab = state.tabs.find((tab) => tab.id === state.activeTabId);
@@ -188,7 +201,7 @@ function activatedProfileWorkbench(
     };
   }
 
-  const tab = createQueryTab(profileId, state.tabs);
+  const tab = createQueryTab(profileId, state.tabs, profileEngine(state, profileId));
   return {
     tabs: [...state.tabs, tab],
     activeTabId: tab.id,

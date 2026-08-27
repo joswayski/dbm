@@ -43,7 +43,8 @@ jobs:
             libxdo-dev \
             libgbm-dev \
             librsvg2-dev \
-            pkg-config
+            pkg-config \
+            redis-server
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.94.0

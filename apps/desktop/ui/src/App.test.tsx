@@ -188,15 +188,16 @@ describe("App connection and query navigation", () => {
     );
   });
 
-  it("switches new-connection defaults to MySQL", () => {
+  it("switches new-connection defaults to Redis", () => {
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: "New connection" }));
-    fireEvent.click(screen.getByRole("button", { name: "MySQL" }));
-    expect(screen.getByRole("heading", { name: "New connection" }).closest(".modal-card")).toHaveTextContent("MYSQL");
-    expect(screen.getByPlaceholderText("mysql://user:password@host:3306/database")).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("Local MySQL")).toBeInTheDocument();
-    expect(screen.getByDisplayValue(3306)).toBeInTheDocument();
-    expect(screen.getByDisplayValue("root")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Redis" }));
+    expect(screen.getByRole("heading", { name: "New connection" }).closest(".modal-card")).toHaveTextContent("REDIS");
+    expect(screen.getByPlaceholderText("redis://default:password@host:6379/0")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Local Redis")).toBeInTheDocument();
+    expect(screen.getByDisplayValue(6379)).toBeInTheDocument();
+    expect(screen.getByDisplayValue("default")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("0")).toBeInTheDocument();
   });
 
   it("tests Save & connect before persisting the profile", async () => {

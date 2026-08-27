@@ -5,10 +5,12 @@ use crate::models::{
 };
 use crate::mysql::MysqlSession;
 use crate::postgres::PgSession;
+use crate::redis::RedisSession;
 
 pub enum DbSession {
     Postgres(PgSession),
     Mysql(MysqlSession),
+    Redis(RedisSession),
 }
 
 impl DbSession {
@@ -20,6 +22,9 @@ impl DbSession {
             DatabaseEngine::Mysql => {
                 Ok(Self::Mysql(MysqlSession::connect(profile, password).await?))
             }
+            DatabaseEngine::Redis => {
+                Ok(Self::Redis(RedisSession::connect(profile, password).await?))
+            }
         }
     }
 
@@ -27,6 +32,7 @@ impl DbSession {
         match self {
             Self::Postgres(session) => session.profile(),
             Self::Mysql(session) => session.profile(),
+            Self::Redis(session) => session.profile(),
         }
     }
 
@@ -34,6 +40,7 @@ impl DbSession {
         match self {
             Self::Postgres(session) => session.list_databases().await,
             Self::Mysql(session) => session.list_databases().await,
+            Self::Redis(session) => session.list_databases().await,
         }
     }
 
@@ -41,6 +48,7 @@ impl DbSession {
         match self {
             Self::Postgres(session) => session.schema_tree().await,
             Self::Mysql(session) => session.schema_tree().await,
+            Self::Redis(session) => session.schema_tree().await,
         }
     }
 
@@ -48,6 +56,7 @@ impl DbSession {
         match self {
             Self::Postgres(session) => session.table_page(request).await,
             Self::Mysql(session) => session.table_page(request).await,
+            Self::Redis(session) => session.table_page(request).await,
         }
     }
 
@@ -55,6 +64,7 @@ impl DbSession {
         match self {
             Self::Postgres(session) => session.run_query(sql, max_rows).await,
             Self::Mysql(session) => session.run_query(sql, max_rows).await,
+            Self::Redis(session) => session.run_query(sql, max_rows).await,
         }
     }
 
@@ -62,6 +72,7 @@ impl DbSession {
         match self {
             Self::Postgres(session) => session.apply_mutations(batch).await,
             Self::Mysql(session) => session.apply_mutations(batch).await,
+            Self::Redis(session) => session.apply_mutations(batch).await,
         }
     }
 

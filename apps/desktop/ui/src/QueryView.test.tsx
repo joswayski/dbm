@@ -22,6 +22,21 @@ describe("QueryView", () => {
     vi.restoreAllMocks();
   });
 
+  it("uses Redis command targeting and workbench labels", async () => {
+    const runQuery = vi.spyOn(commands, "runQuery");
+    render(<QueryView profileId="preview" engine="redis" initialSql={"PING\n\nGET greeting"} title="Redis" />);
+
+    expect(screen.getByText("REDIS WORKBENCH")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Run command/ }));
+
+    await waitFor(() => expect(runQuery).toHaveBeenCalledWith({
+      profileId: "preview",
+      sql: "PING",
+      maxRows: 10_000,
+    }));
+    expect(await screen.findByText("PONG")).toBeInTheDocument();
+  });
+
   it("runs the statement under the cursor on Command+Enter without inserting a newline", async () => {
     const runQuery = vi.spyOn(commands, "runQuery");
     render(<QueryView profileId="preview" initialSql={"SELECT now();\n\nSELECT 1;"} />);
