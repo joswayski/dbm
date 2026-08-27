@@ -1202,6 +1202,7 @@ function ProfileModal({
                   type="button"
                   className={`engine-option ${form.engine === engine ? "selected" : ""}`}
                   aria-pressed={form.engine === engine}
+                  aria-label={ENGINE_PRESETS[engine].label}
                   onClick={() => setForm((current) => applyEngineDefaults(current, engine))}
                 >
                   <span className="engine-icon"><Database size={14} /></span>
