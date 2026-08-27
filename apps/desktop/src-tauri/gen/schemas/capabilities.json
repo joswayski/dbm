@@ -1,1 +1,0 @@
-{"main":{"identifier":"main","description":"Permissions for the DBM desktop window","local":true,"windows":["main"],"permissions":["core:default","dialog:allow-save","fs:allow-open","fs:allow-remove","fs:allow-write","opener:allow-open-path","opener:allow-reveal-item-in-dir"]}}
