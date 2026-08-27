@@ -25,6 +25,12 @@ const browserHistory: QueryHistoryEntry[] = [];
 const browserRows: Record<string, JsonValue[][]> = {
   users: Array.from({ length: 12 }, (_, index) => [index + 1, `person${index + 1}@example.com`, index % 3 !== 0, String(index + 100)]),
   orders: Array.from({ length: 12 }, (_, index) => [index + 1, index + 10, index % 2 ? "paid" : "pending", String(index + 100)]),
+  all: [
+    ["greeting", "string", -1],
+    ["user:1", "hash", -1],
+  ],
+  greeting: [["greeting", "hello"]],
+  "user:1": [["name", "Ada"], ["role", "engineer"]],
 };
 
 function inTauri(): boolean {
@@ -107,8 +113,8 @@ export function deleteProfile(profileId: string): Promise<void> {
 
 export function testProfile(input: SaveProfileInput): Promise<void> {
   return call("test_profile", { input }, async () => {
-    if (!input.host || !input.username) {
-      throw new Error("Host and username are required");
+    if (!input.host || (input.engine !== "redis" && !input.username)) {
+      throw new Error(input.engine === "redis" ? "Host is required" : "Host and username are required");
     }
   });
 }
@@ -117,8 +123,13 @@ export function connectProfile(profileId: string): Promise<WorkspaceInfo> {
   return call("connect_profile", { profileId }, () => {
     const summary = browserProfiles.find((item) => item.profile.id === profileId);
     if (!summary) throw new Error("Profile not found");
-    const fallback = summary.profile.engine === "mysql" ? "mysql" : "postgres";
-    const databases: DatabaseRef[] = [...new Set([summary.profile.defaultDatabase, fallback])]
+    const fallback = summary.profile.engine === "mysql"
+      ? "mysql"
+      : summary.profile.engine === "redis"
+        ? "0"
+        : "postgres";
+    const extra = summary.profile.engine === "redis" ? ["1"] : [];
+    const databases: DatabaseRef[] = [...new Set([summary.profile.defaultDatabase, fallback, ...extra])]
       .map((name) => ({ name, isTemplate: false, isConnectable: true }));
     return { profile: summary.profile, databases };
   });
@@ -155,9 +166,42 @@ const browserSchema: SchemaNode[] = [
   },
 ];
 
+const browserRedisSchema: SchemaNode[] = [
+  {
+    name: "Keys",
+    kind: "schema",
+    schema: "keys",
+    table: null,
+    children: [
+      { name: "all", kind: "table", schema: "keys", table: "all", children: [] },
+    ],
+  },
+  {
+    name: "Strings",
+    kind: "schema",
+    schema: "string",
+    table: null,
+    children: [
+      { name: "greeting", kind: "key", schema: "string", table: "greeting", children: [] },
+    ],
+  },
+  {
+    name: "Hashes",
+    kind: "schema",
+    schema: "hash",
+    table: null,
+    children: [
+      { name: "user:1", kind: "key", schema: "hash", table: "user:1", children: [] },
+    ],
+  },
+];
+
 export function loadSchemaTree(profileId: string): Promise<SchemaNode[]> {
   return call("load_schema_tree", { profileId }, () => {
     const summary = browserProfiles.find((item) => item.profile.id === profileId);
+    if (summary?.profile.engine === "redis") {
+      return browserRedisSchema;
+    }
     if (summary?.profile.engine === "mysql") {
       const database = summary.profile.defaultDatabase;
       return [{
@@ -213,10 +257,11 @@ export function runQuery(request: QueryRequest): Promise<QueryResponse> {
       success: true,
     };
     browserHistory.unshift(entry);
-    if (/^\s*(select|show|with|values)/i.test(request.sql)) {
+    if (/^\s*(select|show|with|values|ping|get|hgetall|scan|keys|info)/i.test(request.sql)) {
+      const redisPing = /^\s*ping\s*$/i.test(request.sql);
       return {
-        columns: [{ name: "result", dataType: "text" }],
-        rows: [["DBM browser preview"]],
+        columns: [{ name: redisPing ? "value" : "result", dataType: "text" }],
+        rows: [[redisPing ? "PONG" : "DBM browser preview"]],
         rowCount: 1,
         affectedRows: null,
         durationMs: 2,
@@ -353,6 +398,43 @@ export async function revealExportedFile(path: string): Promise<void> {
 }
 
 function browserTableMetadata(schema: string, table: string): TableMetadata {
+  if (schema === "keys" && table === "all") {
+    return {
+      schema,
+      table,
+      columns: [
+        { name: "key", dataType: "string", nullable: false, defaultValue: null, ordinal: 1 },
+        { name: "type", dataType: "string", nullable: false, defaultValue: null, ordinal: 2 },
+        { name: "ttl", dataType: "integer", nullable: false, defaultValue: null, ordinal: 3 },
+      ],
+      primaryKey: ["key"],
+      hasXmin: false,
+    };
+  }
+  if (schema === "string") {
+    return {
+      schema,
+      table,
+      columns: [
+        { name: "key", dataType: "string", nullable: false, defaultValue: null, ordinal: 1 },
+        { name: "value", dataType: "string", nullable: true, defaultValue: null, ordinal: 2 },
+      ],
+      primaryKey: ["key"],
+      hasXmin: false,
+    };
+  }
+  if (schema === "hash") {
+    return {
+      schema,
+      table,
+      columns: [
+        { name: "field", dataType: "string", nullable: false, defaultValue: null, ordinal: 1 },
+        { name: "value", dataType: "string", nullable: true, defaultValue: null, ordinal: 2 },
+      ],
+      primaryKey: ["field"],
+      hasXmin: false,
+    };
+  }
   return table === "orders"
     ? {
         schema,

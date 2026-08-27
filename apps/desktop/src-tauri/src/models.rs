@@ -3,12 +3,15 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
+use crate::error::{AppError, AppResult};
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum DatabaseEngine {
     #[default]
     Postgres,
     Mysql,
+    Redis,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -49,6 +52,50 @@ pub struct ConnectionProfile {
     pub read_only: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+impl ConnectionProfile {
+    pub fn validate(&self) -> AppResult<()> {
+        if self.name.is_empty() || self.host.is_empty() {
+            return Err(AppError::InvalidInput(
+                "name, host, and username are required".into(),
+            ));
+        }
+        if self.engine != DatabaseEngine::Redis && self.username.is_empty() {
+            return Err(AppError::InvalidInput(
+                "name, host, and username are required".into(),
+            ));
+        }
+        if self.engine == DatabaseEngine::Redis {
+            parse_redis_database(&self.default_database)?;
+        } else if self.default_database.is_empty() {
+            return Err(AppError::InvalidInput("database is required".into()));
+        }
+        if self.port == 0 {
+            return Err(AppError::InvalidInput(
+                "port must be between 1 and 65535".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+pub fn parse_redis_database(value: &str) -> AppResult<i64> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(AppError::InvalidInput(
+            "Redis database index is required".into(),
+        ));
+    }
+    let db = trimmed.parse::<i64>().map_err(|_| {
+        AppError::InvalidInput("Redis database must be a non-negative integer".into())
+    })?;
+    if db < 0 {
+        return Err(AppError::InvalidInput(
+            "Redis database must be a non-negative integer".into(),
+        ));
+    }
+    Ok(db)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

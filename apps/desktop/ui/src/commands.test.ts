@@ -9,6 +9,39 @@ describe("command adapters", () => {
     expect(toDisplayValue("hello")).toBe("hello");
   });
 
+  it("keeps Redis preview profiles on the Redis key tree", async () => {
+    const profile = await saveProfile({
+      name: "Redis preview",
+      color: "#a78bfa",
+      engine: "redis",
+      host: "localhost",
+      port: 6379,
+      username: "default",
+      defaultDatabase: "0",
+      tlsMode: "disabled",
+      caCertPath: null,
+      ssh: null,
+      readOnly: false,
+    });
+    const workspace = await connectProfile(profile.id);
+    expect(workspace.databases.map((database) => database.name)).toEqual(["0", "1"]);
+    const tree = await loadSchemaTree(profile.id);
+    expect(tree.map((node) => node.name)).toEqual(["Keys", "Strings", "Hashes"]);
+    const page = await loadTablePage({
+      profileId: profile.id,
+      schema: "hash",
+      table: "user:1",
+      offset: 0,
+      limit: 50,
+      filters: [],
+      orderBy: null,
+    });
+    expect(page.rows).toEqual([
+      ["name", "Ada"],
+      ["role", "engineer"],
+    ]);
+  });
+
   it("keeps MySQL preview profiles on the MySQL schema tree", async () => {
     const profile = await saveProfile({
       name: "MySQL preview",

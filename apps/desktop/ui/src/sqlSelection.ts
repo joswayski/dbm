@@ -21,6 +21,18 @@ export function sqlExecutionTarget(sqlText: string, selectionFrom: number, selec
   };
 }
 
+export function lineExecutionTarget(text: string, selectionFrom: number, selectionTo: number): SqlExecutionTarget | null {
+  const from = clamp(Math.min(selectionFrom, selectionTo), 0, text.length);
+  const to = clamp(Math.max(selectionFrom, selectionTo), 0, text.length);
+  const range = from !== to ? trimSqlRange(text, { from, to }) : lineRangeAtCursor(text, from);
+  if (!range) return null;
+  return {
+    ...range,
+    sql: text.slice(range.from, range.to),
+    kind: from !== to ? "selection" : "statement",
+  };
+}
+
 export function sqlStatementAtCursor(sqlText: string, cursorPosition: number): string {
   const range = statementRangeAtCursor(sqlText, cursorPosition);
   return range ? sqlText.slice(range.from, range.to) : "";
@@ -128,6 +140,39 @@ function statementRanges(sqlText: string): SqlRange[] {
   }
 
   ranges.push({ from: statementStart, to: sqlText.length });
+  return ranges;
+}
+
+function lineRangeAtCursor(text: string, cursorPosition: number): SqlRange | null {
+  const cursor = clamp(cursorPosition, 0, text.length);
+  const ranges = lineRanges(text);
+  let rangeIndex = ranges.findIndex((range, index) => cursor < range.to || index === ranges.length - 1);
+  if (cursor > 0 && text[cursor - 1] === "\n" && rangeIndex > 0) rangeIndex -= 1;
+  if (rangeIndex < 0) return trimSqlRange(text, { from: 0, to: text.length });
+
+  const selected = trimSqlRange(text, ranges[rangeIndex]);
+  if (selected) return selected;
+  for (let index = rangeIndex + 1; index < ranges.length; index += 1) {
+    const next = trimSqlRange(text, ranges[index]);
+    if (next) return next;
+  }
+  for (let index = rangeIndex - 1; index >= 0; index -= 1) {
+    const previous = trimSqlRange(text, ranges[index]);
+    if (previous) return previous;
+  }
+  return null;
+}
+
+function lineRanges(text: string): SqlRange[] {
+  const ranges: SqlRange[] = [];
+  let lineStart = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    if (text[index] === "\n") {
+      ranges.push({ from: lineStart, to: index });
+      lineStart = index + 1;
+    }
+  }
+  ranges.push({ from: lineStart, to: text.length });
   return ranges;
 }
 

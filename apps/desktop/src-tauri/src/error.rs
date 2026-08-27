@@ -77,4 +77,10 @@ impl From<keyring::Error> for AppError {
     }
 }
 
+impl From<redis_rs::RedisError> for AppError {
+    fn from(error: redis_rs::RedisError) -> Self {
+        Self::database(&error)
+    }
+}
+
 pub type AppResult<T> = Result<T, AppError>;

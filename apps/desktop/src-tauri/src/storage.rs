@@ -134,19 +134,7 @@ impl LocalStore {
             created_at,
             updated_at: now,
         };
-        if profile.name.is_empty() || profile.host.is_empty() || profile.username.is_empty() {
-            return Err(AppError::InvalidInput(
-                "name, host, and username are required".into(),
-            ));
-        }
-        if profile.default_database.is_empty() {
-            return Err(AppError::InvalidInput("database is required".into()));
-        }
-        if profile.port == 0 {
-            return Err(AppError::InvalidInput(
-                "port must be between 1 and 65535".into(),
-            ));
-        }
+        profile.validate()?;
 
         let ssh_json = profile
             .ssh
@@ -253,6 +241,7 @@ impl LocalStore {
 fn profile_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ConnectionProfile> {
     let engine = match row.get::<_, String>(3)?.as_str() {
         "mysql" => DatabaseEngine::Mysql,
+        "redis" => DatabaseEngine::Redis,
         _ => DatabaseEngine::Postgres,
     };
     let tls_mode = match row.get::<_, String>(8)?.as_str() {
@@ -331,6 +320,7 @@ fn engine_to_string(engine: &DatabaseEngine) -> &'static str {
     match engine {
         DatabaseEngine::Postgres => "postgres",
         DatabaseEngine::Mysql => "mysql",
+        DatabaseEngine::Redis => "redis",
     }
 }
 
@@ -338,6 +328,7 @@ fn default_port(engine: &DatabaseEngine) -> u16 {
     match engine {
         DatabaseEngine::Postgres => 5432,
         DatabaseEngine::Mysql => 3306,
+        DatabaseEngine::Redis => 6379,
     }
 }
 
@@ -439,6 +430,41 @@ mod tests {
                 .iter()
                 .any(|profile| profile.name == "Legacy"
                     && profile.engine == DatabaseEngine::Postgres)
+        );
+        std::fs::remove_file(path).expect("remove temp db");
+    }
+
+    #[test]
+    fn redis_profiles_round_trip_and_allow_empty_username() {
+        let path = std::env::temp_dir().join(format!("dbm-test-{}.sqlite3", Uuid::new_v4()));
+        let store = LocalStore::from_path(&path).expect("store");
+        let redis = store
+            .save_profile(&SaveProfileInput {
+                id: None,
+                name: "Local Redis".into(),
+                color: None,
+                engine: DatabaseEngine::Redis,
+                host: "localhost".into(),
+                port: 6379,
+                username: String::new(),
+                default_database: "0".into(),
+                tls_mode: TlsMode::Disabled,
+                ca_cert_path: None,
+                ssh: None,
+                read_only: false,
+                password: None,
+            })
+            .expect("save redis");
+        assert_eq!(redis.engine, DatabaseEngine::Redis);
+        assert_eq!(redis.port, 6379);
+        assert_eq!(redis.username, "");
+        assert_eq!(
+            store
+                .get_profile(redis.id)
+                .expect("get")
+                .expect("found")
+                .engine,
+            DatabaseEngine::Redis
         );
         std::fs::remove_file(path).expect("remove temp db");
     }

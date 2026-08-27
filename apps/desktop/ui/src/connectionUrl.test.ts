@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseConnectionUrl, parseMysqlConnectionUrl, parsePostgresConnectionUrl } from "./connectionUrl";
+import { parseConnectionUrl, parseMysqlConnectionUrl, parsePostgresConnectionUrl, parseRedisConnectionUrl } from "./connectionUrl";
 
 describe("parseConnectionUrl", () => {
   it("imports Railway-style PostgreSQL URLs", () => {
@@ -47,9 +47,30 @@ describe("parseConnectionUrl", () => {
     });
   });
 
+  it("imports Redis URLs, including TLS and password-only auth", () => {
+    expect(parseRedisConnectionUrl("redis://:secret@localhost:6379/2")).toEqual({
+      engine: "redis",
+      host: "localhost",
+      port: 6379,
+      username: "",
+      defaultDatabase: "2",
+      tlsMode: "preferred",
+      password: "secret",
+      suggestedName: "2 @ localhost",
+    });
+    expect(parseConnectionUrl("rediss://default:p@ss@cache.example:6380/0")).toMatchObject({
+      engine: "redis",
+      host: "cache.example",
+      port: 6380,
+      username: "default",
+      defaultDatabase: "0",
+      tlsMode: "required",
+    });
+  });
+
   it("rejects unsupported protocols", () => {
-    expect(() => parseConnectionUrl("redis://localhost:6379")).toThrow(
-      "The connection URL must begin with postgres://, postgresql://, mysql://, or mariadb://.",
+    expect(() => parseConnectionUrl("mongodb://localhost:27017")).toThrow(
+      "The connection URL must begin with postgres://, postgresql://, mysql://, mariadb://, redis://, rediss://, valkey://, or valkeys://.",
     );
     expect(() => parsePostgresConnectionUrl("mysql://root@localhost/app")).toThrow(
       "The connection URL must begin with postgres:// or postgresql://.",
