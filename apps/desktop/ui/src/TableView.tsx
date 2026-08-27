@@ -2,6 +2,40 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties, type Mous
 import { createPortal } from "react-dom";
 
 import * as commands from "./commands";
+import {
+  IconAlertCircle,
+  IconAlertTriangle,
+  IconArrowDown,
+  IconArrowRight,
+  IconArrowUp,
+  IconCheck,
+  IconCheckCircle,
+  IconChevronDown,
+  IconChevronLeft,
+  IconChevronRight,
+  IconChevronsLeft,
+  IconChevronsRight,
+  IconChevronsUpDown,
+  IconChevronUp,
+  IconCopy,
+  IconDownload,
+  IconFolderOpen,
+  IconPlus,
+  IconRefresh,
+  IconTable,
+  IconTrash,
+  IconX,
+} from "./icons";
+import {
+  Badge,
+  Button,
+  EmptyState,
+  IconButton,
+  Menu,
+  MenuItem,
+  Notice,
+} from "./ui";
+import { useDismiss } from "./useDismiss";
 import type {
   FilterCondition,
   FilterOperator,
@@ -121,6 +155,7 @@ export function TableView({
   const [exportResult, setExportResult] = useState<ExportResult | null>(null);
   const filtersInitialized = useRef(false);
   const gridRef = useRef<HTMLDivElement>(null);
+  const selectionMenuRef = useRef<HTMLDivElement>(null);
   const previewCloseTimer = useRef<number | null>(null);
 
   const load = useCallback(async () => {
@@ -186,16 +221,7 @@ export function TableView({
     };
   }, [contextMenu]);
 
-  useEffect(() => {
-    if (!selectionMenuOpen) return;
-    const close = () => setSelectionMenuOpen(false);
-    window.addEventListener("click", close);
-    window.addEventListener("blur", close);
-    return () => {
-      window.removeEventListener("click", close);
-      window.removeEventListener("blur", close);
-    };
-  }, [selectionMenuOpen]);
+  useDismiss(selectionMenuRef, selectionMenuOpen, () => setSelectionMenuOpen(false));
 
   useEffect(() => {
     if (!changePreview) return;
@@ -470,7 +496,7 @@ export function TableView({
     if (changePreview && changePreview.rowKey !== rowKey && previewCloseTimer.current !== null) return;
     cancelPreviewClose();
     const rect = element.getBoundingClientRect();
-    const previewWidth = Math.min(720, Math.max(320, window.innerWidth - 32));
+    const previewWidth = Math.min(680, Math.max(320, window.innerWidth - 32));
     const left = Math.max(16, Math.min(rect.left + 16, window.innerWidth - previewWidth - 16));
     const spaceBelow = Math.max(0, window.innerHeight - rect.bottom - 16);
     const spaceAbove = Math.max(0, rect.top - 16);
@@ -533,8 +559,8 @@ export function TableView({
       setSelectionAnchor(entry.rowIndex);
     }
     setContextMenu({
-      x: Math.min(event.clientX, window.innerWidth - 190),
-      y: Math.min(event.clientY, window.innerHeight - 110),
+      x: Math.min(event.clientX, window.innerWidth - 210),
+      y: Math.min(event.clientY, window.innerHeight - 120),
     });
   };
 
@@ -575,14 +601,38 @@ export function TableView({
   const exportLabel = exporting
     ? `Exporting ${exportProgress.toLocaleString()}${page?.totalRows != null ? ` / ${page.totalRows.toLocaleString()}` : ""}…`
     : `Export all${page?.totalRows != null ? ` (${page.totalRows.toLocaleString()})` : ""}`;
+  const columnsReset = collapsedColumns.size > 0 || Object.keys(columnWidths).length > 0;
+  const addFilterButton = (
+    <Button
+      variant="ghost"
+      size="sm"
+      icon={<IconPlus size={13} />}
+      onClick={() => setFilterDrafts((current) => [...current, createFilterDraft(visibleColumns[0]?.name ?? "")])}
+      disabled={!page}
+    >Add filter</Button>
+  );
+  const firstRowNumber = page && rowEntries.length > 0 ? page.offset + 1 : 0;
+  const lastRowNumber = page ? page.offset + rowEntries.length : 0;
 
   return (
-    <div className="table-view">
+    <div className="table-view view">
       <div className="view-toolbar">
-        <div><span className="eyebrow">TABLE</span><h2>{schema}.{table}</h2></div>
+        <div className="view-title">
+          <IconTable size={15} />
+          <h2><span className="qualifier">{schema}.</span>{table}</h2>
+          <span className="view-title-meta">
+            {page ? <>
+              <span>{page.totalRows ?? "—"} rows</span>
+              <span aria-hidden="true">·</span>
+              <span>{page.metadata.columns.length} columns</span>
+            </> : null}
+            {page && !editable ? <Badge title="This view has no primary key, so DBM cannot map edits back to rows.">Read-only</Badge> : null}
+          </span>
+        </div>
         <div className="toolbar-actions">
-          <button
-            className="secondary-button"
+          <Button
+            variant="secondary"
+            icon={<IconRefresh size={13} />}
             onClick={() => {
               if (pendingCount > 0) {
                 setError(PENDING_REFRESH_ERROR);
@@ -592,253 +642,406 @@ export function TableView({
             }}
             disabled={loading}
             title="Reload the current page with the same filters and sort"
-          >{loading ? "Refreshing…" : "Refresh"}</button>
-          <button className="secondary-button" onClick={() => void copyEntries(copyableEntries, "visible")} disabled={!page || loading} title="Copies only the current preview page">Copy visible ({copyableEntries.length})</button>
-          <button className="secondary-button" onClick={() => void exportAllRows()} disabled={!page || loading || exporting} title="Prompts for a location and exports every filtered row">{exportLabel}</button>
-          {selectedEntries.length > 0 ? <div className="selection-actions">
-            <button
-              className="secondary-button selection-actions-trigger"
+          >{loading ? "Refreshing…" : "Refresh"}</Button>
+          <Button
+            variant="secondary"
+            icon={<IconCopy size={13} />}
+            onClick={() => void copyEntries(copyableEntries, "visible")}
+            disabled={!page || loading}
+            title="Copies only the current preview page"
+          >Copy visible ({copyableEntries.length})</Button>
+          <Button
+            variant="secondary"
+            icon={<IconDownload size={13} />}
+            onClick={() => void exportAllRows()}
+            disabled={!page || loading || exporting}
+            loading={exporting}
+            title="Prompts for a location and exports every filtered row"
+          >{exportLabel}</Button>
+          {selectedEntries.length > 0 ? <div className="menu-anchor" ref={selectionMenuRef}>
+            <Button
+              variant="secondary"
+              trailing={<IconChevronDown size={13} />}
               aria-expanded={selectionMenuOpen}
               aria-haspopup="menu"
               onClick={(event) => { event.stopPropagation(); setSelectionMenuOpen((open) => !open); }}
-            >{selectedEntries.length} selected <span aria-hidden="true">⌄</span></button>
-            {selectionMenuOpen ? <div className="selection-actions-menu" role="menu" onClick={(event) => event.stopPropagation()}>
-              <button role="menuitem" onClick={() => { void copyEntries(selectedEntries, "selected"); setSelectionMenuOpen(false); }}>Copy selected as CSV</button>
-              {editable ? <button role="menuitem" className={allSelectedDeleted ? "" : "danger"} onClick={stageDeleteForSelected}>{allSelectedDeleted ? "Undo staged deletion" : `Stage ${selectedEntries.length === 1 ? "row" : `${selectedEntries.length} rows`} for deletion`}</button> : null}
-              <button role="menuitem" onClick={() => { setSelectedRows(new Set()); setSelectionAnchor(null); setSelectionMenuOpen(false); }}>Clear selection</button>
-            </div> : null}
+            >{selectedEntries.length} selected</Button>
+            {selectionMenuOpen ? <Menu label="Selection actions">
+              <MenuItem
+                icon={<IconCopy size={14} />}
+                label="Copy selected as CSV"
+                onClick={() => { void copyEntries(selectedEntries, "selected"); setSelectionMenuOpen(false); }}
+              />
+              {editable ? <MenuItem
+                icon={allSelectedDeleted ? <IconCheck size={14} /> : <IconTrash size={14} />}
+                label={allSelectedDeleted
+                  ? "Undo staged deletion"
+                  : `Stage ${selectedEntries.length === 1 ? "row" : `${selectedEntries.length} rows`} for deletion`}
+                danger={!allSelectedDeleted}
+                onClick={stageDeleteForSelected}
+              /> : null}
+              <MenuItem
+                icon={<IconX size={14} />}
+                label="Clear selection"
+                onClick={() => { setSelectedRows(new Set()); setSelectionAnchor(null); setSelectionMenuOpen(false); }}
+              />
+            </Menu> : null}
           </div> : null}
-          {pendingCount > 0 ? <>
-            <button className="primary-button" onClick={() => void saveChanges()} disabled={saving}>{saving ? "Saving…" : `Save changes (${pendingCount})`}</button>
-          </> : null}
+          {pendingCount > 0 ? <Button
+            variant="primary"
+            icon={saving ? undefined : <IconCheck size={13} />}
+            loading={saving}
+            onClick={() => void saveChanges()}
+            disabled={saving}
+          >{saving ? "Saving…" : `Save changes (${pendingCount})`}</Button> : null}
         </div>
       </div>
 
-      <div className="filter-panel">
-        <div className="filter-panel-header">
-          <strong>Filters</strong>
-          <span className="filter-join">All filters must match</span>
-          <button className="text-button" onClick={() => setFilterDrafts((current) => [...current, createFilterDraft(visibleColumns[0]?.name ?? "")])} disabled={!page}>＋ Add filter</button>
-          {page ? <span className="row-count">{page.totalRows ?? "—"} rows · {page.metadata.columns.length} columns</span> : null}
-        </div>
-        {filterDrafts.map((filter) => (
-          <div className="filter-row" key={filter.id}>
-            <select className="select-input filter-column" value={filter.column} onChange={(event) => updateFilter(filter.id, { column: event.target.value })} disabled={!page}>
+      <div className="query-bar">
+        {filterDrafts.length === 0 ? (
+          <div className="query-bar-row">
+            <span className="query-bar-label">Where</span>
+            <span className="filter-no-value">No filters — every row is shown.</span>
+            {addFilterButton}
+          </div>
+        ) : null}
+        {filterDrafts.map((filter, index) => (
+          <div className="query-bar-row" key={filter.id}>
+            <span className="query-bar-label">{index === 0 ? "Where" : "and"}</span>
+            <select
+              className="select filter-column"
+              aria-label="Filter column"
+              value={filter.column}
+              onChange={(event) => updateFilter(filter.id, { column: event.target.value })}
+              disabled={!page}
+            >
               {visibleColumns.map((column) => <option key={column.name} value={column.name}>{column.name}</option>)}
             </select>
-            <select className="select-input filter-operator" value={filter.operator} onChange={(event) => updateFilter(filter.id, { operator: event.target.value as FilterOperator })} disabled={!page}>
+            <select
+              className="select filter-operator"
+              aria-label="Filter operator"
+              value={filter.operator}
+              onChange={(event) => updateFilter(filter.id, { operator: event.target.value as FilterOperator })}
+              disabled={!page}
+            >
               {FILTER_OPERATORS.map((operator) => <option key={operator.value} value={operator.value}>{operator.label}</option>)}
             </select>
             {filterNeedsValue(filter.operator) ? <input
-              className="text-input"
+              className="input filter-value"
+              aria-label="Filter value"
               placeholder={filter.operator === "in" || filter.operator === "notIn" ? "value 1, value 2, …" : "Value…"}
               value={filter.value}
               onChange={(event) => updateFilter(filter.id, { value: event.target.value })}
               onKeyDown={(event) => { if (event.key === "Enter") applyFilters(); }}
             /> : <span className="filter-no-value">No value needed</span>}
-            <button className="icon-button filter-remove" onClick={() => setFilterDrafts((current) => current.filter((candidate) => candidate.id !== filter.id))} aria-label="Remove filter">×</button>
+            <IconButton
+              icon={<IconX size={14} />}
+              label="Remove filter"
+              tooltip={false}
+              onClick={() => setFilterDrafts((current) => current.filter((candidate) => candidate.id !== filter.id))}
+            />
+            {index === filterDrafts.length - 1 ? addFilterButton : null}
           </div>
         ))}
-        <div className="table-query-controls">
-          <label>
-            <span>Preview limit</span>
-            <span className="limit-input-wrap">
-              <input className="text-input limit-input" aria-label="Preview limit" type="number" min="1" max={MAX_PREVIEW_ROWS} value={limitInput} onChange={(event) => setLimitInput(event.target.value)} onBlur={applyPreviewLimit} onKeyDown={(event) => { if (event.key === "Enter") applyPreviewLimit(); }} />
-              <span className="limit-stepper">
-                <button type="button" aria-label="Increase preview limit" onMouseDown={(event) => event.preventDefault()} onClick={() => stepPreviewLimit(1)}>▲</button>
-                <button type="button" aria-label="Decrease preview limit" onMouseDown={(event) => event.preventDefault()} onClick={() => stepPreviewLimit(-1)}>▼</button>
-              </span>
+        <div className="query-bar-row">
+          <span className="query-bar-label">Order by</span>
+          <select
+            className="select sort-column-select"
+            aria-label="Sort by"
+            value={effectiveOrderBy?.column ?? ""}
+            onChange={(event) => {
+              setOrderBy(event.target.value ? { column: event.target.value, descending: false } : null);
+              setPageIndex(0);
+            }}
+          >
+            {page?.metadata.primaryKey.length ? null : <option value="">Choose a sort column</option>}
+            {visibleColumns.map((column) => (
+              <option key={column.name} value={column.name}>
+                {column.name}{page?.metadata.primaryKey.includes(column.name) ? " (primary key)" : ""}
+              </option>
+            ))}
+          </select>
+          {effectiveOrderBy ? <select
+            className="select sort-direction-select"
+            aria-label="Sort direction"
+            value={effectiveOrderBy.descending ? "desc" : "asc"}
+            onChange={(event) => {
+              setOrderBy({ ...effectiveOrderBy, descending: event.target.value === "desc" });
+              setPageIndex(0);
+            }}
+          >
+            <option value="asc">Ascending</option>
+            <option value="desc">Descending</option>
+          </select> : null}
+          <span className="query-bar-label query-bar-label-inline">Limit</span>
+          <span className="limit-field">
+            <input
+              className="input"
+              aria-label="Preview limit"
+              type="number"
+              min="1"
+              max={MAX_PREVIEW_ROWS}
+              value={limitInput}
+              onChange={(event) => setLimitInput(event.target.value)}
+              onBlur={applyPreviewLimit}
+              onKeyDown={(event) => { if (event.key === "Enter") applyPreviewLimit(); }}
+            />
+            <span className="limit-stepper">
+              <button
+                type="button"
+                aria-label="Increase preview limit"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => stepPreviewLimit(1)}
+              ><IconChevronUp size={11} /></button>
+              <button
+                type="button"
+                aria-label="Decrease preview limit"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => stepPreviewLimit(-1)}
+              ><IconChevronDown size={11} /></button>
             </span>
-          </label>
-          <label>
-            <span>Sort by</span>
-            <select
-              className="select-input sort-column-select"
-              value={effectiveOrderBy?.column ?? ""}
-              onChange={(event) => {
-                setOrderBy(event.target.value ? { column: event.target.value, descending: false } : null);
-                setPageIndex(0);
-              }}
-            >
-              {page?.metadata.primaryKey.length ? null : <option value="">Choose a sort column</option>}
-              {visibleColumns.map((column) => (
-                <option key={column.name} value={column.name}>
-                  {column.name}{page?.metadata.primaryKey.includes(column.name) ? " (primary key)" : ""}
-                </option>
-              ))}
-            </select>
-          </label>
-          {effectiveOrderBy ? <label>
-            <span>Direction</span>
-            <select
-              className="select-input sort-direction-select"
-              aria-label="Sort direction"
-              value={effectiveOrderBy.descending ? "desc" : "asc"}
-              onChange={(event) => {
-                setOrderBy({ ...effectiveOrderBy, descending: event.target.value === "desc" });
-                setPageIndex(0);
-              }}
-            >
-              <option value="asc">Ascending</option>
-              <option value="desc">Descending</option>
-            </select>
-          </label> : null}
-          {collapsedColumns.size > 0 || Object.keys(columnWidths).length > 0 ? <button className="text-button" onClick={() => { setCollapsedColumns(new Set()); setColumnWidths({}); }}>Reset columns</button> : null}
-          <div className="filter-actions">
-            {hasFiltersToClear ? <button className="secondary-button" onClick={clearFilters} disabled={!page}>Clear</button> : null}
-            <button className="primary-button apply-filters-button" onClick={applyFilters} disabled={!page}>Apply filters</button>
+          </span>
+          <div className="query-bar-actions">
+            {columnsReset ? <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => { setCollapsedColumns(new Set()); setColumnWidths({}); }}
+            >Reset columns</Button> : null}
+            {hasFiltersToClear ? <Button variant="secondary" onClick={clearFilters} disabled={!page}>Clear</Button> : null}
+            <Button variant="primary" onClick={applyFilters} disabled={!page}>Apply filters</Button>
           </div>
         </div>
       </div>
 
-      {error ? <DismissibleMessage className="inline-error" message={error} onDismiss={() => setError(null)} /> : null}
-      {notice ? <DismissibleMessage className="inline-notice" message={notice} onDismiss={() => setNotice(null)} /> : null}
-      {exportResult ? <div className="inline-notice export-complete" role="status">
-        <span>
+      <div className="view-messages">
+        {error ? <Notice tone="danger" icon={<IconAlertCircle size={14} />} onDismiss={() => setError(null)}>{error}</Notice> : null}
+        {notice ? <Notice tone="success" icon={<IconCheckCircle size={14} />} onDismiss={() => setNotice(null)}>{notice}</Notice> : null}
+        {exportResult ? <Notice
+          tone="success"
+          role="status"
+          icon={<IconCheckCircle size={14} />}
+          onDismiss={() => setExportResult(null)}
+          actions={<Button
+            variant="secondary"
+            size="sm"
+            icon={<IconFolderOpen size={13} />}
+            onClick={() => void handleExportAction("reveal")}
+          >Show in folder</Button>}
+        >
           Exported {exportResult.rows.toLocaleString()} filtered {exportResult.rows === 1 ? "row" : "rows"} to{" "}
-          <button className="export-file-link" onClick={() => void handleExportAction("open")}>{fileName(exportResult.path)}</button>.
-        </span>
-        <div className="export-complete-actions">
-          <button className="secondary-button export-reveal-button" onClick={() => void handleExportAction("reveal")}><span className="export-folder-icon" aria-hidden="true" /> Show in folder</button>
-          <button className="export-dismiss-button" onClick={() => setExportResult(null)} aria-label="Dismiss export result">×</button>
-        </div>
-      </div> : null}
-      {pendingCount > 0 ? <div className="pending-changes">
-        <strong>{pendingCount} pending {pendingCount === 1 ? "change" : "changes"}</strong>
-        {pendingEditCount > 0 ? <span className="pending-edit-count">{pendingEditCount} {pendingEditCount === 1 ? "edited row" : "edited rows"}</span> : null}
-        {pendingDeleteCount > 0 ? <span className="pending-delete-count">{pendingDeleteCount} {pendingDeleteCount === 1 ? "deletion" : "deletions"}</span> : null}
-        <button className="secondary-button pending-discard-button" onClick={discardAllChanges} disabled={saving}>Discard changes</button>
-      </div> : null}
+          <button type="button" className="export-file-link" onClick={() => void handleExportAction("open")}>{fileName(exportResult.path)}</button>.
+        </Notice> : null}
+        {pendingCount > 0 ? <div className="pending-changes">
+          <IconAlertTriangle size={14} />
+          <strong>{pendingCount} pending {pendingCount === 1 ? "change" : "changes"}</strong>
+          {pendingEditCount > 0 ? <Badge tone="warning">{pendingEditCount} {pendingEditCount === 1 ? "edited row" : "edited rows"}</Badge> : null}
+          {pendingDeleteCount > 0 ? <Badge tone="danger">{pendingDeleteCount} {pendingDeleteCount === 1 ? "deletion" : "deletions"}</Badge> : null}
+          <Button
+            className="pending-discard-button"
+            variant="secondary"
+            size="sm"
+            onClick={discardAllChanges}
+            disabled={saving}
+          >Discard changes</Button>
+        </div> : null}
+      </div>
 
-      <div className="grid-wrap" ref={gridRef}>
-        {loading && !page ? <div className="initial-grid-skeleton" aria-label="Loading rows">
-          <div className="skeleton-header" />
-          {Array.from({ length: 5 }, (_, index) => <div className="skeleton-row" key={index} />)}
-        </div> : page && rowEntries.length > 0 ? (
-          <table className={`data-grid resizable-grid ${hoveredColumnAction ? "column-action-active" : ""}`} style={{ width: `${gridWidth}px`, minWidth: "100%" }}>
-            <colgroup>
-              {visibleColumns.map((column) => <col key={column.name} style={{ width: `${columnWidth(column)}px` }} />)}
-            </colgroup>
-            <thead><tr>
-              {visibleColumns.map((column) => {
-                const sorted = effectiveOrderBy?.column === column.name;
-                const collapsed = collapsedColumns.has(column.name);
-                const focusClass = hoveredColumnAction
-                  ? hoveredColumnAction === column.name ? "column-action-target" : "column-action-dimmed"
-                  : "";
-                return <th key={column.name} className={[sorted ? "sorted-column" : "", "resizable-header", focusClass].filter(Boolean).join(" ")}>
-                  {collapsed ? <button
-                    className="expand-column column-action-button"
-                    onClick={() => toggleColumn(column.name)}
-                    onMouseEnter={() => setHoveredColumnAction(column.name)}
-                    onMouseLeave={() => setHoveredColumnAction(null)}
-                    data-tooltip={`Expand ${column.name}`}
-                    aria-label={`Expand ${column.name}`}
-                  ><span className="column-action-glyph" aria-hidden="true">↦</span><span className="collapsed-column-name">{column.name}</span></button> : <div className="column-header-content">
-                    <button className="column-sort" onClick={() => toggleSort(column.name)} aria-label={`Sort by ${column.name}`}>
-                      <span>{column.name}<small>{column.dataType}</small></span>
-                      <span className={`sort-indicator ${sorted ? "active" : ""}`}>{sorted ? effectiveOrderBy?.descending ? "↓" : "↑" : "↕"}</span>
-                    </button>
-                    <button
-                      className="collapse-column column-action-button"
-                      onClick={() => toggleColumn(column.name)}
-                      onMouseEnter={() => setHoveredColumnAction(column.name)}
-                      onMouseLeave={() => setHoveredColumnAction(null)}
-                      data-tooltip={`Collapse ${column.name}`}
-                      aria-label={`Collapse ${column.name}`}
-                    ><span className="column-action-glyph" aria-hidden="true">↤</span></button>
-                  </div>}
-                  {!collapsed ? <div className="column-resize-handle" onMouseDown={(event) => startColumnResize(event, column)} /> : null}
-                </th>;
-              })}
-            </tr></thead>
-            <tbody>{rowEntries.map((entry) => {
-              const deleted = Boolean(entry.pending?.deleted);
-              const edited = Boolean(entry.pending && !entry.pending.deleted);
-              const rowClass = [selectedRows.has(entry.key) ? "selected-row" : "", deleted ? "deleted-row" : edited ? "staged-row" : ""].filter(Boolean).join(" ");
-              return <tr
-                key={entry.key}
-                className={rowClass}
-                onClick={(event) => selectRow(event, entry.rowIndex, entry.key)}
-                onContextMenu={(event) => openContextMenu(event, entry)}
-                onMouseEnter={(event) => { if (entry.pending) showChangePreview(event.currentTarget, entry.key); }}
-                onMouseLeave={() => { if (entry.pending) schedulePreviewClose(); }}
-                aria-selected={selectedRows.has(entry.key)}
-              >
-                {visibleColumns.map((column, columnIndex) => {
+      <div className="grid-region">
+        <div className="grid-scroll" ref={gridRef}>
+          {loading && !page ? <div className="grid-skeleton" aria-label="Loading rows">
+            <div className="skeleton-header" />
+            {Array.from({ length: 8 }, (_, index) => <div className="skeleton-row" key={index} />)}
+          </div> : page && rowEntries.length > 0 ? (
+            <table
+              className={`data-grid resizable-grid ${hoveredColumnAction ? "column-action-active" : ""}`}
+              style={{ width: `${gridWidth}px`, minWidth: "100%" }}
+            >
+              <colgroup>
+                {visibleColumns.map((column) => <col key={column.name} style={{ width: `${columnWidth(column)}px` }} />)}
+              </colgroup>
+              <thead><tr>
+                {visibleColumns.map((column) => {
+                  const sorted = effectiveOrderBy?.column === column.name;
                   const collapsed = collapsedColumns.has(column.name);
-                  const isEditing = editing?.rowKey === entry.key && editing.column === columnIndex;
                   const isPrimaryKey = page.metadata.primaryKey.includes(column.name);
-                  const displayValue = commands.toDisplayValue(entry.values[columnIndex]);
-                  const changed = Boolean(
-                    entry.pending &&
-                    !entry.pending.deleted &&
-                    !rowsEqual([entry.pending.original[columnIndex]], [entry.pending.changes[columnIndex]]),
-                  );
                   const focusClass = hoveredColumnAction
                     ? hoveredColumnAction === column.name ? "column-action-target" : "column-action-dimmed"
                     : "";
-                  return <td
-                    key={column.name}
-                    className={[collapsed ? "collapsed-data-cell" : "", changed ? "changed-cell" : "", focusClass].filter(Boolean).join(" ")}
-                    onDoubleClick={(event) => {
-                      event.stopPropagation();
-                      if (editable && !collapsed && !isPrimaryKey && !deleted) {
-                        setEditing({
-                          rowKey: entry.key,
-                          column: columnIndex,
-                          value: displayValue === "NULL" ? "" : displayValue,
-                        });
-                      }
-                    }}
-                  >
-                    {collapsed ? <span className="collapsed-cell">…</span> : isEditing ? <input
-                      autoFocus
-                      className="cell-input"
-                      value={editing?.value ?? ""}
-                      onMouseDown={(event) => event.stopPropagation()}
-                      onClick={(event) => event.stopPropagation()}
-                      onDoubleClick={(event) => event.stopPropagation()}
-                      onChange={(event) => {
-                        const value = event.target.value;
-                        setEditing((current) => current?.rowKey === entry.key && current.column === columnIndex
-                          ? { ...current, value }
-                          : current);
-                      }}
-                      onBlur={() => {
-                        if (editing?.rowKey === entry.key && editing.column === columnIndex) {
-                          setCell(entry, columnIndex, editing.value);
-                        }
-                        setEditing(null);
-                      }}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") {
-                          event.preventDefault();
-                          event.currentTarget.blur();
-                        } else if (event.key === "Escape") {
-                          event.preventDefault();
-                          setEditing(null);
-                        }
-                      }}
-                    /> : <span className={entry.values[columnIndex] === null ? "null-value" : "cell-value"}>{displayValue}</span>}
-                  </td>;
+                  return <th key={column.name} className={[sorted ? "sorted-column" : "", "resizable-header", focusClass].filter(Boolean).join(" ")}>
+                    {collapsed ? <button
+                      type="button"
+                      className="expand-column column-action-button"
+                      onClick={() => toggleColumn(column.name)}
+                      onMouseEnter={() => setHoveredColumnAction(column.name)}
+                      onMouseLeave={() => setHoveredColumnAction(null)}
+                      data-tooltip={`Expand ${column.name}`}
+                      aria-label={`Expand ${column.name}`}
+                    >
+                      <IconChevronsRight size={13} />
+                      <span className="collapsed-column-name">{column.name}</span>
+                    </button> : <div className="column-header-content">
+                      <button
+                        type="button"
+                        className="column-sort"
+                        onClick={() => toggleSort(column.name)}
+                        aria-label={`Sort by ${column.name}`}
+                      >
+                        <span className="column-name">
+                          <span>{column.name}</span>
+                          {isPrimaryKey ? <span className="column-key" title="Primary key">pk</span> : null}
+                          <span className="column-type">{column.dataType}</span>
+                        </span>
+                        <span className={`sort-indicator ${sorted ? "active" : ""}`}>
+                          {sorted
+                            ? effectiveOrderBy?.descending ? <IconArrowDown size={12} /> : <IconArrowUp size={12} />
+                            : <IconChevronsUpDown size={12} />}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        className="collapse-column column-action-button"
+                        onClick={() => toggleColumn(column.name)}
+                        onMouseEnter={() => setHoveredColumnAction(column.name)}
+                        onMouseLeave={() => setHoveredColumnAction(null)}
+                        data-tooltip={`Collapse ${column.name}`}
+                        aria-label={`Collapse ${column.name}`}
+                      ><IconChevronsLeft size={13} /></button>
+                    </div>}
+                    {!collapsed ? <div className="column-resize-handle" onMouseDown={(event) => startColumnResize(event, column)} /> : null}
+                  </th>;
                 })}
-              </tr>;
-            })}</tbody>
-          </table>
-        ) : <div className="empty-state">No rows match this view.</div>}
-        {showLoadingOverlay && page ? <div className="grid-loading-overlay"><span>Refreshing…</span></div> : null}
+              </tr></thead>
+              <tbody>{rowEntries.map((entry) => {
+                const deleted = Boolean(entry.pending?.deleted);
+                const edited = Boolean(entry.pending && !entry.pending.deleted);
+                const rowClass = [
+                  selectedRows.has(entry.key) ? "selected-row" : "",
+                  deleted ? "deleted-row" : edited ? "staged-row" : "",
+                ].filter(Boolean).join(" ");
+                return <tr
+                  key={entry.key}
+                  className={rowClass}
+                  onClick={(event) => selectRow(event, entry.rowIndex, entry.key)}
+                  onContextMenu={(event) => openContextMenu(event, entry)}
+                  onMouseEnter={(event) => { if (entry.pending) showChangePreview(event.currentTarget, entry.key); }}
+                  onMouseLeave={() => { if (entry.pending) schedulePreviewClose(); }}
+                  aria-selected={selectedRows.has(entry.key)}
+                >
+                  {visibleColumns.map((column, columnIndex) => {
+                    const collapsed = collapsedColumns.has(column.name);
+                    const isEditing = editing?.rowKey === entry.key && editing.column === columnIndex;
+                    const isPrimaryKey = page.metadata.primaryKey.includes(column.name);
+                    const displayValue = commands.toDisplayValue(entry.values[columnIndex]);
+                    const changed = Boolean(
+                      entry.pending &&
+                      !entry.pending.deleted &&
+                      !rowsEqual([entry.pending.original[columnIndex]], [entry.pending.changes[columnIndex]]),
+                    );
+                    const focusClass = hoveredColumnAction
+                      ? hoveredColumnAction === column.name ? "column-action-target" : "column-action-dimmed"
+                      : "";
+                    return <td
+                      key={column.name}
+                      className={[collapsed ? "collapsed-data-cell" : "", changed ? "changed-cell" : "", focusClass].filter(Boolean).join(" ")}
+                      onDoubleClick={(event) => {
+                        event.stopPropagation();
+                        if (editable && !collapsed && !isPrimaryKey && !deleted) {
+                          setEditing({
+                            rowKey: entry.key,
+                            column: columnIndex,
+                            value: displayValue === "NULL" ? "" : displayValue,
+                          });
+                        }
+                      }}
+                    >
+                      {collapsed ? <span className="collapsed-cell">…</span> : isEditing ? <input
+                        autoFocus
+                        className="cell-input"
+                        value={editing?.value ?? ""}
+                        onMouseDown={(event) => event.stopPropagation()}
+                        onClick={(event) => event.stopPropagation()}
+                        onDoubleClick={(event) => event.stopPropagation()}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          setEditing((current) => current?.rowKey === entry.key && current.column === columnIndex
+                            ? { ...current, value }
+                            : current);
+                        }}
+                        onBlur={() => {
+                          if (editing?.rowKey === entry.key && editing.column === columnIndex) {
+                            setCell(entry, columnIndex, editing.value);
+                          }
+                          setEditing(null);
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            event.currentTarget.blur();
+                          } else if (event.key === "Escape") {
+                            event.preventDefault();
+                            setEditing(null);
+                          }
+                        }}
+                      /> : <span className={entry.values[columnIndex] === null ? "null-value" : "cell-value"}>{displayValue}</span>}
+                    </td>;
+                  })}
+                </tr>;
+              })}</tbody>
+            </table>
+          ) : <EmptyState
+            icon={<IconTable size={17} />}
+            title="No rows match this view"
+            description={appliedFilters.length > 0
+              ? "Clear or loosen the filters above to see rows again."
+              : "This table has no rows yet."}
+          />}
+          {showLoadingOverlay && page ? <div className="grid-loading-overlay">
+            <span><span className="spinner" />Refreshing…</span>
+          </div> : null}
+        </div>
+        <div className="grid-footer">
+          <span>
+            {rowEntries.length > 0
+              ? `Rows ${firstRowNumber.toLocaleString()}–${lastRowNumber.toLocaleString()}${page?.totalRows != null ? ` of ${page.totalRows.toLocaleString()}` : ""}`
+              : "No rows"}
+          </span>
+          {editable ? <span>Double-click a cell to edit</span> : null}
+          <span className="grid-footer-spacer" />
+          {pageIndex > 0 || page?.hasMore ? <span className="pagination">
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={<IconChevronLeft size={12} />}
+              disabled={loading || pageIndex === 0}
+              onClick={() => setPageIndex((value) => value - 1)}
+            >Previous</Button>
+            <span className="numeric">Page {pageIndex + 1}</span>
+            <Button
+              variant="ghost"
+              size="sm"
+              trailing={<IconChevronRight size={12} />}
+              disabled={loading || !page?.hasMore}
+              onClick={() => setPageIndex((value) => value + 1)}
+            >Next</Button>
+          </span> : null}
+        </div>
       </div>
-
-      {pageIndex > 0 || page?.hasMore ? <div className="pagination">
-        {pageIndex > 0 ? <button className="secondary-button" disabled={loading} onClick={() => setPageIndex((value) => value - 1)}>← Previous</button> : null}
-        <span>Page {pageIndex + 1}</span>
-        {page?.hasMore ? <button className="secondary-button" disabled={loading} onClick={() => setPageIndex((value) => value + 1)}>Next →</button> : null}
-      </div> : null}
+      <div className="view-footer-pad" />
 
       {contextMenu ? <div className="row-context-menu" style={{ left: contextMenu.x, top: contextMenu.y } as CSSProperties}>
-        <button onClick={() => void copyEntries(selectedEntries, "selected")}>Copy selected as CSV</button>
-        {editable ? <button className={allSelectedDeleted ? "" : "danger"} onClick={stageDeleteForSelected}>{allSelectedDeleted ? "Undo staged deletion" : `Stage ${selectedEntries.length > 1 ? `${selectedEntries.length} rows` : "row"} for deletion`}</button> : null}
+        <MenuItem
+          icon={<IconCopy size={14} />}
+          label="Copy selected as CSV"
+          onClick={() => void copyEntries(selectedEntries, "selected")}
+        />
+        {editable ? <MenuItem
+          icon={allSelectedDeleted ? <IconCheck size={14} /> : <IconTrash size={14} />}
+          label={allSelectedDeleted
+            ? "Undo staged deletion"
+            : `Stage ${selectedEntries.length > 1 ? `${selectedEntries.length} rows` : "row"} for deletion`}
+          danger={!allSelectedDeleted}
+          onClick={stageDeleteForSelected}
+        /> : null}
       </div> : null}
       {changePreview && pendingRows[changePreview.rowKey] ? createPortal(<ChangePreview
         pending={pendingRows[changePreview.rowKey]}
@@ -852,10 +1055,6 @@ export function TableView({
   );
 }
 
-function DismissibleMessage({ className, message, onDismiss }: { className: string; message: string; onDismiss: () => void }) {
-  return <div className={`${className} dismissible-message`}><span>{message}</span><button onClick={onDismiss} aria-label="Dismiss message">×</button></div>;
-}
-
 function ChangePreview({ pending, columns, onDiscard, onMouseEnter, onMouseLeave, style }: {
   pending: PendingRow;
   columns: TableColumn[];
@@ -865,17 +1064,46 @@ function ChangePreview({ pending, columns, onDiscard, onMouseEnter, onMouseLeave
   style: CSSProperties;
 }) {
   const stopPropagation = (event: ReactMouseEvent) => event.stopPropagation();
-  if (pending.deleted) return <div className="change-preview delete-preview" style={style} onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave} onMouseDown={stopPropagation} onClick={stopPropagation}>
-    <div className="change-preview-header"><strong>Pending delete</strong><button onClick={(event) => { event.stopPropagation(); onDiscard(); }}>Undo delete</button></div>
-    <p>This row will be deleted when changes are saved.</p>
+  if (pending.deleted) return <div
+    className="change-preview delete-preview"
+    style={style}
+    onMouseEnter={onMouseEnter}
+    onMouseLeave={onMouseLeave}
+    onMouseDown={stopPropagation}
+    onClick={stopPropagation}
+  >
+    <div className="change-preview-header">
+      <strong><IconTrash size={13} />Pending delete</strong>
+      <Button
+        variant="danger"
+        size="sm"
+        onClick={(event) => { event.stopPropagation(); onDiscard(); }}
+      >Undo delete</Button>
+    </div>
+    <p>This row is removed when you save changes.</p>
   </div>;
+
   const changes = columns.flatMap((column, index) => rowsEqual([pending.original[index]], [pending.changes[index]]) ? [] : [{
     column: column.name,
     before: commands.toDisplayValue(pending.original[index]),
     after: commands.toDisplayValue(pending.changes[index]),
   }]);
-  return <div className="change-preview edit-preview" style={style} onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave} onMouseDown={stopPropagation} onClick={stopPropagation}>
-    <div className="change-preview-header"><strong>Pending edit</strong><button onClick={(event) => { event.stopPropagation(); onDiscard(); }}>Discard edit</button></div>
+  return <div
+    className="change-preview edit-preview"
+    style={style}
+    onMouseEnter={onMouseEnter}
+    onMouseLeave={onMouseLeave}
+    onMouseDown={stopPropagation}
+    onClick={stopPropagation}
+  >
+    <div className="change-preview-header">
+      <strong><IconAlertTriangle size={13} />Pending edit</strong>
+      <Button
+        variant="secondary"
+        size="sm"
+        onClick={(event) => { event.stopPropagation(); onDiscard(); }}
+      >Discard edit</Button>
+    </div>
     <div className="change-diff-list">
       {changes.map((change) => {
         const diff = inlineDiff(change.before, change.after);
@@ -883,7 +1111,7 @@ function ChangePreview({ pending, columns, onDiscard, onMouseEnter, onMouseLeave
           <b>{change.column}</b>
           <div className="change-diff-values">
             <div className="change-diff-before"><span>Before</span><InlineDiffValue parts={diff.before} kind="removed" /></div>
-            <span className="change-arrow" aria-hidden="true">→</span>
+            <span className="change-arrow" aria-hidden="true"><IconArrowRight size={13} /></span>
             <div className="change-diff-after"><span>After</span><InlineDiffValue parts={diff.after} kind="added" /></div>
           </div>
         </div>;

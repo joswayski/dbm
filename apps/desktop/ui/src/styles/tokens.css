@@ -1,0 +1,159 @@
+/* Design tokens. Components consume these only — never raw palette values, so
+   the light appearance stays a token swap. See docs/design.md. */
+
+:root {
+  /* Type */
+  --font-ui: Inter, "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", Roboto, Ubuntu, Cantarell, "Noto Sans", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, "Cascadia Mono", "JetBrains Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-md: 13px;
+  --text-lg: 15px;
+  --text-xl: 19px;
+  --text-2xl: 26px;
+
+  /* Space */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 28px;
+  --space-8: 32px;
+
+  /* Metrics */
+  --control-h: 28px;
+  --control-h-sm: 24px;
+  --control-h-lg: 32px;
+  --row-h: 32px;
+  --topbar-h: 44px;
+  --tabstrip-h: 36px;
+  --toolbar-h: 44px;
+  --statusbar-h: 26px;
+
+  /* Radii */
+  --radius-sm: 5px;
+  --radius: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-pill: 999px;
+
+  /* Motion */
+  --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --fast: 110ms;
+  --normal: 160ms;
+}
+
+/* Dark appearance (default) */
+:root,
+:root[data-appearance="dark"] {
+  color-scheme: dark;
+
+  --surface-0: #08080b;
+  --surface-1: #0b0b0f;
+  --surface-2: #101015;
+  --surface-3: #16161c;
+  --surface-4: #1d1d24;
+
+  --line-soft: rgba(255, 255, 255, 0.045);
+  --line: rgba(255, 255, 255, 0.075);
+  --line-strong: rgba(255, 255, 255, 0.13);
+
+  --text: #f2f2f5;
+  --text-2: #a4a4b0;
+  --text-3: #71717f;
+  --text-disabled: #4d4d59;
+
+  --hover: rgba(255, 255, 255, 0.05);
+  --active: rgba(255, 255, 255, 0.08);
+  --field-bg: #0d0d11;
+  --field-bg-hover: #111117;
+
+  --accent: #4ad4e8;
+  --accent-hover: #6fe0f0;
+  --accent-press: #34bdd1;
+  --accent-fg: #04222a;
+  --accent-soft: rgba(74, 212, 232, 0.12);
+  --accent-selection: rgba(74, 212, 232, 0.22);
+  --accent-line: rgba(74, 212, 232, 0.4);
+  --focus: rgba(74, 212, 232, 0.55);
+
+  --success: #4ade80;
+  --success-soft: rgba(74, 222, 128, 0.11);
+  --success-line: rgba(74, 222, 128, 0.28);
+  --warning: #f5b544;
+  --warning-soft: rgba(245, 181, 68, 0.12);
+  --warning-line: rgba(245, 181, 68, 0.3);
+  --danger: #f87171;
+  --danger-soft: rgba(248, 113, 113, 0.11);
+  --danger-line: rgba(248, 113, 113, 0.3);
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-2: 0 10px 28px -8px rgba(0, 0, 0, 0.6), 0 2px 6px rgba(0, 0, 0, 0.4);
+  --shadow-3: 0 28px 70px -16px rgba(0, 0, 0, 0.72), 0 4px 12px rgba(0, 0, 0, 0.45);
+  --scrim: rgba(4, 4, 7, 0.66);
+  --overlay-veil: rgba(8, 8, 11, 0.5);
+
+  --scroll-thumb: rgba(255, 255, 255, 0.14);
+  --scroll-thumb-hover: rgba(255, 255, 255, 0.24);
+
+  --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2371717f' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  --connection-color: #4ad4e8;
+}
+
+/* Light appearance */
+:root[data-appearance="light"] {
+  color-scheme: light;
+
+  --surface-0: #f4f4f6;
+  --surface-1: #fafafb;
+  --surface-2: #ffffff;
+  --surface-3: #f4f4f6;
+  --surface-4: #ffffff;
+
+  --line-soft: rgba(9, 9, 15, 0.05);
+  --line: rgba(9, 9, 15, 0.09);
+  --line-strong: rgba(9, 9, 15, 0.16);
+
+  --text: #16161a;
+  --text-2: #5b5b66;
+  --text-3: #82828e;
+  --text-disabled: #adadb8;
+
+  --hover: rgba(9, 9, 15, 0.04);
+  --active: rgba(9, 9, 15, 0.07);
+  --field-bg: #ffffff;
+  --field-bg-hover: #fbfbfc;
+
+  --accent: #0b7f95;
+  --accent-hover: #096d80;
+  --accent-press: #075b6b;
+  --accent-fg: #ffffff;
+  --accent-soft: rgba(11, 127, 149, 0.09);
+  --accent-selection: rgba(11, 127, 149, 0.16);
+  --accent-line: rgba(11, 127, 149, 0.38);
+  --focus: rgba(11, 127, 149, 0.5);
+
+  --success: #157f47;
+  --success-soft: rgba(21, 127, 71, 0.09);
+  --success-line: rgba(21, 127, 71, 0.28);
+  --warning: #96610a;
+  --warning-soft: rgba(214, 152, 32, 0.14);
+  --warning-line: rgba(150, 97, 10, 0.3);
+  --danger: #c0353b;
+  --danger-soft: rgba(192, 53, 59, 0.08);
+  --danger-line: rgba(192, 53, 59, 0.26);
+
+  --shadow-1: 0 1px 2px rgba(9, 9, 15, 0.08);
+  --shadow-2: 0 10px 24px -10px rgba(9, 9, 15, 0.22), 0 2px 6px rgba(9, 9, 15, 0.06);
+  --shadow-3: 0 26px 64px -18px rgba(9, 9, 15, 0.3), 0 4px 12px rgba(9, 9, 15, 0.08);
+  --scrim: rgba(28, 28, 35, 0.34);
+  --overlay-veil: rgba(250, 250, 251, 0.55);
+
+  --scroll-thumb: rgba(9, 9, 15, 0.18);
+  --scroll-thumb-hover: rgba(9, 9, 15, 0.3);
+
+  --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2382828e' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  --connection-color: #0b7f95;
+}
