@@ -6,6 +6,11 @@ servers): saved connections, database and schema exploration, paginated table
 browsing, SQL execution, and safe local profile storage. Redis and other
 protocol adapters remain planned follow-ups.
 
+The interface is a keyboard-first workbench: a command palette reaches every
+connection, table, and action, and the same React tree renders identically on
+all three platforms. [docs/design.md](docs/design.md) is the reference for the
+design tokens, component inventory, and cross-platform UI rules.
+
 ## Development
 
 Prerequisites:
@@ -90,8 +95,13 @@ Passwords are stored in the operating system credential store when available.
 - Database list, schemas, tables/views, configurable previews up to 200 rows,
   structured multi-filtering, ordering, visible-page CSV copy, and full filtered
   CSV export.
-- Resizable sidebars and columns, collapsible wide fields, and multi-row
-  selection for staged edits and deletes.
+- A command palette (`Ctrl`/`⌘`+`K`) over connections, databases, tables, open
+  tabs, and actions, plus `Ctrl`/`⌘`+`T` for a new query tab and
+  `Ctrl`/`⌘`+`1`–`9` to jump between tabs.
+- Dark and light appearances with a System option that follows the operating
+  system, selected from the settings menu in the top bar.
+- Sidebar schema filter, resizable sidebar, resizable editor and columns,
+  collapsible wide fields, and multi-row selection for staged edits and deletes.
 - Inline edits and staged deletes for primary-key-backed tables. PostgreSQL
   edits are guarded by `xmin` optimistic concurrency; MySQL edits match on the
   primary key. Read-only profile mode blocks GUI writes on both engines.
