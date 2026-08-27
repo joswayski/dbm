@@ -29,10 +29,11 @@
 
 ## Visual design
 
-- DBM uses a dark workbench chrome: near-black surfaces (`--bg`, `--panel`), muted borders, high-contrast body text, and a cyan accent (`--accent` / `--accent-strong`) for primary actions and focus.
-- Connection identity is multi-color: each profile has its own color for sidebar, tabs, and main-pane theming. Do not force a single accent across all connections.
-- Establish hierarchy with typography, spacing, and dense-but-readable layout before adding color. Prefer restrained shadows, small corner radii, and concise UI copy.
-- Preserve accessible contrast on dark surfaces. Status and danger colors (`--success`, `--danger`) keep stable meanings.
+- DBM uses a dark charcoal workbench: near-black surfaces (`--bg`, `--panel`), hairline borders, high-contrast body text, and a cyan accent (`--accent` / `--accent-strong`) for the one primary action on a surface.
+- Keep chrome compact (sidebar brand, 40px titlebar, 34px tabs) so the grid and SQL editor dominate. Prefer quiet ghost/secondary buttons; fill only Run, Save, Apply, and Save & connect.
+- Connection identity is multi-color: each profile has its own color for sidebar, tabs, selection, and main-pane theming. Do not force a single accent across all connections.
+- Use the shared SVG set in `apps/desktop/ui/src/icons.tsx` instead of emoji or decorative Unicode. Establish hierarchy with type, spacing, and density before extra color. Small radii, restrained shadows, concise copy.
+- Design for macOS, Windows, and Linux together: native window chrome, no vibrancy-only tricks, system fonts (`Segoe UI` / `Inter` / system-ui). Preserve accessible contrast. Status and danger colors (`--success`, `--danger`) keep stable meanings.
 
 ## Product behavior to preserve
 

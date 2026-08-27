@@ -2,6 +2,23 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties, type Mous
 import { createPortal } from "react-dom";
 
 import * as commands from "./commands";
+import {
+  IconArrowDown,
+  IconArrowUp,
+  IconChevronDown,
+  IconChevronLeft,
+  IconChevronRight,
+  IconChevronUp,
+  IconClose,
+  IconCollapse,
+  IconCopy,
+  IconDownload,
+  IconExpand,
+  IconFilter,
+  IconPlus,
+  IconRefresh,
+  IconSort,
+} from "./icons";
 import type {
   FilterCondition,
   FilterOperator,
@@ -579,7 +596,7 @@ export function TableView({
   return (
     <div className="table-view">
       <div className="view-toolbar">
-        <div><span className="eyebrow">TABLE</span><h2>{schema}.{table}</h2></div>
+        <div><span className="eyebrow">Table</span><h2>{schema}.{table}</h2></div>
         <div className="toolbar-actions">
           <button
             className="secondary-button"
@@ -592,16 +609,16 @@ export function TableView({
             }}
             disabled={loading}
             title="Reload the current page with the same filters and sort"
-          >{loading ? "Refreshing…" : "Refresh"}</button>
-          <button className="secondary-button" onClick={() => void copyEntries(copyableEntries, "visible")} disabled={!page || loading} title="Copies only the current preview page">Copy visible ({copyableEntries.length})</button>
-          <button className="secondary-button" onClick={() => void exportAllRows()} disabled={!page || loading || exporting} title="Prompts for a location and exports every filtered row">{exportLabel}</button>
+          ><IconRefresh size={13} />{loading ? "Refreshing…" : "Refresh"}</button>
+          <button className="secondary-button" onClick={() => void copyEntries(copyableEntries, "visible")} disabled={!page || loading} title="Copies only the current preview page"><IconCopy size={13} />Copy visible ({copyableEntries.length})</button>
+          <button className="secondary-button" onClick={() => void exportAllRows()} disabled={!page || loading || exporting} title="Prompts for a location and exports every filtered row"><IconDownload size={13} />{exportLabel}</button>
           {selectedEntries.length > 0 ? <div className="selection-actions">
             <button
               className="secondary-button selection-actions-trigger"
               aria-expanded={selectionMenuOpen}
               aria-haspopup="menu"
               onClick={(event) => { event.stopPropagation(); setSelectionMenuOpen((open) => !open); }}
-            >{selectedEntries.length} selected <span aria-hidden="true">⌄</span></button>
+              >{selectedEntries.length} selected <span aria-hidden="true"><IconChevronDown size={12} /></span></button>
             {selectionMenuOpen ? <div className="selection-actions-menu" role="menu" onClick={(event) => event.stopPropagation()}>
               <button role="menuitem" onClick={() => { void copyEntries(selectedEntries, "selected"); setSelectionMenuOpen(false); }}>Copy selected as CSV</button>
               {editable ? <button role="menuitem" className={allSelectedDeleted ? "" : "danger"} onClick={stageDeleteForSelected}>{allSelectedDeleted ? "Undo staged deletion" : `Stage ${selectedEntries.length === 1 ? "row" : `${selectedEntries.length} rows`} for deletion`}</button> : null}
@@ -616,9 +633,9 @@ export function TableView({
 
       <div className="filter-panel">
         <div className="filter-panel-header">
-          <strong>Filters</strong>
+          <strong><IconFilter size={12} /> Filters</strong>
           <span className="filter-join">All filters must match</span>
-          <button className="text-button" onClick={() => setFilterDrafts((current) => [...current, createFilterDraft(visibleColumns[0]?.name ?? "")])} disabled={!page}>＋ Add filter</button>
+          <button className="text-button" onClick={() => setFilterDrafts((current) => [...current, createFilterDraft(visibleColumns[0]?.name ?? "")])} disabled={!page}><IconPlus size={12} /> Add filter</button>
           {page ? <span className="row-count">{page.totalRows ?? "—"} rows · {page.metadata.columns.length} columns</span> : null}
         </div>
         {filterDrafts.map((filter) => (
@@ -636,7 +653,7 @@ export function TableView({
               onChange={(event) => updateFilter(filter.id, { value: event.target.value })}
               onKeyDown={(event) => { if (event.key === "Enter") applyFilters(); }}
             /> : <span className="filter-no-value">No value needed</span>}
-            <button className="icon-button filter-remove" onClick={() => setFilterDrafts((current) => current.filter((candidate) => candidate.id !== filter.id))} aria-label="Remove filter">×</button>
+            <button className="icon-button filter-remove" onClick={() => setFilterDrafts((current) => current.filter((candidate) => candidate.id !== filter.id))} aria-label="Remove filter"><IconClose size={13} /></button>
           </div>
         ))}
         <div className="table-query-controls">
@@ -645,8 +662,8 @@ export function TableView({
             <span className="limit-input-wrap">
               <input className="text-input limit-input" aria-label="Preview limit" type="number" min="1" max={MAX_PREVIEW_ROWS} value={limitInput} onChange={(event) => setLimitInput(event.target.value)} onBlur={applyPreviewLimit} onKeyDown={(event) => { if (event.key === "Enter") applyPreviewLimit(); }} />
               <span className="limit-stepper">
-                <button type="button" aria-label="Increase preview limit" onMouseDown={(event) => event.preventDefault()} onClick={() => stepPreviewLimit(1)}>▲</button>
-                <button type="button" aria-label="Decrease preview limit" onMouseDown={(event) => event.preventDefault()} onClick={() => stepPreviewLimit(-1)}>▼</button>
+                <button type="button" aria-label="Increase preview limit" onMouseDown={(event) => event.preventDefault()} onClick={() => stepPreviewLimit(1)}><IconChevronUp size={8} /></button>
+                <button type="button" aria-label="Decrease preview limit" onMouseDown={(event) => event.preventDefault()} onClick={() => stepPreviewLimit(-1)}><IconChevronDown size={8} /></button>
               </span>
             </span>
           </label>
@@ -700,7 +717,7 @@ export function TableView({
         </span>
         <div className="export-complete-actions">
           <button className="secondary-button export-reveal-button" onClick={() => void handleExportAction("reveal")}><span className="export-folder-icon" aria-hidden="true" /> Show in folder</button>
-          <button className="export-dismiss-button" onClick={() => setExportResult(null)} aria-label="Dismiss export result">×</button>
+          <button className="export-dismiss-button" onClick={() => setExportResult(null)} aria-label="Dismiss export result"><IconClose size={14} /></button>
         </div>
       </div> : null}
       {pendingCount > 0 ? <div className="pending-changes">
@@ -734,10 +751,10 @@ export function TableView({
                     onMouseLeave={() => setHoveredColumnAction(null)}
                     data-tooltip={`Expand ${column.name}`}
                     aria-label={`Expand ${column.name}`}
-                  ><span className="column-action-glyph" aria-hidden="true">↦</span><span className="collapsed-column-name">{column.name}</span></button> : <div className="column-header-content">
+                  ><span className="column-action-glyph" aria-hidden="true"><IconExpand size={12} /></span><span className="collapsed-column-name">{column.name}</span></button> : <div className="column-header-content">
                     <button className="column-sort" onClick={() => toggleSort(column.name)} aria-label={`Sort by ${column.name}`}>
                       <span>{column.name}<small>{column.dataType}</small></span>
-                      <span className={`sort-indicator ${sorted ? "active" : ""}`}>{sorted ? effectiveOrderBy?.descending ? "↓" : "↑" : "↕"}</span>
+                      <span className={`sort-indicator ${sorted ? "active" : ""}`}>{sorted ? effectiveOrderBy?.descending ? <IconArrowDown size={12} /> : <IconArrowUp size={12} /> : <IconSort size={12} />}</span>
                     </button>
                     <button
                       className="collapse-column column-action-button"
@@ -746,7 +763,7 @@ export function TableView({
                       onMouseLeave={() => setHoveredColumnAction(null)}
                       data-tooltip={`Collapse ${column.name}`}
                       aria-label={`Collapse ${column.name}`}
-                    ><span className="column-action-glyph" aria-hidden="true">↤</span></button>
+                    ><span className="column-action-glyph" aria-hidden="true"><IconCollapse size={12} /></span></button>
                   </div>}
                   {!collapsed ? <div className="column-resize-handle" onMouseDown={(event) => startColumnResize(event, column)} /> : null}
                 </th>;
@@ -831,9 +848,9 @@ export function TableView({
       </div>
 
       {pageIndex > 0 || page?.hasMore ? <div className="pagination">
-        {pageIndex > 0 ? <button className="secondary-button" disabled={loading} onClick={() => setPageIndex((value) => value - 1)}>← Previous</button> : null}
+        {pageIndex > 0 ? <button className="secondary-button" disabled={loading} onClick={() => setPageIndex((value) => value - 1)}><IconChevronLeft size={13} /> Previous</button> : null}
         <span>Page {pageIndex + 1}</span>
-        {page?.hasMore ? <button className="secondary-button" disabled={loading} onClick={() => setPageIndex((value) => value + 1)}>Next →</button> : null}
+        {page?.hasMore ? <button className="secondary-button" disabled={loading} onClick={() => setPageIndex((value) => value + 1)}>Next <IconChevronRight size={13} /></button> : null}
       </div> : null}
 
       {contextMenu ? <div className="row-context-menu" style={{ left: contextMenu.x, top: contextMenu.y } as CSSProperties}>
@@ -853,7 +870,7 @@ export function TableView({
 }
 
 function DismissibleMessage({ className, message, onDismiss }: { className: string; message: string; onDismiss: () => void }) {
-  return <div className={`${className} dismissible-message`}><span>{message}</span><button onClick={onDismiss} aria-label="Dismiss message">×</button></div>;
+  return <div className={`${className} dismissible-message`}><span>{message}</span><button onClick={onDismiss} aria-label="Dismiss message"><IconClose size={14} /></button></div>;
 }
 
 function ChangePreview({ pending, columns, onDiscard, onMouseEnter, onMouseLeave, style }: {

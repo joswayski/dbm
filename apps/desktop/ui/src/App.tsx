@@ -4,6 +4,28 @@ import { MySQL, PostgreSQL, sql } from "@codemirror/lang-sql";
 
 import * as commands from "./commands";
 import { parseConnectionUrl } from "./connectionUrl";
+import {
+  BrandMark,
+  IconAlert,
+  IconCheck,
+  IconChevronDown,
+  IconChevronRight,
+  IconChevronUp,
+  IconClose,
+  IconCollapse,
+  IconDatabase,
+  IconExpand,
+  IconHistory,
+  IconMore,
+  IconPanelLeft,
+  IconPencil,
+  IconPlay,
+  IconPlus,
+  IconRefresh,
+  IconSchema,
+  IconTable,
+  IconView,
+} from "./icons";
 import { sqlExecutionTarget, type SqlExecutionTarget } from "./sqlSelection";
 import { useDbmStore } from "./store";
 import { TableView } from "./TableView";
@@ -21,10 +43,10 @@ import type {
 
 const DEFAULT_CONNECTION_COLOR = "#38bdf8";
 const CONNECTION_COLORS = ["#38bdf8", "#22c55e", "#a78bfa", "#f59e0b", "#ef4444", "#64748b"];
-const DEFAULT_SIDEBAR_WIDTH = 320;
-const MIN_SIDEBAR_WIDTH = 280;
-const MAX_SIDEBAR_WIDTH = 480;
-const COLLAPSED_SIDEBAR_WIDTH = 48;
+const DEFAULT_SIDEBAR_WIDTH = 272;
+const MIN_SIDEBAR_WIDTH = 232;
+const MAX_SIDEBAR_WIDTH = 440;
+const COLLAPSED_SIDEBAR_WIDTH = 52;
 const QUERY_HISTORY_UPDATED_EVENT = "dbm:query-history-updated";
 const SQL_IDENTIFIER = String.raw`(?:"(?:[^"]|"")*"|` + "`(?:[^`]|``)*`" + String.raw`|[A-Za-z_][A-Za-z0-9_$]*)`;
 const SIMPLE_FULL_TABLE_SELECT = new RegExp(
@@ -331,26 +353,50 @@ export default function App() {
         style={{ width: sidebarCollapsed ? COLLAPSED_SIDEBAR_WIDTH : sidebarWidth, minWidth: sidebarCollapsed ? COLLAPSED_SIDEBAR_WIDTH : sidebarWidth }}
       >
         <div className="brand-row">
-          {!sidebarCollapsed ? <div className="brand-mark">DB</div> : null}
+          {!sidebarCollapsed ? <div className="brand-mark"><BrandMark size={18} /></div> : null}
           {!sidebarCollapsed ? <div className="brand-copy">
             <strong>DBM</strong>
-            <span>database manager</span>
+            <span>Local workbench</span>
           </div> : null}
           <button
             className="sidebar-collapse-button"
             onClick={() => setSidebarCollapsed((value) => !value)}
             title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
             aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-          >{sidebarCollapsed ? "›" : "‹"}</button>
+          >{sidebarCollapsed ? <IconChevronRight size={15} /> : <IconPanelLeft size={15} />}</button>
         </div>
-        {!sidebarCollapsed ? <>
+        {sidebarCollapsed ? (
+          <div className="connection-rail">
+            {profiles.map((summary) => {
+              const profileId = summary.profile.id;
+              return (
+                <button
+                  key={profileId}
+                  className={`connection-rail-dot ${activeProfileId === profileId ? "active" : ""} ${workspaces[profileId] ? "connected" : ""}`}
+                  style={{ "--connection-color": summary.profile.color ?? DEFAULT_CONNECTION_COLOR } as CSSProperties}
+                  title={summary.profile.name}
+                  aria-label={summary.profile.name}
+                  onClick={() => handleSelectProfile(profileId, Boolean(workspaces[profileId]))}
+                />
+              );
+            })}
+            <button
+              className="connection-rail-add"
+              onClick={() => setModalProfile(null)}
+              title="New connection"
+              aria-label="New connection"
+            ><IconPlus size={14} /></button>
+          </div>
+        ) : <>
         <div className="sidebar-section-title">
           <span>Connections</span>
-          <button className="sidebar-new-button" onClick={() => setModalProfile(null)}>New connection</button>
+          <button className="sidebar-new-button" onClick={() => setModalProfile(null)} aria-label="New connection">
+            <IconPlus size={12} /> New
+          </button>
         </div>
         <div className="connection-list">
           {profiles.length === 0 ? (
-            <div className="empty-sidebar">No saved connections.</div>
+            <div className="empty-sidebar">No saved connections yet.</div>
           ) : profiles.map((summary) => {
             const profileId = summary.profile.id;
             const workspace = workspaces[profileId];
@@ -392,7 +438,7 @@ export default function App() {
                         className="text-button"
                         onClick={() => void handleRefreshSchema(profileId)}
                         disabled={refreshingSchemaId === profileId}
-                      >{refreshingSchemaId === profileId ? "Refreshing…" : "Refresh"}</button>
+                      >{refreshingSchemaId === profileId ? "Refreshing…" : <><IconRefresh size={12} /> Refresh</>}</button>
                     </div>
                     <div className="schema-tree">
                       {(schemas[profileId] ?? []).map((node) => (
@@ -411,7 +457,8 @@ export default function App() {
           })}
         </div>
         <div className="sidebar-footer">
-          <span className="privacy-chip">LOCAL ONLY</span>
+          <span className="privacy-chip">Local</span>
+          <span className="muted">Stays on this machine</span>
         </div>
         <div
           className="sidebar-resize-handle"
@@ -430,7 +477,7 @@ export default function App() {
             setSidebarWidth((width) => Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, width + (event.key === "ArrowLeft" ? -10 : 10))));
           }}
         />
-        </> : null}
+        </>}
       </aside>
 
       <main className="main-pane" style={connectionStyle}>
@@ -446,7 +493,7 @@ export default function App() {
           ) : <div className="breadcrumb">No active connection</div>}
           <UpdateControl />
         </header>
-        {error ? <div className="error-banner" role="alert"><span>{error}</span><button onClick={() => setError(null)} aria-label="Dismiss error">×</button></div> : null}
+        {error ? <div className="error-banner" role="alert"><span>{error}</span><button onClick={() => setError(null)} aria-label="Dismiss error"><IconClose size={14} /></button></div> : null}
         <div className="tab-strip">
           {tabs.map((tab) => (
             <div
@@ -463,7 +510,7 @@ export default function App() {
                   title={`Expand ${tab.title}`}
                   aria-label={`Expand ${tab.title}`}
                 >
-                  <span className="tab-collapse-glyph" aria-hidden="true">↦</span>
+                  <span className="tab-collapse-glyph" aria-hidden="true"><IconExpand size={12} /></span>
                   <span className="collapsed-tab-name">{tab.title}</span>
                 </button>
               ) : renamingTabId === tab.id ? (
@@ -491,6 +538,7 @@ export default function App() {
                     if (tab.kind === "query") startRenamingTab(tab.id, tab.title);
                   }}
                 >
+                  <span className="tab-kind">{tab.kind === "query" ? <IconPlay size={12} /> : <IconTable size={12} />}</span>
                   <span>{tab.title}</span>
                 </button>
               )}
@@ -500,7 +548,7 @@ export default function App() {
                   onClick={() => startRenamingTab(tab.id, tab.title)}
                   title={`Rename ${tab.title}`}
                   aria-label={`Rename ${tab.title}`}
-                >✎</button>
+                ><IconPencil size={12} /></button>
               ) : null}
               {!tab.collapsed && tab.id === activeTabId ? (
                 <button
@@ -508,9 +556,9 @@ export default function App() {
                   onClick={() => handleCollapseTab(tab.id)}
                   title={`Collapse ${tab.title}`}
                   aria-label={`Collapse ${tab.title}`}
-                >↤</button>
+                ><IconCollapse size={12} /></button>
               ) : null}
-              <button className="tab-close" onClick={() => handleCloseTab(tab.id)} aria-label={`Close ${tab.title}`}>×</button>
+              <button className="tab-close" onClick={() => handleCloseTab(tab.id)} aria-label={`Close ${tab.title}`}><IconClose size={12} /></button>
             </div>
           ))}
           {activeWorkspace && activeProfileId ? (
@@ -519,7 +567,7 @@ export default function App() {
               title="New query"
               aria-label="New query"
               onClick={() => handleOpenQuery(activeProfileId)}
-            >＋</button>
+            ><IconPlus size={14} /></button>
           ) : null}
         </div>
         <section className="content-pane">
@@ -549,6 +597,7 @@ export default function App() {
               hasProfiles={profiles.length > 0}
               profile={selectedProfile ?? null}
               connected={Boolean(activeWorkspace)}
+              onCreateConnection={() => setModalProfile(null)}
             />
           ) : null}
         </section>
@@ -575,7 +624,7 @@ export default function App() {
       ) : null}
       {toast ? <div className={`app-toast ${toast.kind}`} role="status">
         <span>{toast.message}</span>
-        <button onClick={() => setToast(null)} aria-label="Dismiss notification">×</button>
+        <button onClick={() => setToast(null)} aria-label="Dismiss notification"><IconClose size={14} /></button>
       </div> : null}
     </div>
   );
@@ -712,6 +761,7 @@ function ConnectionItem({
             <strong>{summary.profile.name}</strong>
             <small>{ENGINE_PRESETS[summary.profile.engine ?? "postgres"].label} · {summary.profile.username}@{summary.profile.host}</small>
           </span>
+          <span className={`connection-status ${connected ? "on" : ""}`} aria-hidden="true" />
         </button>
         <div className="connection-actions">
           {expandable ? <button
@@ -720,7 +770,7 @@ function ConnectionItem({
             aria-label={expanded ? "Collapse connection" : "Expand connection"}
             aria-expanded={expanded}
             onClick={() => { setActionsOpen(false); onToggleExpanded(); }}
-          >{expanded ? "⌃" : "⌄"}</button> : null}
+          >{expanded ? <IconChevronUp size={14} /> : <IconChevronDown size={14} />}</button> : null}
           <button
             className="icon-button subtle"
             title="Connection actions"
@@ -728,7 +778,7 @@ function ConnectionItem({
             aria-haspopup="menu"
             aria-expanded={actionsOpen}
             onClick={() => setActionsOpen((open) => !open)}
-          >⋯</button>
+          ><IconMore size={14} /></button>
         </div>
       </div>
       {actionsOpen ? <div className="connection-actions-menu" role="menu">
@@ -770,8 +820,10 @@ function SchemaBranch({
           if (isTable) onTable(node.schema!, node.table!);
           else setOpen((value) => !value);
         }}>
-        <span className="tree-caret" aria-hidden="true">{isTable ? "▧" : open ? "⌄" : "›"}</span>
-        <span className={`schema-icon ${node.kind}`} aria-hidden="true">{isTable ? "T" : "S"}</span>
+        <span className={`tree-caret ${isTable ? "empty" : ""}`} aria-hidden="true">{isTable ? null : open ? <IconChevronDown size={12} /> : <IconChevronRight size={12} />}</span>
+        <span className={`schema-icon ${node.kind}`} aria-hidden="true">
+          {isTable ? <IconTable size={13} /> : node.kind === "view" ? <IconView size={13} /> : <IconSchema size={13} />}
+        </span>
         <span className="truncate">{node.name}</span>
       </button>
       {open && node.children.length > 0 ? node.children.map((child) => (
@@ -791,22 +843,43 @@ function Welcome({
   hasProfiles,
   profile,
   connected,
+  onCreateConnection,
 }: {
   hasProfiles: boolean;
   profile: ConnectionProfile | null;
   connected: boolean;
+  onCreateConnection: () => void;
 }) {
   return (
     <div className="welcome">
-      <div className="welcome-mark">DB<span>M</span></div>
+      <div className="welcome-mark"><BrandMark size={22} /></div>
       <h1>{profile ? profile.name : "No connection selected"}</h1>
       <p>{profile
         ? connected
-          ? "Choose a table from the sidebar or open a new query with the plus button above."
+          ? "Choose a table from the sidebar or open a query with the plus on the tab strip."
           : "This connection is selected but not connected. Select it again to connect."
         : hasProfiles
           ? "Select a saved connection from the sidebar to browse its data."
-          : "Create a connection from the sidebar to get started."}</p>
+          : "Create a connection to start querying PostgreSQL or MySQL. Profiles, history, and results stay on this machine."}</p>
+      {!hasProfiles ? (
+        <div className="welcome-actions">
+          <button className="primary-button" onClick={onCreateConnection}>Get started</button>
+        </div>
+      ) : null}
+      <div className="welcome-points">
+        <div>
+          <span className="welcome-point-icon"><IconDatabase size={13} /></span>
+          <span><b>Connect locally.</b> PostgreSQL and MySQL with TLS, saved in your OS keychain.</span>
+        </div>
+        <div>
+          <span className="welcome-point-icon"><IconTable size={13} /></span>
+          <span><b>Browse and edit.</b> Paginated tables, filters, and primary-key writes you can review first.</span>
+        </div>
+        <div>
+          <span className="welcome-point-icon"><IconPlay size={13} /></span>
+          <span><b>Run SQL immediately.</b> Connecting opens a query tab. Command/Ctrl+Enter runs the statement under the cursor.</span>
+        </div>
+      </div>
     </div>
   );
 }
@@ -959,7 +1032,7 @@ export function QueryView({
   return (
     <div className="query-view">
       <div className="view-toolbar">
-        <div><span className="eyebrow">SQL WORKBENCH</span><h2>{title}</h2></div>
+        <div><span className="eyebrow">Query</span><h2>{title}</h2></div>
         <div className="toolbar-actions">
           {running ? (
             <button
@@ -974,13 +1047,14 @@ export function QueryView({
             title={executedSql
               ? "Re-run the last executed statement for fresh results"
               : "Run a statement first to enable refresh"}
-          >{running && executedSql ? "Refreshing…" : "Refresh"}</button>
+          ><IconRefresh size={13} />{running && executedSql ? "Refreshing…" : "Refresh"}</button>
           <button className="primary-button" onClick={runFromEditor} disabled={running || !executionTarget}>
-            {running ? "Running…" : runLabel}<kbd>{runShortcutGlyph()}</kbd>
+            <IconPlay size={13} />{running ? "Running…" : runLabel}<kbd>{runShortcutGlyph()}</kbd>
           </button>
         </div>
       </div>
-      <div className="query-layout">
+      <div className="query-workspace">
+        <div className="query-layout">
         <div className="editor-panel" onKeyDownCapture={handleEditorKeyDownCapture}>
           <CodeMirror ref={editorRef} className="query-code-editor" value={sqlText} height="100%" theme="dark" extensions={editorExtensions} onChange={setSqlText} onUpdate={handleEditorUpdate} basicSetup={{ lineNumbers: true, foldGutter: false }} />
           {executionTarget?.kind === "selection" ? <button
@@ -989,12 +1063,13 @@ export function QueryView({
             onClick={runFromEditor}
             disabled={running}
             title="Run the selected SQL (Command/Ctrl+Enter)"
-          ><span aria-hidden="true">▶</span> Run selection</button> : null}
+          ><IconPlay size={11} /> Run selection</button> : null}
           <div className="editor-hint">The outlined statement or selected SQL will run · Command/Ctrl+Enter · results capped at 10,000 rows</div>
         </div>
-        <aside className="history-panel"><div className="panel-title">History <span>{history.length}</span></div>{history.length === 0 ? <p className="muted">Run a query to start history.</p> : <div className="history-list">{history.slice(0, 100).map((entry) => <button className="history-item" key={entry.id} onClick={() => setSqlText(entry.sql)}><span>{entry.success ? "✓" : "!"}</span><span className="history-sql">{entry.sql.replace(/\s+/g, " ").slice(0, 70)}</span><small>{new Date(entry.executedAt).toLocaleTimeString()}</small></button>)}</div>}</aside>
-      </div>
-      {error ? <div className="inline-error dismissible-message"><span>{error}</span><button onClick={() => setError(null)} aria-label="Dismiss message">×</button></div> : null}
+        <aside className="history-panel"><div className="panel-title"><span className="panel-title-label"><IconHistory size={13} /> History</span> <span>{history.length}</span></div>{history.length === 0 ? <p className="muted">Run a query to start history.</p> : <div className="history-list">{history.slice(0, 100).map((entry) => <button className="history-item" key={entry.id} onClick={() => setSqlText(entry.sql)}><span className={entry.success ? "history-ok" : "history-fail"}>{entry.success ? <IconCheck size={12} /> : <IconAlert size={12} />}</span><span className="history-sql">{entry.sql.replace(/\s+/g, " ").slice(0, 70)}</span><small>{new Date(entry.executedAt).toLocaleTimeString()}</small></button>)}</div>}</aside>
+        </div>
+        <div className="result-slot">
+      {error ? <div className="inline-error dismissible-message"><span>{error}</span><button onClick={() => setError(null)} aria-label="Dismiss message"><IconClose size={14} /></button></div> : null}
       {response ? editableTable ? <div className="result-panel editable-query-result">
         <div className="result-meta">
           <span>Table viewer · query completed in {response.durationMs} ms</span>
@@ -1020,6 +1095,8 @@ export function QueryView({
         </div>
         <ResultTable columns={response.columns.map((column) => column.name)} rows={response.rows} />
       </div> : <div className="query-empty">Results will appear here.</div>}
+        </div>
+      </div>
     </div>
   );
 }
@@ -1112,9 +1189,10 @@ function ProfileModal({
       <div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="connection-modal-title">
         <div className="modal-header">
           <div><span className="eyebrow">{ENGINE_PRESETS[form.engine].label.toUpperCase()}</span><h2 id="connection-modal-title">{profile ? "Edit connection" : "New connection"}</h2></div>
-          <button className="icon-button" onClick={onClose} aria-label="Close">×</button>
+          <button className="icon-button" onClick={onClose} aria-label="Close"><IconClose size={15} /></button>
         </div>
         <div className="form-grid">
+          <div className="form-section-title">Engine</div>
           <div className="form-field full">
             <span>Database engine</span>
             <div className="engine-picker" role="group" aria-label="Database engine">
@@ -1131,6 +1209,7 @@ function ProfileModal({
               ))}
             </div>
           </div>
+          <div className="form-section-title">Server</div>
           <label className="form-field full">
             <span>Connection URL</span>
             <div className="url-field">
@@ -1183,6 +1262,7 @@ function ProfileModal({
             <span>Port</span>
             <input className="text-input" type="number" value={form.port} onChange={(event) => update("port", Number(event.target.value))} />
           </label>
+          <div className="form-section-title">Authentication</div>
           <label className="form-field">
             <span>Username</span>
             <input className="text-input" value={form.username} onChange={(event) => update("username", event.target.value)} />
@@ -1195,6 +1275,7 @@ function ProfileModal({
             <span>Password</span>
             <input className="text-input" type="password" value={form.password ?? ""} onChange={(event) => update("password", event.target.value || undefined)} placeholder={profile ? "Leave blank to keep saved password" : "Stored in OS keychain"} />
           </label>
+          <div className="form-section-title">Security</div>
           <label className="form-field">
             <span>TLS</span>
             <select className="select-input" value={form.tlsMode} onChange={(event) => update("tlsMode", event.target.value as SaveProfileInput["tlsMode"])}>
@@ -1213,7 +1294,7 @@ function ProfileModal({
           </label>
         </div>
         {feedback ? <div className={`modal-feedback ${feedback.kind}`} role="status">{feedback.message}</div> : null}
-        <div className="modal-note">Passwords are stored in your operating system credential manager and are never written to DBM's profile database.</div>
+        <div className="modal-note">Passwords are stored in your operating system credential manager and are never written to DBM’s profile database.</div>
         <div className="modal-actions">
           {onDelete ? <button className="danger-button" onClick={() => void onDelete()} disabled={testing || saving}>Delete</button> : <span />}
           <div className="modal-actions-right">
