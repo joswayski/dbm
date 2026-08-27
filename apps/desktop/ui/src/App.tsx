@@ -1,6 +1,31 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from "react";
 import CodeMirror, { Decoration, ViewPlugin, type DecorationSet, type EditorView, type ReactCodeMirrorRef, type ViewUpdate } from "@uiw/react-codemirror";
 import { MySQL, PostgreSQL, sql } from "@codemirror/lang-sql";
+import {
+  AlertCircle,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  ChevronUp,
+  Clock3,
+  Database,
+  FileCode2,
+  Info,
+  Layers3,
+  LockKeyhole,
+  Minimize2,
+  MoreHorizontal,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Pencil,
+  Play,
+  Plus,
+  RefreshCw,
+  ShieldCheck,
+  Square,
+  Table2,
+  X,
+} from "lucide-react";
 
 import * as commands from "./commands";
 import { parseConnectionUrl } from "./connectionUrl";
@@ -20,11 +45,11 @@ import type {
 } from "./types";
 
 const DEFAULT_CONNECTION_COLOR = "#38bdf8";
-const CONNECTION_COLORS = ["#38bdf8", "#22c55e", "#a78bfa", "#f59e0b", "#ef4444", "#64748b"];
-const DEFAULT_SIDEBAR_WIDTH = 320;
-const MIN_SIDEBAR_WIDTH = 280;
-const MAX_SIDEBAR_WIDTH = 480;
-const COLLAPSED_SIDEBAR_WIDTH = 48;
+const CONNECTION_COLORS = ["#38bdf8", "#34d399", "#a78bfa", "#f59e0b", "#fb7185", "#94a3b8"];
+const DEFAULT_SIDEBAR_WIDTH = 304;
+const MIN_SIDEBAR_WIDTH = 260;
+const MAX_SIDEBAR_WIDTH = 440;
+const COLLAPSED_SIDEBAR_WIDTH = 54;
 const QUERY_HISTORY_UPDATED_EVENT = "dbm:query-history-updated";
 const SQL_IDENTIFIER = String.raw`(?:"(?:[^"]|"")*"|` + "`(?:[^`]|``)*`" + String.raw`|[A-Za-z_][A-Za-z0-9_$]*)`;
 const SIMPLE_FULL_TABLE_SELECT = new RegExp(
@@ -331,26 +356,30 @@ export default function App() {
         style={{ width: sidebarCollapsed ? COLLAPSED_SIDEBAR_WIDTH : sidebarWidth, minWidth: sidebarCollapsed ? COLLAPSED_SIDEBAR_WIDTH : sidebarWidth }}
       >
         <div className="brand-row">
-          {!sidebarCollapsed ? <div className="brand-mark">DB</div> : null}
+          {!sidebarCollapsed ? <div className="brand-mark" aria-hidden="true"><Database size={17} strokeWidth={2} /></div> : null}
           {!sidebarCollapsed ? <div className="brand-copy">
             <strong>DBM</strong>
-            <span>database manager</span>
+            <span>Local database studio</span>
           </div> : null}
           <button
             className="sidebar-collapse-button"
             onClick={() => setSidebarCollapsed((value) => !value)}
             title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
             aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-          >{sidebarCollapsed ? "›" : "‹"}</button>
+          >{sidebarCollapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}</button>
         </div>
         {!sidebarCollapsed ? <>
         <div className="sidebar-section-title">
           <span>Connections</span>
-          <button className="sidebar-new-button" onClick={() => setModalProfile(null)}>New connection</button>
+          <button className="sidebar-new-button" onClick={() => setModalProfile(null)}><Plus size={13} />New</button>
         </div>
         <div className="connection-list">
           {profiles.length === 0 ? (
-            <div className="empty-sidebar">No saved connections.</div>
+            <div className="empty-sidebar">
+              <div className="empty-sidebar-icon"><Database size={16} /></div>
+              <strong>No connections yet</strong>
+              <span>Add PostgreSQL or MySQL to begin.</span>
+            </div>
           ) : profiles.map((summary) => {
             const profileId = summary.profile.id;
             const workspace = workspaces[profileId];
@@ -387,12 +416,12 @@ export default function App() {
                       {workspace.databases.map((database) => <option key={database.name}>{database.name}</option>)}
                     </select>
                     <div className="schema-heading">
-                      <span>Schema</span>
+                      <span>Explorer</span>
                       <button
                         className="text-button"
                         onClick={() => void handleRefreshSchema(profileId)}
                         disabled={refreshingSchemaId === profileId}
-                      >{refreshingSchemaId === profileId ? "Refreshing…" : "Refresh"}</button>
+                      ><RefreshCw size={11} className={refreshingSchemaId === profileId ? "spin" : ""} />{refreshingSchemaId === profileId ? "Refreshing…" : "Refresh"}</button>
                     </div>
                     <div className="schema-tree">
                       {(schemas[profileId] ?? []).map((node) => (
@@ -411,7 +440,9 @@ export default function App() {
           })}
         </div>
         <div className="sidebar-footer">
-          <span className="privacy-chip">LOCAL ONLY</span>
+          <LockKeyhole size={11} aria-hidden="true" />
+          <span>Private workspace</span>
+          <span className="privacy-chip">Local</span>
         </div>
         <div
           className="sidebar-resize-handle"
@@ -437,16 +468,18 @@ export default function App() {
         <header className="topbar">
           {activeViewProfile ? (
             <div className="connection-identity">
-              <span className="connection-identity-dot" />
+              <span className="connection-avatar"><Database size={15} /></span>
               <span>
                 <strong>{activeViewProfile.name}</strong>
-                <small>{activeViewProfile.username}@{activeViewProfile.host}:{activeViewProfile.port}/{activeViewProfile.defaultDatabase}</small>
+                <small>{activeViewProfile.username}@{activeViewProfile.host}:{activeViewProfile.port}</small>
               </span>
+              <span className="database-chip"><span className="status-dot" />{activeViewProfile.defaultDatabase}</span>
+              {activeViewProfile.readOnly ? <span className="read-only-topbar-chip"><LockKeyhole size={10} />Read only</span> : null}
             </div>
-          ) : <div className="breadcrumb">No active connection</div>}
+          ) : <div className="workspace-identity"><Database size={14} /><span>Workspace</span><small>No active connection</small></div>}
           <UpdateControl />
         </header>
-        {error ? <div className="error-banner" role="alert"><span>{error}</span><button onClick={() => setError(null)} aria-label="Dismiss error">×</button></div> : null}
+        {error ? <div className="error-banner" role="alert"><AlertCircle size={14} /><span>{error}</span><button onClick={() => setError(null)} aria-label="Dismiss error"><X size={14} /></button></div> : null}
         <div className="tab-strip">
           {tabs.map((tab) => (
             <div
@@ -463,7 +496,7 @@ export default function App() {
                   title={`Expand ${tab.title}`}
                   aria-label={`Expand ${tab.title}`}
                 >
-                  <span className="tab-collapse-glyph" aria-hidden="true">↦</span>
+                  <span className="tab-collapse-glyph" aria-hidden="true"><ChevronRight size={12} /></span>
                   <span className="collapsed-tab-name">{tab.title}</span>
                 </button>
               ) : renamingTabId === tab.id ? (
@@ -491,6 +524,7 @@ export default function App() {
                     if (tab.kind === "query") startRenamingTab(tab.id, tab.title);
                   }}
                 >
+                  {tab.kind === "query" ? <FileCode2 size={13} /> : <Table2 size={13} />}
                   <span>{tab.title}</span>
                 </button>
               )}
@@ -500,7 +534,7 @@ export default function App() {
                   onClick={() => startRenamingTab(tab.id, tab.title)}
                   title={`Rename ${tab.title}`}
                   aria-label={`Rename ${tab.title}`}
-                >✎</button>
+                ><Pencil size={11} /></button>
               ) : null}
               {!tab.collapsed && tab.id === activeTabId ? (
                 <button
@@ -508,9 +542,9 @@ export default function App() {
                   onClick={() => handleCollapseTab(tab.id)}
                   title={`Collapse ${tab.title}`}
                   aria-label={`Collapse ${tab.title}`}
-                >↤</button>
+                ><Minimize2 size={11} /></button>
               ) : null}
-              <button className="tab-close" onClick={() => handleCloseTab(tab.id)} aria-label={`Close ${tab.title}`}>×</button>
+              <button className="tab-close" onClick={() => handleCloseTab(tab.id)} aria-label={`Close ${tab.title}`}><X size={12} /></button>
             </div>
           ))}
           {activeWorkspace && activeProfileId ? (
@@ -519,7 +553,7 @@ export default function App() {
               title="New query"
               aria-label="New query"
               onClick={() => handleOpenQuery(activeProfileId)}
-            >＋</button>
+            ><Plus size={15} /></button>
           ) : null}
         </div>
         <section className="content-pane">
@@ -549,6 +583,9 @@ export default function App() {
               hasProfiles={profiles.length > 0}
               profile={selectedProfile ?? null}
               connected={Boolean(activeWorkspace)}
+              onNewConnection={() => setModalProfile(null)}
+              onConnect={selectedProfile ? () => void handleConnect(selectedProfile.id) : undefined}
+              onNewQuery={selectedProfile && activeWorkspace ? () => handleOpenQuery(selectedProfile.id) : undefined}
             />
           ) : null}
         </section>
@@ -574,8 +611,9 @@ export default function App() {
         />
       ) : null}
       {toast ? <div className={`app-toast ${toast.kind}`} role="status">
+        {toast.kind === "success" ? <CheckCircle2 size={14} /> : <Info size={14} />}
         <span>{toast.message}</span>
-        <button onClick={() => setToast(null)} aria-label="Dismiss notification">×</button>
+        <button onClick={() => setToast(null)} aria-label="Dismiss notification"><X size={13} /></button>
       </div> : null}
     </div>
   );
@@ -651,6 +689,7 @@ function UpdateControl() {
         onClick={() => void run()}
         title={detail || `Installed version ${status?.current_version ?? "…"}`}
       >
+        <RefreshCw size={11} className={status?.state === "checking" || downloading ? "spin" : ""} />
         {label}
       </button>
       {actionError ? <span className="update-control-error" role="alert" title={actionError}>!</span> : null}
@@ -707,11 +746,14 @@ function ConnectionItem({
           aria-current={active ? "page" : undefined}
           title={connected ? undefined : "Connect"}
         >
-          <span className="connection-color" style={{ background: summary.profile.color ?? DEFAULT_CONNECTION_COLOR, color: summary.profile.color ?? DEFAULT_CONNECTION_COLOR }} />
+          <span className="connection-icon" style={{ color: summary.profile.color ?? DEFAULT_CONNECTION_COLOR }}>
+            <Database size={15} strokeWidth={1.8} />
+          </span>
           <span className="connection-copy">
             <strong>{summary.profile.name}</strong>
-            <small>{ENGINE_PRESETS[summary.profile.engine ?? "postgres"].label} · {summary.profile.username}@{summary.profile.host}</small>
+            <small>{summary.profile.defaultDatabase} · {summary.profile.host}</small>
           </span>
+          <span className={`connection-status ${connected ? "online" : ""}`} title={connected ? "Connected" : ENGINE_PRESETS[summary.profile.engine ?? "postgres"].label} />
         </button>
         <div className="connection-actions">
           {expandable ? <button
@@ -720,7 +762,7 @@ function ConnectionItem({
             aria-label={expanded ? "Collapse connection" : "Expand connection"}
             aria-expanded={expanded}
             onClick={() => { setActionsOpen(false); onToggleExpanded(); }}
-          >{expanded ? "⌃" : "⌄"}</button> : null}
+          >{expanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}</button> : null}
           <button
             className="icon-button subtle"
             title="Connection actions"
@@ -728,17 +770,17 @@ function ConnectionItem({
             aria-haspopup="menu"
             aria-expanded={actionsOpen}
             onClick={() => setActionsOpen((open) => !open)}
-          >⋯</button>
+          ><MoreHorizontal size={14} /></button>
         </div>
       </div>
       {actionsOpen ? <div className="connection-actions-menu" role="menu">
-        <button role="menuitem" onClick={() => { setActionsOpen(false); onEdit(); }}>Edit connection</button>
+        <button role="menuitem" onClick={() => { setActionsOpen(false); onEdit(); }}><Pencil size={12} />Edit connection</button>
         {connected ? <button
           role="menuitem"
           className="danger"
           title="Close this connection and its tabs"
           onClick={() => { setActionsOpen(false); onDisconnect(); }}
-        >Disconnect</button> : null}
+        ><Square size={11} />Disconnect</button> : null}
       </div> : null}
     </div>
   );
@@ -770,8 +812,8 @@ function SchemaBranch({
           if (isTable) onTable(node.schema!, node.table!);
           else setOpen((value) => !value);
         }}>
-        <span className="tree-caret" aria-hidden="true">{isTable ? "▧" : open ? "⌄" : "›"}</span>
-        <span className={`schema-icon ${node.kind}`} aria-hidden="true">{isTable ? "T" : "S"}</span>
+        <span className="tree-caret" aria-hidden="true">{isTable ? null : open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}</span>
+        <span className={`schema-icon ${node.kind}`} aria-hidden="true">{isTable ? <Table2 size={12} /> : <Layers3 size={12} />}</span>
         <span className="truncate">{node.name}</span>
       </button>
       {open && node.children.length > 0 ? node.children.map((child) => (
@@ -791,22 +833,42 @@ function Welcome({
   hasProfiles,
   profile,
   connected,
+  onNewConnection,
+  onConnect,
+  onNewQuery,
 }: {
   hasProfiles: boolean;
   profile: ConnectionProfile | null;
   connected: boolean;
+  onNewConnection: () => void;
+  onConnect?: () => void;
+  onNewQuery?: () => void;
 }) {
+  const title = profile
+    ? connected ? `${profile.name} is ready` : `Reconnect to ${profile.name}`
+    : hasProfiles ? "Choose a connection" : "Connect your first database";
+  const detail = profile
+    ? connected
+      ? "Open a table from the explorer or start a fresh SQL query."
+      : "Connect to restore this database workspace."
+    : hasProfiles
+      ? "Select a saved connection to open its private workspace."
+      : "A focused workspace for PostgreSQL and MySQL, stored entirely on this device.";
   return (
     <div className="welcome">
-      <div className="welcome-mark">DB<span>M</span></div>
-      <h1>{profile ? profile.name : "No connection selected"}</h1>
-      <p>{profile
-        ? connected
-          ? "Choose a table from the sidebar or open a new query with the plus button above."
-          : "This connection is selected but not connected. Select it again to connect."
-        : hasProfiles
-          ? "Select a saved connection from the sidebar to browse its data."
-          : "Create a connection from the sidebar to get started."}</p>
+      <div className="welcome-visual" aria-hidden="true">
+        <div className="welcome-glow" />
+        <div className="welcome-mark"><Database size={25} strokeWidth={1.6} /></div>
+      </div>
+      <span className="welcome-kicker">DBM WORKSPACE</span>
+      <h1>{title}</h1>
+      <p>{detail}</p>
+      <div className="welcome-actions">
+        {!profile || !hasProfiles ? <button className="primary-button welcome-primary" onClick={onNewConnection}><Plus size={14} />New connection</button> : null}
+        {profile && !connected && onConnect ? <button className="primary-button welcome-primary" onClick={onConnect}><Play size={13} />Connect</button> : null}
+        {profile && connected && onNewQuery ? <button className="primary-button welcome-primary" onClick={onNewQuery}><FileCode2 size={14} />New query</button> : null}
+      </div>
+      <div className="welcome-trust"><ShieldCheck size={13} /><span>Profiles and query history stay on this device</span></div>
     </div>
   );
 }
@@ -959,13 +1021,16 @@ export function QueryView({
   return (
     <div className="query-view">
       <div className="view-toolbar">
-        <div><span className="eyebrow">SQL WORKBENCH</span><h2>{title}</h2></div>
+        <div className="view-heading">
+          <span className="view-icon"><FileCode2 size={15} /></span>
+          <div><span className="eyebrow">SQL WORKBENCH</span><h2>{title}</h2></div>
+        </div>
         <div className="toolbar-actions">
           {running ? (
             <button
               className="secondary-button"
               onClick={() => void commands.cancelQuery().catch((reason: unknown) => setError(errorMessage(reason)))}
-            >Cancel</button>
+            ><Square size={11} />Cancel</button>
           ) : null}
           <button
             className="secondary-button"
@@ -974,14 +1039,18 @@ export function QueryView({
             title={executedSql
               ? "Re-run the last executed statement for fresh results"
               : "Run a statement first to enable refresh"}
-          >{running && executedSql ? "Refreshing…" : "Refresh"}</button>
+          ><RefreshCw size={12} className={running && executedSql ? "spin" : ""} />{running && executedSql ? "Refreshing…" : "Refresh"}</button>
           <button className="primary-button" onClick={runFromEditor} disabled={running || !executionTarget}>
-            {running ? "Running…" : runLabel}<kbd>{runShortcutGlyph()}</kbd>
+            <Play size={12} fill="currentColor" />{running ? "Running…" : runLabel}<kbd>{runShortcutGlyph()}</kbd>
           </button>
         </div>
       </div>
       <div className="query-layout">
         <div className="editor-panel" onKeyDownCapture={handleEditorKeyDownCapture}>
+          <div className="panel-chrome">
+            <span><span className="status-dot" />{database}</span>
+            <small>{engine === "mysql" ? "MySQL" : "PostgreSQL"}</small>
+          </div>
           <CodeMirror ref={editorRef} className="query-code-editor" value={sqlText} height="100%" theme="dark" extensions={editorExtensions} onChange={setSqlText} onUpdate={handleEditorUpdate} basicSetup={{ lineNumbers: true, foldGutter: false }} />
           {executionTarget?.kind === "selection" ? <button
             className="editor-selection-run"
@@ -989,15 +1058,15 @@ export function QueryView({
             onClick={runFromEditor}
             disabled={running}
             title="Run the selected SQL (Command/Ctrl+Enter)"
-          ><span aria-hidden="true">▶</span> Run selection</button> : null}
-          <div className="editor-hint">The outlined statement or selected SQL will run · Command/Ctrl+Enter · results capped at 10,000 rows</div>
+          ><Play size={10} fill="currentColor" />Run selection</button> : null}
+          <div className="editor-hint"><span>The highlighted statement or selection will run</span><span><kbd>{runShortcutGlyph()}</kbd> Results capped at 10,000 rows</span></div>
         </div>
-        <aside className="history-panel"><div className="panel-title">History <span>{history.length}</span></div>{history.length === 0 ? <p className="muted">Run a query to start history.</p> : <div className="history-list">{history.slice(0, 100).map((entry) => <button className="history-item" key={entry.id} onClick={() => setSqlText(entry.sql)}><span>{entry.success ? "✓" : "!"}</span><span className="history-sql">{entry.sql.replace(/\s+/g, " ").slice(0, 70)}</span><small>{new Date(entry.executedAt).toLocaleTimeString()}</small></button>)}</div>}</aside>
+        <aside className="history-panel"><div className="panel-title"><span className="panel-title-label"><Clock3 size={12} />History</span><span>{history.length}</span></div>{history.length === 0 ? <div className="history-empty"><Clock3 size={17} /><p>Executed queries will appear here.</p></div> : <div className="history-list">{history.slice(0, 100).map((entry) => <button className="history-item" key={entry.id} onClick={() => setSqlText(entry.sql)}><span className={`history-status ${entry.success ? "success" : "error"}`}>{entry.success ? <CheckCircle2 size={11} /> : <AlertCircle size={11} />}</span><span className="history-sql">{entry.sql.replace(/\s+/g, " ").slice(0, 70)}</span><small>{new Date(entry.executedAt).toLocaleTimeString()}</small></button>)}</div>}</aside>
       </div>
-      {error ? <div className="inline-error dismissible-message"><span>{error}</span><button onClick={() => setError(null)} aria-label="Dismiss message">×</button></div> : null}
+      {error ? <div className="inline-error dismissible-message"><AlertCircle size={14} /><span>{error}</span><button onClick={() => setError(null)} aria-label="Dismiss message"><X size={13} /></button></div> : null}
       {response ? editableTable ? <div className="result-panel editable-query-result">
         <div className="result-meta">
-          <span>Table viewer · query completed in {response.durationMs} ms</span>
+          <span className="result-label"><Table2 size={12} />Table result <small>Completed in {response.durationMs} ms</small></span>
           <span className="editable-result-chip">Editable table</span>
         </div>
         <TableView
@@ -1009,7 +1078,7 @@ export function QueryView({
         />
       </div> : <div className="result-panel">
         <div className="result-meta">
-          <span>{response.rowCount} rows{response.affectedRows !== null ? ` · ${response.affectedRows} affected` : ""} · {response.durationMs} ms</span>
+          <span className="result-label"><Table2 size={12} />Results <small>{response.rowCount} rows{response.affectedRows !== null ? ` · ${response.affectedRows} affected` : ""} · {response.durationMs} ms</small></span>
           <span className="result-meta-actions">
             {response.truncated ? <span className="warning-chip">truncated</span> : null}
             {response.columns.length > 0 ? <span
@@ -1019,13 +1088,13 @@ export function QueryView({
           </span>
         </div>
         <ResultTable columns={response.columns.map((column) => column.name)} rows={response.rows} />
-      </div> : <div className="query-empty">Results will appear here.</div>}
+      </div> : <div className="query-empty"><div className="query-empty-icon"><Table2 size={17} /></div><strong>Ready for results</strong><span>Run the current statement to see rows here.</span></div>}
     </div>
   );
 }
 
 function ResultTable({ columns, rows }: { columns: string[]; rows: JsonValue[][] }) {
-  if (columns.length === 0) return <div className="empty-state">Statement completed without a result set.</div>;
+  if (columns.length === 0) return <div className="empty-state"><CheckCircle2 size={17} /><strong>Statement completed</strong><span>No result set was returned.</span></div>;
   return <div className="result-grid-wrap"><table className="data-grid result-grid"><thead><tr>{columns.map((column) => <th key={column}>{column}</th>)}</tr></thead><tbody>{rows.map((row, rowIndex) => <tr key={rowIndex}>{columns.map((column, columnIndex) => <td key={`${column}-${columnIndex}`}><span className={row[columnIndex] === null ? "null-value" : "cell-value"}>{commands.toDisplayValue(row[columnIndex] ?? null)}</span></td>)}</tr>)}</tbody></table></div>;
 }
 
@@ -1111,12 +1180,21 @@ function ProfileModal({
     <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="connection-modal-title">
         <div className="modal-header">
-          <div><span className="eyebrow">{ENGINE_PRESETS[form.engine].label.toUpperCase()}</span><h2 id="connection-modal-title">{profile ? "Edit connection" : "New connection"}</h2></div>
-          <button className="icon-button" onClick={onClose} aria-label="Close">×</button>
+          <div className="modal-title-group">
+            <span className="modal-title-icon"><Database size={16} /></span>
+            <div>
+              <h2 id="connection-modal-title">{profile ? "Edit connection" : "New connection"}</h2>
+              <p>{profile ? "Update how DBM reaches this database." : "Add a private database workspace."}</p>
+            </div>
+          </div>
+          <button className="icon-button modal-close" onClick={onClose} aria-label="Close"><X size={15} /></button>
         </div>
-        <div className="form-grid">
-          <div className="form-field full">
-            <span>Database engine</span>
+        <div className="modal-body">
+          <section className="modal-section quick-connect-section">
+            <div className="modal-section-heading">
+              <span>Quick setup</span>
+              <small>Paste a URL or choose an engine</small>
+            </div>
             <div className="engine-picker" role="group" aria-label="Database engine">
               {(["postgres", "mysql"] as const).map((engine) => (
                 <button
@@ -1126,39 +1204,83 @@ function ProfileModal({
                   aria-pressed={form.engine === engine}
                   onClick={() => setForm((current) => applyEngineDefaults(current, engine))}
                 >
-                  {ENGINE_PRESETS[engine].label}
+                  <span className="engine-icon"><Database size={14} /></span>
+                  <span><strong>{ENGINE_PRESETS[engine].label}</strong><small>{engine === "postgres" ? "Port 5432" : "Port 3306"}</small></span>
+                  {form.engine === engine ? <CheckCircle2 size={14} className="engine-check" /> : null}
                 </button>
               ))}
             </div>
-          </div>
-          <label className="form-field full">
-            <span>Connection URL</span>
-            <div className="url-field">
-              <input
-                className="text-input"
-                type="password"
-                value={connectionUrl}
-                onChange={(event) => setConnectionUrl(event.target.value)}
-                onPaste={(event) => {
-                  const pasted = event.clipboardData.getData("text");
-                  event.preventDefault();
-                  setConnectionUrl(pasted);
-                  importConnectionUrl(pasted);
-                }}
-                autoComplete="off"
-                autoCapitalize="none"
-                spellCheck={false}
-                placeholder={ENGINE_PRESETS[form.engine].urlPlaceholder}
-              />
-              <button className="secondary-button" onClick={() => importConnectionUrl(connectionUrl)} disabled={!connectionUrl.trim()}>Import URL</button>
+            <label className="form-field url-form-field">
+              <span>Connection URL <small>Optional</small></span>
+              <div className="url-field">
+                <input
+                  className="text-input"
+                  type="password"
+                  value={connectionUrl}
+                  onChange={(event) => setConnectionUrl(event.target.value)}
+                  onPaste={(event) => {
+                    const pasted = event.clipboardData.getData("text");
+                    event.preventDefault();
+                    setConnectionUrl(pasted);
+                    importConnectionUrl(pasted);
+                  }}
+                  autoComplete="off"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  placeholder={ENGINE_PRESETS[form.engine].urlPlaceholder}
+                />
+                <button className="secondary-button" onClick={() => importConnectionUrl(connectionUrl)} disabled={!connectionUrl.trim()}>Import</button>
+              </div>
+            </label>
+          </section>
+
+          <section className="modal-section">
+            <div className="modal-section-heading">
+              <span>Connection details</span>
+              <small>{ENGINE_PRESETS[form.engine].label.toUpperCase()}</small>
             </div>
-          </label>
-          <label className="form-field full">
-            <span>Name</span>
-            <input className="text-input" value={form.name} onChange={(event) => update("name", event.target.value)} placeholder={ENGINE_PRESETS[form.engine].name} />
-          </label>
-          <div className="form-field full">
-            <span>Connection color</span>
+            <div className="form-grid">
+              <label className="form-field full">
+                <span>Name</span>
+                <input className="text-input" value={form.name} onChange={(event) => update("name", event.target.value)} placeholder={ENGINE_PRESETS[form.engine].name} />
+              </label>
+              <label className="form-field">
+                <span>Host</span>
+                <input className="text-input" value={form.host} onChange={(event) => update("host", event.target.value)} />
+              </label>
+              <label className="form-field">
+                <span>Port</span>
+                <input className="text-input" type="number" value={form.port} onChange={(event) => update("port", Number(event.target.value))} />
+              </label>
+              <label className="form-field">
+                <span>Username</span>
+                <input className="text-input" value={form.username} onChange={(event) => update("username", event.target.value)} />
+              </label>
+              <label className="form-field">
+                <span>Database</span>
+                <input className="text-input" value={form.defaultDatabase} onChange={(event) => update("defaultDatabase", event.target.value)} />
+              </label>
+              <label className="form-field">
+                <span>Password</span>
+                <input className="text-input" type="password" value={form.password ?? ""} onChange={(event) => update("password", event.target.value || undefined)} placeholder={profile ? "Keep saved password" : "Stored securely"} />
+              </label>
+              <label className="form-field">
+                <span>TLS mode</span>
+                <select className="select-input" value={form.tlsMode} onChange={(event) => update("tlsMode", event.target.value as SaveProfileInput["tlsMode"])}>
+                  <option value="preferred">Preferred</option>
+                  <option value="required">Required</option>
+                  <option value="disabled">Disabled</option>
+                </select>
+              </label>
+              <label className="form-field full">
+                <span>CA certificate path <small>Optional</small></span>
+                <input className="text-input" value={form.caCertPath ?? ""} onChange={(event) => update("caCertPath", event.target.value || null)} placeholder="/path/to/root-ca.pem" />
+              </label>
+            </div>
+          </section>
+
+          <section className="modal-section profile-options-section">
+            <div className="modal-section-heading"><span>Workspace identity</span><small>Used throughout DBM</small></div>
             <div className="color-picker">
               {CONNECTION_COLORS.map((color) => (
                 <button
@@ -1167,58 +1289,35 @@ function ProfileModal({
                   style={{ background: color }}
                   onClick={() => update("color", color)}
                   aria-label={`Use connection color ${color}`}
-                />
+                >
+                  {form.color === color ? <CheckCircle2 size={13} /> : null}
+                </button>
               ))}
               <label className="custom-color" title="Choose a custom color">
                 <input type="color" value={form.color ?? DEFAULT_CONNECTION_COLOR} onChange={(event) => update("color", event.target.value)} />
                 <span>Custom</span>
               </label>
             </div>
-          </div>
-          <label className="form-field">
-            <span>Host</span>
-            <input className="text-input" value={form.host} onChange={(event) => update("host", event.target.value)} />
-          </label>
-          <label className="form-field">
-            <span>Port</span>
-            <input className="text-input" type="number" value={form.port} onChange={(event) => update("port", Number(event.target.value))} />
-          </label>
-          <label className="form-field">
-            <span>Username</span>
-            <input className="text-input" value={form.username} onChange={(event) => update("username", event.target.value)} />
-          </label>
-          <label className="form-field">
-            <span>Database</span>
-            <input className="text-input" value={form.defaultDatabase} onChange={(event) => update("defaultDatabase", event.target.value)} />
-          </label>
-          <label className="form-field">
-            <span>Password</span>
-            <input className="text-input" type="password" value={form.password ?? ""} onChange={(event) => update("password", event.target.value || undefined)} placeholder={profile ? "Leave blank to keep saved password" : "Stored in OS keychain"} />
-          </label>
-          <label className="form-field">
-            <span>TLS</span>
-            <select className="select-input" value={form.tlsMode} onChange={(event) => update("tlsMode", event.target.value as SaveProfileInput["tlsMode"])}>
-              <option value="preferred">Preferred</option>
-              <option value="required">Required</option>
-              <option value="disabled">Disabled</option>
-            </select>
-          </label>
-          <label className="form-field full">
-            <span>CA certificate path (optional)</span>
-            <input className="text-input" value={form.caCertPath ?? ""} onChange={(event) => update("caCertPath", event.target.value || null)} placeholder="/path/to/root-ca.pem" />
-          </label>
-          <label className="checkbox-field full">
-            <input type="checkbox" checked={form.readOnly} onChange={(event) => update("readOnly", event.target.checked)} />
-            <span>Read-only profile (blocks GUI edits and mutations)</span>
-          </label>
+            <label className="checkbox-field">
+              <input type="checkbox" checked={form.readOnly} onChange={(event) => update("readOnly", event.target.checked)} />
+              <span><strong>Open as read-only</strong><small>Block edits and mutation queries from the interface.</small></span>
+            </label>
+          </section>
+
+          {feedback ? <div className={`modal-feedback ${feedback.kind}`} role="status">
+            {feedback.kind === "success" ? <CheckCircle2 size={14} /> : feedback.kind === "error" ? <AlertCircle size={14} /> : <Info size={14} />}
+            <span>{feedback.message}</span>
+          </div> : null}
+          <div className="modal-note"><ShieldCheck size={15} /><span><strong>Credentials stay local</strong>Passwords are stored in your operating system credential manager, never in DBM's profile database.</span></div>
         </div>
-        {feedback ? <div className={`modal-feedback ${feedback.kind}`} role="status">{feedback.message}</div> : null}
-        <div className="modal-note">Passwords are stored in your operating system credential manager and are never written to DBM's profile database.</div>
         <div className="modal-actions">
           {onDelete ? <button className="danger-button" onClick={() => void onDelete()} disabled={testing || saving}>Delete</button> : <span />}
           <div className="modal-actions-right">
-            <button className="secondary-button" onClick={() => void test()} disabled={testing || saving}>{testing ? "Testing…" : "Test connection"}</button>
+            <button className="secondary-button" onClick={() => void test()} disabled={testing || saving}>
+              <RefreshCw size={12} className={testing ? "spin" : ""} />{testing ? "Testing…" : "Test connection"}
+            </button>
             <button className="primary-button" onClick={() => void save()} disabled={testing || saving}>
+              <Play size={12} fill="currentColor" />
               {saveStage === "testing" ? "Testing…" : saveStage === "connecting" ? "Connecting…" : "Save & connect"}
             </button>
           </div>

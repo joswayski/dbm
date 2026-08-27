@@ -121,7 +121,7 @@ describe("App connection and query navigation", () => {
 
     fireEvent.click(screen.getByRole("button", { name: `Connection actions for ${profile.name}` }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Disconnect" }));
-    expect(await screen.findByRole("heading", { name: "No connection selected" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Choose a connection" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Revenue audit" })).not.toBeInTheDocument();
   }, 15_000);
 
