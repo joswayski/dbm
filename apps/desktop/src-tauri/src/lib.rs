@@ -1,15 +1,23 @@
 #![deny(unsafe_code)]
 
+mod error;
+mod keyring_store;
+mod models;
+mod mysql;
+mod postgres;
+mod redis;
+mod session;
+mod state;
+mod storage;
 mod updates;
 
 use chrono::Utc;
-use dbm_engine::error::AppResult;
-use dbm_engine::models::{
+use error::AppResult;
+use models::{
     ConnectionProfile, MutationBatch, ProfileSummary, QueryHistoryEntry, QueryRequest,
     SaveProfileInput, TablePageRequest, WorkspaceInfo,
 };
-use dbm_engine::state::AppState;
-use dbm_engine::{models, session};
+use state::AppState;
 use uuid::Uuid;
 
 fn command_error(error: impl std::fmt::Display) -> String {
@@ -18,7 +26,25 @@ fn command_error(error: impl std::fmt::Display) -> String {
 
 fn profile_for_test(state: &AppState, input: &SaveProfileInput) -> AppResult<ConnectionProfile> {
     let existing = input.id.map(|id| state.profile(id)).transpose()?;
-    input.to_profile(existing.as_ref())
+    let now = Utc::now();
+    let profile = ConnectionProfile {
+        id: input.id.unwrap_or_else(Uuid::new_v4),
+        name: input.name.trim().to_owned(),
+        color: input.color.clone(),
+        engine: input.engine,
+        host: input.host.trim().to_owned(),
+        port: input.port,
+        username: input.username.trim().to_owned(),
+        default_database: input.default_database.trim().to_owned(),
+        tls_mode: input.tls_mode.clone(),
+        ca_cert_path: input.ca_cert_path.clone(),
+        ssh: input.ssh.clone(),
+        read_only: input.read_only,
+        created_at: existing.as_ref().map_or(now, |profile| profile.created_at),
+        updated_at: now,
+    };
+    profile.validate()?;
+    Ok(profile)
 }
 
 #[tauri::command]
@@ -51,9 +77,14 @@ async fn save_profile(
 
 #[tauri::command]
 async fn delete_profile(state: tauri::State<'_, AppState>, profile_id: Uuid) -> Result<(), String> {
+    state.disconnect(profile_id).await;
     state
+        .credentials
+        .delete_password(profile_id)
+        .map_err(command_error)?;
+    state
+        .store
         .delete_profile(profile_id)
-        .await
         .map_err(command_error)
 }
 
