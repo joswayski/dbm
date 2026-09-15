@@ -104,7 +104,7 @@ pub fn build(
     let title = gtk::Label::new(Some(&format!("{schema}.{table}")));
     title.add_css_class("title");
     title.set_xalign(0.0);
-    let eyebrow = gtk::Label::new(Some("TABLE VIEWER"));
+    let eyebrow = gtk::Label::new(Some("TABLE"));
     eyebrow.add_css_class("eyebrow");
     eyebrow.set_xalign(0.0);
     let title_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
@@ -209,7 +209,7 @@ pub fn build(
     pending_label.set_hexpand(true);
     let save_button = gtk::Button::with_label("Save changes");
     save_button.add_css_class("primary-button");
-    let discard_button = gtk::Button::with_label("Discard all");
+    let discard_button = gtk::Button::with_label("Discard changes");
     discard_button.add_css_class("secondary-button");
     let pending_content = gtk::Box::new(gtk::Orientation::Horizontal, 10);
     pending_content.add_css_class("pending-changes");
@@ -565,12 +565,30 @@ fn update_actions(state: &TableViewState) {
     let idle = !state.loading && !state.saving;
     let has_pending = !state.pending.is_empty();
     state.pending_bar.set_reveal_child(has_pending);
-    state.pending_label.set_label(&format!(
-        "{} pending · {} edited · {} deleted — not saved yet",
-        state.pending.len(),
-        state.pending.len() - state.pending.delete_count(),
-        state.pending.delete_count()
-    ));
+    let count = state.pending.len();
+    let deleted = state.pending.delete_count();
+    let edited = count - deleted;
+    let mut summary = format!(
+        "{count} pending {}",
+        if count == 1 { "change" } else { "changes" }
+    );
+    if edited > 0 {
+        summary.push_str(&format!(
+            " · {edited} edited {}",
+            if edited == 1 { "row" } else { "rows" }
+        ));
+    }
+    if deleted > 0 {
+        summary.push_str(&format!(
+            " · {deleted} {}",
+            if deleted == 1 {
+                "deletion"
+            } else {
+                "deletions"
+            }
+        ));
+    }
+    state.pending_label.set_label(&summary);
     state.save_button.set_label(if state.saving {
         "Saving…"
     } else {
@@ -782,16 +800,16 @@ fn show_preview(
         "{} · {}",
         field.name,
         if pending.deleted {
-            "PENDING DELETE"
+            "Pending delete"
         } else {
-            "PENDING EDIT"
+            "Pending edit"
         }
     )));
     heading.add_css_class("eyebrow");
     heading.set_xalign(0.0);
     content.append(&heading);
     if pending.deleted {
-        let message = gtk::Label::new(Some("This row will be deleted when you save."));
+        let message = gtk::Label::new(Some("This row will be deleted when changes are saved."));
         message.set_xalign(0.0);
         content.append(&message);
     } else {

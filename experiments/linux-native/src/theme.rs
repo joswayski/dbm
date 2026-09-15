@@ -133,7 +133,6 @@ window, .dialog { background-color: #0b1017; color: #dbe5f2; font-family: "Satos
 .brand-title { font-weight: 700; font-size: 14px; }
 .brand-subtitle { color: #7c8ea6; font-size: 10px; }
 .section-title { color: #7c8ea6; font-size: 10px; font-weight: 700; letter-spacing: 0.08em; }
-.sidebar-footer { padding: 10px 14px; border-top: 1px solid #253447; }
 .connection-group { margin: 3px 8px; border: 1px solid transparent; border-radius: 8px; }
 .connection-group.active { border-color: #344963; background-color: rgba(23, 34, 49, 0.58); }
 
@@ -252,7 +251,6 @@ entry.cell-editor { background-color: #101a27; color: #dbe5f2; border: 1px solid
 .toast { background-color: #172231; border: 1px solid #344963; border-radius: 7px; padding: 9px 12px; box-shadow: 0 14px 40px rgba(0, 0, 0, 0.48); font-size: 12px; }
 
 .chip { border-radius: 4px; padding: 1px 5px; font-size: 9px; font-weight: 800; letter-spacing: 0.08em; }
-.chip.local { color: #4ade80; border: 1px solid rgba(74, 222, 128, 0.3); }
 .chip.warning { color: #fbbf24; border: 1px solid rgba(251, 191, 36, 0.35); }
 .chip.readonly { color: #8fa2b8; border: 1px solid #253447; }
 

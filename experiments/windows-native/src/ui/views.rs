@@ -101,7 +101,7 @@ impl Ui {
         );
         y += 30.0;
 
-        let list_area = rect(area.left, y, area.right, area.bottom - 42.0);
+        let list_area = rect(area.left, y, area.right, area.bottom);
         self.scroll_region(ViewId::Sidebar, list_area);
         let scroll = self.scroll_offset(ViewId::Sidebar);
         let _ = r.push_clip(list_area);
@@ -113,26 +113,6 @@ impl Ui {
         }
         r.reset_transform();
         r.pop_clip();
-
-        // Footer
-        let footer = rect(area.left, area.bottom - 42.0, area.right, area.bottom);
-        let _ = r.hline(footer.left, footer.right, footer.top, theme::BORDER);
-        let chip = rect(
-            footer.left + 14.0,
-            footer.top + 12.0,
-            footer.left + 96.0,
-            footer.top + 30.0,
-        );
-        let _ = r.fill_round_rect(chip, 4.0, theme::SUCCESS, 0.12);
-        let _ = r.stroke_round_rect(chip, 4.0, theme::SUCCESS, 1.0);
-        let _ = r.draw_text(
-            "LOCAL ONLY",
-            chip,
-            theme::SUCCESS,
-            Font::Eyebrow,
-            TextAlign::Center,
-            false,
-        );
     }
 
     fn paint_connection_group(
@@ -947,7 +927,7 @@ impl Ui {
         let toolbar = rect(area.left, area.top, area.right, area.top + 54.0);
         let _ = r.fill_rect(toolbar, theme::BG, 1.0);
         let _ = r.draw_text(
-            "TABLE VIEWER",
+            "TABLE",
             rect(
                 toolbar.left + 14.0,
                 toolbar.top + 8.0,
@@ -1476,9 +1456,9 @@ impl Ui {
                         );
                         let _ = r.stroke_round_rect(panel, 7.0, accent, 1.0);
                         let heading = if mutation.deleted {
-                            "PENDING DELETION"
+                            "Pending delete"
                         } else {
-                            "BEFORE / AFTER"
+                            "Pending edit"
                         };
                         let _ = r.draw_text(
                             heading,
@@ -1502,9 +1482,9 @@ impl Ui {
                                 panel.top + 31.0,
                             ),
                             if mutation.deleted {
-                                "Undo deletion"
+                                "Undo delete"
                             } else {
-                                "Discard row changes"
+                                "Discard edit"
                             },
                             ButtonKind::Secondary,
                             Action::DiscardTableRow {
@@ -1515,7 +1495,7 @@ impl Ui {
                         );
                         if mutation.deleted {
                             let _ = r.draw_text(
-                                "This row will be removed when changes are saved.",
+                                "This row will be deleted when changes are saved.",
                                 rect(
                                     panel.left + 12.0,
                                     panel.top + 34.0,

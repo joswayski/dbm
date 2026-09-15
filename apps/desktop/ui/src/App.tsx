@@ -438,9 +438,6 @@ export default function App() {
             );
           })}
         </div>
-        <div className="sidebar-footer">
-          <span className="privacy-chip">LOCAL ONLY</span>
-        </div>
         <div
           className="sidebar-resize-handle"
           role="separator"

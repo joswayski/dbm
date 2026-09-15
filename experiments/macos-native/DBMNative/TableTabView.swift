@@ -76,7 +76,7 @@ struct TableTabView: View {
     private var toolbar: some View {
         HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 0) {
-                Text("TABLE VIEWER")
+                Text("TABLE")
                     .font(Theme.eyebrowFont)
                     .foregroundStyle(Theme.muted)
                 Text("\(schema).\(table)")

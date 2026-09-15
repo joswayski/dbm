@@ -120,16 +120,8 @@ impl Ui {
         section_row.append(&section_spacer);
         section_row.append(&new_connection_button);
 
-        let footer = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-        footer.add_css_class("sidebar-footer");
-        let local_chip = gtk::Label::new(Some("LOCAL ONLY"));
-        local_chip.add_css_class("chip");
-        local_chip.add_css_class("local");
-        footer.append(&local_chip);
-
         sidebar_body.append(&section_row);
         sidebar_body.append(&connections_scroll);
-        sidebar_body.append(&footer);
 
         let sidebar = gtk::Box::new(gtk::Orientation::Vertical, 0);
         sidebar.add_css_class("sidebar");

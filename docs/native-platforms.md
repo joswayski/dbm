@@ -48,8 +48,9 @@ experiments/macos-native      SwiftUI/AppKit presentation + Rust C-ABI bridge
   everywhere: presets, connection-URL parsing, CSV output, destructive-statement
   detection, statement/line targeting, and Rust table draft state. Its tests run
   on every platform; the Swift frontend mirrors the draft contract.
-- The Tauri shell is a thin command layer over the engine; the React UI and its
-  tests are unchanged.
+- The Tauri shell is a thin command layer over the engine. Its React workbench
+  behavior is preserved; the decorative privacy footer was removed from all
+  frontends without changing local-only storage or networking behavior.
 - Native frontends link the engine in-process (the macOS app links it through a
   small JSON C ABI). They do not speak Tauri IPC, and they read and write the
   same local profile database and OS credential store as the Tauri app, so a

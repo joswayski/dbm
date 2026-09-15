@@ -25,7 +25,6 @@ struct SidebarView: View {
                 .padding(.horizontal, 8)
                 .padding(.vertical, 6)
             }
-            footer
         }
         .background(Theme.sidebar)
         .sheet(item: $editingProfile) { profile in
@@ -73,22 +72,6 @@ struct SidebarView: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
         }
-    }
-
-    private var footer: some View {
-        HStack {
-            Text("LOCAL ONLY")
-                .font(Theme.eyebrowFont)
-                .foregroundStyle(Theme.success)
-                .padding(.horizontal, 5)
-                .padding(.vertical, 3)
-                .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Theme.success.opacity(0.35)))
-            Spacer()
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(Theme.bg.opacity(0.25))
-        .overlay(alignment: .top) { Rectangle().fill(Theme.border).frame(height: 1) }
     }
 }
 
