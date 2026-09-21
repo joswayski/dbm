@@ -28,14 +28,6 @@ impl DbSession {
         }
     }
 
-    pub fn profile(&self) -> &ConnectionProfile {
-        match self {
-            Self::Postgres(session) => session.profile(),
-            Self::Mysql(session) => session.profile(),
-            Self::Redis(session) => session.profile(),
-        }
-    }
-
     pub async fn list_databases(&self) -> AppResult<Vec<DatabaseRef>> {
         match self {
             Self::Postgres(session) => session.list_databases().await,

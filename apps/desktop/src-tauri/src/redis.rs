@@ -40,6 +40,7 @@ impl RedisSession {
         })
     }
 
+    #[cfg(test)]
     pub fn profile(&self) -> &ConnectionProfile {
         &self.profile
     }

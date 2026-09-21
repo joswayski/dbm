@@ -114,6 +114,8 @@ Passwords are stored in the operating system credential store when available.
   per-profile history. Connecting a profile opens a query tab so you can run
   SQL immediately. Redis connections open a command workbench (`PING` by
   default) instead of SQL.
+- Automatically reconnects once after an idle connection closes, then retries
+  read-only browsing and SQL statements. Writes are never retried automatically.
 - Refresh on table previews and query results: reload the current page and
   filters, or re-run the last executed statement, without re-authoring them.
 

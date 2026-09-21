@@ -33,6 +33,24 @@ impl AppError {
         }
         Self::Database(messages.join(": "))
     }
+
+    pub fn is_connection_lost(&self) -> bool {
+        let Self::Database(message) = self else {
+            return false;
+        };
+        let message = message.to_ascii_lowercase();
+        [
+            "connection closed",
+            "connection reset",
+            "connection aborted",
+            "connection broken",
+            "broken pipe",
+            "not connected",
+            "connection is closed",
+        ]
+        .iter()
+        .any(|needle| message.contains(needle))
+    }
 }
 
 impl From<rusqlite::Error> for AppError {
@@ -84,3 +102,16 @@ impl From<redis_rs::RedisError> for AppError {
 }
 
 pub type AppResult<T> = Result<T, AppError>;
+
+#[cfg(test)]
+mod tests {
+    use super::AppError;
+
+    #[test]
+    fn identifies_lost_database_connections() {
+        assert!(AppError::Database("connection closed".into()).is_connection_lost());
+        assert!(AppError::Database("Broken pipe".into()).is_connection_lost());
+        assert!(!AppError::Database("syntax error at or near SELECT".into()).is_connection_lost());
+        assert!(!AppError::NotConnected.is_connection_lost());
+    }
+}

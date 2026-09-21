@@ -33,10 +33,6 @@ impl MysqlSession {
         Ok(Self { profile, pool })
     }
 
-    pub fn profile(&self) -> &ConnectionProfile {
-        &self.profile
-    }
-
     pub async fn close(&self) {
         let _ = self.pool.clone().disconnect().await;
     }
