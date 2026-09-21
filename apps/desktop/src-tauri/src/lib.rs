@@ -159,10 +159,9 @@ async fn list_databases(
     profile_id: Uuid,
 ) -> Result<Vec<models::DatabaseRef>, String> {
     state
-        .session(profile_id)
-        .await
-        .map_err(command_error)?
-        .list_databases()
+        .with_session_retry(profile_id, |session| async move {
+            session.list_databases().await
+        })
         .await
         .map_err(command_error)
 }
@@ -173,10 +172,10 @@ async fn load_schema_tree(
     profile_id: Uuid,
 ) -> Result<Vec<models::SchemaNode>, String> {
     state
-        .session(profile_id)
-        .await
-        .map_err(command_error)?
-        .schema_tree()
+        .with_session_retry(
+            profile_id,
+            |session| async move { session.schema_tree().await },
+        )
         .await
         .map_err(command_error)
 }
@@ -187,12 +186,35 @@ async fn load_table_page(
     request: TablePageRequest,
 ) -> Result<models::TablePage, String> {
     state
-        .session(request.profile_id)
-        .await
-        .map_err(command_error)?
-        .table_page(&request)
+        .with_session_retry(request.profile_id, |session| {
+            let request = &request;
+            async move { session.table_page(request).await }
+        })
         .await
         .map_err(command_error)
+}
+
+fn is_read_only_query(sql: &str) -> bool {
+    matches!(
+        sql.split_whitespace()
+            .next()
+            .map(str::to_ascii_lowercase)
+            .as_deref(),
+        Some("select" | "show" | "describe" | "desc" | "explain")
+    )
+}
+
+#[cfg(test)]
+mod query_tests {
+    use super::is_read_only_query;
+
+    #[test]
+    fn retries_only_read_only_queries() {
+        assert!(is_read_only_query("SELECT * FROM users"));
+        assert!(is_read_only_query("  EXPLAIN SELECT * FROM users"));
+        assert!(!is_read_only_query("UPDATE users SET active = true"));
+        assert!(!is_read_only_query("DELETE FROM users"));
+    }
 }
 
 #[tauri::command]
@@ -200,22 +222,28 @@ async fn run_query(
     state: tauri::State<'_, AppState>,
     request: QueryRequest,
 ) -> Result<models::QueryResponse, String> {
-    let session = state
-        .session(request.profile_id)
-        .await
-        .map_err(command_error)?;
-    let response = session.run_query(&request.sql, request.max_rows).await;
+    let response = if is_read_only_query(&request.sql) {
+        state
+            .with_session_retry(request.profile_id, |session| {
+                let request = &request;
+                async move { session.run_query(&request.sql, request.max_rows).await }
+            })
+            .await
+    } else {
+        state
+            .session(request.profile_id)
+            .await
+            .map_err(command_error)?
+            .run_query(&request.sql, request.max_rows)
+            .await
+    };
     let success = response.is_ok();
     let response = response.map_err(command_error);
-    let (duration_ms, database) = response
-        .as_ref()
-        .map(|result| {
-            (
-                result.duration_ms,
-                session.profile().default_database.clone(),
-            )
-        })
-        .unwrap_or((0, session.profile().default_database.clone()));
+    let duration_ms = response.as_ref().map_or(0, |result| result.duration_ms);
+    let database = state
+        .profile(request.profile_id)
+        .map_err(command_error)?
+        .default_database;
     let entry = QueryHistoryEntry {
         id: Uuid::new_v4(),
         profile_id: request.profile_id,

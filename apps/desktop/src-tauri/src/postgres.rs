@@ -30,10 +30,6 @@ impl PgSession {
         Ok(Self { profile, client })
     }
 
-    pub fn profile(&self) -> &ConnectionProfile {
-        &self.profile
-    }
-
     pub async fn list_databases(&self) -> AppResult<Vec<DatabaseRef>> {
         let rows = self
             .client
