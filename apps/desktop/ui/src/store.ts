@@ -39,11 +39,20 @@ export const useDbmStore = create<DbmStore>((set, get) => ({
     set((state) => {
       const workspaces = { ...state.workspaces };
       delete workspaces[saved.id];
+      const previous = state.profiles.find((summary) => summary.profile.id === saved.id)?.profile;
+      // Table tabs belong to the server and database they were opened on.
+      const tabs = previous && connectionTargetChanged(previous, saved)
+        ? withoutTableTabs(state.tabs, saved.id)
+        : state.tabs;
+      const activeTabId = state.activeProfileId === saved.id && tabs.some((tab) => tab.id === state.activeTabId)
+        ? state.activeTabId
+        : null;
       return {
         profiles,
         workspaces,
+        tabs,
         activeProfileId: saved.id,
-        activeTabId: state.activeProfileId === saved.id ? state.activeTabId : null,
+        activeTabId,
       };
     });
     return saved;
@@ -72,7 +81,21 @@ export const useDbmStore = create<DbmStore>((set, get) => ({
   },
   switchDatabase: async (profileId, database) => {
     const workspace = await commands.connectDatabase(profileId, database);
-    set((state) => ({ workspaces: { ...state.workspaces, [profileId]: workspace }, activeProfileId: profileId }));
+    set((state) => {
+      // Table tabs were opened on the previous database; leaving them open would
+      // show stale rows and send edits to the newly selected database.
+      const tabs = withoutTableTabs(state.tabs, profileId);
+      const workspaces = { ...state.workspaces, [profileId]: workspace };
+      return {
+        workspaces,
+        ...activatedProfileWorkbench({
+          ...state,
+          workspaces,
+          tabs,
+          activeTabId: tabs.some((tab) => tab.id === state.activeTabId) ? state.activeTabId : null,
+        }, profileId),
+      };
+    });
   },
   disconnect: async (profileId) => {
     await commands.disconnectWorkspace(profileId);
@@ -140,6 +163,18 @@ export const useDbmStore = create<DbmStore>((set, get) => ({
     }));
   },
 }));
+
+function withoutTableTabs(tabs: Tab[], profileId: string): Tab[] {
+  return tabs.filter((tab) => tab.profileId !== profileId || tab.kind !== "table");
+}
+
+function connectionTargetChanged(previous: ConnectionProfile, next: ConnectionProfile): boolean {
+  return previous.engine !== next.engine ||
+    previous.host !== next.host ||
+    previous.port !== next.port ||
+    previous.username !== next.username ||
+    previous.defaultDatabase !== next.defaultDatabase;
+}
 
 function adjacentTab(tabs: Tab[], index: number): Tab | null {
   return tabs.slice(index + 1)[0] ?? tabs.slice(0, index).at(-1) ?? null;
