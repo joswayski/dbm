@@ -1,10 +1,11 @@
 import { writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-const [tag] = process.argv.slice(2);
-const version = tag?.startsWith("v") ? tag.slice(1) : tag;
+// Takes the packaged app version from scripts/release.mjs, e.g. 2026.9.2401.
+const [argument] = process.argv.slice(2);
+const version = argument?.startsWith("v") ? argument.slice(1) : argument;
 if (!/^\d+\.\d+\.\d+$/u.test(version ?? "")) {
-  throw new Error("release tag must use vMAJOR.MINOR.PATCH");
+  throw new Error("release version must use MAJOR.MINOR.PATCH");
 }
 
 const required = [

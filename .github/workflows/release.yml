@@ -1,18 +1,92 @@
-name: Release installers
+name: Release
 
+# Every merge to main that touches the app builds signed installers for macOS,
+# Windows, and Linux and publishes them as the latest GitHub release. Installed
+# official builds poll releases/latest/download/latest.json and update in place.
 on:
   push:
-    tags: ["v*.*.*"]
+    branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - ".agents/**"
+      - ".amp/**"
+      - ".github/workflows/ci.yml"
+  workflow_dispatch:
+
+# One release at a time. A newer merge waits instead of cancelling a release
+# that may already have pushed its tag.
+concurrency:
+  group: dbm-release
+  cancel-in-progress: false
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  build_draft:
-    name: Build draft (${{ matrix.os }})
+  prepare:
+    name: Tag and draft the release
+    # Manual runs from other branches must not publish a release.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      display_version: ${{ steps.version.outputs.display_version }}
+      app_version: ${{ steps.version.outputs.app_version }}
+      notes: ${{ steps.notes.outputs.notes }}
+      release_id: ${{ steps.draft.outputs.release_id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Choose the next version
+        id: version
+        env:
+          DBM_RELEASE_SHA: ${{ github.sha }}
+        run: node scripts/release.mjs version
+      - name: Collect release notes
+        id: notes
+        env:
+          DBM_RELEASE_SHA: ${{ github.sha }}
+        run: node scripts/release.mjs notes
+      - name: Push the tag and create a draft release
+        id: draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          DISPLAY_VERSION: ${{ steps.version.outputs.display_version }}
+          NOTES: ${{ steps.notes.outputs.notes }}
+          RELEASE_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git tag "$TAG" "$RELEASE_SHA"
+          git push origin "refs/tags/${TAG}"
+          notes_file="$RUNNER_TEMP/release-notes.md"
+          printf '%s\n' "$NOTES" > "$notes_file"
+          release_id="$(
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/releases" \
+              -f tag_name="$TAG" \
+              -f target_commitish="$RELEASE_SHA" \
+              -f name="DBM $DISPLAY_VERSION" \
+              -F body=@"$notes_file" \
+              -F draft=true \
+              --jq .id
+          )"
+          echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build (${{ matrix.os }})
+    needs: prepare
     environment: release
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         include:
           - os: macos-14
@@ -22,12 +96,16 @@ jobs:
           - os: ubuntu-24.04
             args: "--bundles deb,appimage"
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
     env:
       DBM_OFFICIAL_RELEASE: "1"
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -50,7 +128,7 @@ jobs:
             pkg-config
       - run: npm ci
       - name: Prepare the release version and updater credentials
-        run: node scripts/prepare-release-build.mjs "${{ github.ref_name }}"
+        run: node scripts/prepare-release-build.mjs "${{ needs.prepare.outputs.app_version }}"
       - name: Prepare Apple signing and notarization credentials
         if: runner.os == 'macOS'
         env:
@@ -120,12 +198,12 @@ jobs:
 
       - uses: tauri-apps/tauri-action@v1
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
         with:
           projectPath: apps/desktop
-          tagName: ${{ github.ref_name }}
-          releaseName: DBM ${{ github.ref_name }}
-          releaseBody: Cross-platform DBM desktop installers.
+          tagName: ${{ needs.prepare.outputs.tag }}
+          releaseId: ${{ needs.prepare.outputs.release_id }}
+          releaseBody: ${{ needs.prepare.outputs.notes }}
           releaseDraft: true
           prerelease: false
           retryAttempts: 5
@@ -136,6 +214,7 @@ jobs:
         if: runner.os == 'macOS'
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
         shell: bash
         run: |
           set -euo pipefail
@@ -166,27 +245,54 @@ jobs:
             "$dmg"
           xcrun stapler validate "$dmg"
 
-          gh release upload "$GITHUB_REF_NAME" "$dmg" --clobber
+          gh release upload "$TAG" "$dmg" --clobber
 
-  validate_updater:
-    name: Validate draft updater manifest
-    needs: build_draft
+  publish:
+    name: Validate and publish
+    needs: [prepare, build]
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.prepare.outputs.tag }}
+      APP_VERSION: ${{ needs.prepare.outputs.app_version }}
+      RELEASE_ID: ${{ needs.prepare.outputs.release_id }}
     steps:
-      - name: Download and validate latest.json
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
+      - name: Download the draft's assets
         shell: bash
         run: |
           set -euo pipefail
-
-          version="${TAG#v}"
-          gh release download "$TAG" --pattern latest.json
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir assets
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets" \
+            --jq '.[] | {id, name}' | jq -s . > asset-names.json
+      - name: Point the updater manifest at public download URLs
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Uploaded manifests can reference rate-limited API asset URLs or a
+          # draft's untagged download path, neither of which installed apps can
+          # use once the release is public.
+          base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/"
+          jq --slurpfile assets asset-names.json --arg base "$base" '
+            ($assets[0] | map({key: (.id | tostring), value: .name}) | from_entries) as $names
+            | .platforms |= map_values(.url |= (
+                if test("/releases/assets/[0-9]+$")
+                then $base + ($names[capture("/assets/(?<id>[0-9]+)$").id] // "missing-asset" | @uri)
+                else $base + (split("/") | last)
+                end
+              ))
+          ' assets/latest.json > latest.json
           jq -e \
-            --arg version "$version" \
+            --arg version "$APP_VERSION" \
+            --arg base "$base" \
+            --slurpfile assets asset-names.json \
             '
-              .version == $version
+              ($assets[0] | map(.name | @uri)) as $files
+              | .version == $version
+              and (.notes | type == "string" and length > 0)
               and (
                 [
                   .platforms["darwin-aarch64"],
@@ -195,15 +301,60 @@ jobs:
                 ]
                 | all(
                     type == "object"
-                    and (.url | type == "string" and length > 0)
                     and (.signature | type == "string" and length > 0)
+                    and (.url | type == "string" and startswith($base))
+                    and ((.url | ltrimstr($base)) as $file | $files | index($file) != null)
                   )
               )
             ' \
-            latest.json \
-            >/dev/null
-
-          if [[ "$(gh release view "$TAG" --json isDraft --jq .isDraft)" != "true" ]]; then
-            echo "Release $TAG was unexpectedly published." >&2
+            latest.json > /dev/null
+          cp latest.json assets/latest.json
+      - name: Write checksums
+        working-directory: assets
+        run: |
+          rm -f SHA256SUMS
+          sha256sum -- * > ../SHA256SUMS
+          cp ../SHA256SUMS SHA256SUMS
+          cat SHA256SUMS
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: assets/*
+      - name: Upload the manifest and checksums, then publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" --jq .draft)" != "true" ]]; then
+            echo "Release $TAG is no longer a draft; refusing to modify it." >&2
             exit 1
           fi
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber latest.json SHA256SUMS
+          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
+            -f tag_name="$TAG" \
+            -F draft=false \
+            -F prerelease=false \
+            -f make_latest=true \
+            --silent
+          echo "Published https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
+
+  cleanup:
+    name: Remove the unpublished draft
+    needs: [prepare, build, publish]
+    if: (failure() || cancelled()) && needs.prepare.outputs.release_id != ''
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.prepare.outputs.tag }}
+      RELEASE_ID: ${{ needs.prepare.outputs.release_id }}
+    steps:
+      - name: Delete the draft and its tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" --jq .draft)" != "true" ]]; then
+            echo "Release $TAG was published; leaving it in place."
+            exit 0
+          fi
+          gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}"
+          gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/tags/${TAG}"

@@ -6,9 +6,54 @@ DBM distributes installers directly through GitHub Releases:
 - an NSIS `.exe` installer for Windows; and
 - `.deb` and AppImage packages for Linux.
 
-Pushing a `v*.*.*` tag runs `.github/workflows/release.yml` and creates a draft
-release. A successful build only proves that the packages were created. Do not
-publish the draft until every public-release gate below is enforced and passes.
+Every merge to `main` that changes the app runs `.github/workflows/release.yml`,
+which builds all three platforms and publishes the result as the latest GitHub
+Release. Installed official builds find it through the updater manifest and
+update in place. Changes that only touch Markdown, `docs/`, or agent tooling do
+not release. Run the workflow manually from the Actions tab (**Release → Run
+workflow** on `main`) to release without a new merge.
+
+These automatic releases are for the maintainer's own machines. Windows
+installers are not Authenticode-signed yet, so the gates below still apply
+before DBM is promoted to a wider audience.
+
+## How a release is built
+
+1. **prepare** picks the next version, pushes its tag, and creates a draft
+   release whose notes list the pull requests merged since the previous
+   release (Dependabot bumps are omitted).
+2. **build** packages macOS (signed and notarized DMG), Windows (NSIS), and
+   Linux (`.deb` and AppImage) into the draft with Tauri updater signatures
+   and a merged `latest.json`. If any platform fails, the others stop.
+3. **publish** rewrites `latest.json` so every download URL points at the
+   public `releases/download/<tag>/` path, rejects a manifest whose version,
+   notes, signatures, or assets do not match, writes `SHA256SUMS`, attests
+   build provenance for every asset, and then publishes the draft as the
+   latest release.
+4. **cleanup** deletes the draft and its tag if anything failed or was
+   cancelled before publishing.
+
+Only one release runs at a time; a merge that lands during a release waits
+for it and then releases everything merged since.
+
+### Versions
+
+Tags use the release date in New York time plus a daily revision:
+`v2026.09.24.1`, `v2026.09.24.2`, and so on. The packaged app version packs
+that into SemVer as `YEAR.MONTH.DAY×100+REVISION` (`2026.9.2401`), so versions
+always increase for the updater. `scripts/release.mjs` computes both and is
+covered by `npm run test:release`, which `npm run check` includes.
+
+### In-app updates
+
+Official builds (compiled with `DBM_OFFICIAL_RELEASE=1`) check
+`https://github.com/joswayski/dbm/releases/latest/download/latest.json` 15
+seconds after launch and every 4 hours, and the top bar's **Check for
+updates** button checks on demand. When a newer release exists the button
+becomes **Update to …**; installing downloads the signed update and restarts.
+The macOS app, Windows installer, and AppImage update in place; `.deb` installs
+open the release page to download the new package. Local and development
+builds never check for updates.
 
 ## Public-release gates
 
@@ -16,8 +61,8 @@ publish the draft until every public-release gate below is enforced and passes.
 | --- | --- | --- |
 | macOS | Sign with a Developer ID Application certificate, notarize with Apple, staple the notarization ticket, and validate the DMG on a clean Mac | CI signs and notarizes the app, notarizes and staples the DMG, and verifies both; clean-Mac validation remains manual |
 | Windows | Authenticode-sign and RFC 3161-timestamp both `dbm.exe` and the NSIS installer with a publicly trusted code-signing identity | Not configured in CI |
-| Linux | Publish the `.deb` and AppImage with `SHA256SUMS` and GitHub build-provenance attestations | Packages are built; integrity metadata is not configured |
-| All platforms | Tie every artifact to the tagged commit, reject an incomplete draft, and test installation on clean supported systems | The updater manifest is checked for all three platforms; the complete publication gate is not yet enforced |
+| Linux | Publish the `.deb` and AppImage with `SHA256SUMS` and GitHub build-provenance attestations | CI publishes `SHA256SUMS` and attests every asset |
+| All platforms | Tie every artifact to the tagged commit, reject an incomplete draft, and test installation on clean supported systems | CI builds from the merged commit, validates the updater manifest for all three platforms, and deletes incomplete drafts; clean-machine testing remains manual |
 
 Tauri updater signatures, Apple signatures, Windows Authenticode signatures,
 and GitHub attestations solve different problems. One does not replace another:
@@ -30,10 +75,10 @@ and GitHub attestations solve different problems. One does not replace another:
 
 ## GitHub release environment
 
-Create a GitHub environment named `release`. Because DBM releases are triggered
-by tags, restrict the environment to tags matching `v*` rather than to the
-`main` branch alone. The release job must reference this environment before it
-can access signing credentials.
+Create a GitHub environment named `release`. Release builds run from the `main`
+branch, so the environment's deployment branch rule must allow `main` (a rule
+limited to `v*` tags blocks every release). The build job references this
+environment to access signing credentials.
 
 Keep private keys and passwords in environment secrets. Store non-secret Azure
 resource identifiers as environment variables. Do not commit credentials,
@@ -55,19 +100,17 @@ Losing the private key prevents every installed DBM release from authenticating
 future updates. Do not replace the public key after shipping unless an existing
 trusted release first implements a deliberate key rotation.
 
-Release tags must use `vMAJOR.MINOR.PATCH`. The workflow injects that version
-into the packaged app, creates and signs updater artifacts for macOS, Windows,
+The workflow injects the release version into the packaged app, creates and signs updater artifacts for macOS, Windows,
 and AppImage, and generates `latest.json`. A final job rejects a manifest that
 does not contain matching signed entries for all three platforms. Local builds
 use `tauri.local.conf.json` and omit updater artifacts unless an updater private
 key is explicitly supplied.
 
-The update endpoint uses GitHub's latest release URL. The workflow confirms
-every generated release remains a draft and never publishes automatically.
-Drafts are intentionally absent from the public updater endpoint. When DBM is
-ready to launch, publish a validated draft manually as a normal release rather
-than a prerelease. AppImage installations can update in place; `.deb`
-installations open the matching GitHub Release for a manual package update.
+The update endpoint uses GitHub's latest release URL. Drafts are absent from
+it, so installed apps only see a release once the publish job has validated
+the manifest and made it the latest release. AppImage installations can update
+in place; `.deb` installations open the matching GitHub Release for a manual
+package update.
 
 ## macOS signing and notarization
 
@@ -219,8 +262,8 @@ Windows artifacts as well:
    ./DBM_VERSION_amd64.AppImage
    ```
 
-The attestation job must grant `contents: read`, `id-token: write`, and
-`attestations: write` and use GitHub's official `actions/attest` action.
+The attestation job must grant `id-token: write` and `attestations: write` and
+use GitHub's official attestation action (`actions/attest-build-provenance`).
 
 An embedded GPG signature may also be added to the AppImage, but AppImage does
 not automatically verify it. Do not use an embedded AppImage signature as a
@@ -232,22 +275,15 @@ public key through an authenticated channel and configure users with a
 repository-specific keyring and `signed-by=`. Signing a standalone `.deb` is
 not a substitute for signing APT repository metadata.
 
-## Publishing checklist
+## Promoting to a public release
 
-1. Confirm the version tag points to the intended commit on `main`.
-2. Run the frontend and Rust quality gates.
-3. Let the workflow create a draft release; never upload locally produced
-   replacement binaries.
-4. Require successful macOS signing/notarization, Windows Authenticode signing,
-   and Linux integrity/provenance jobs.
-5. Confirm the draft contains the DMG, NSIS installer, `.deb`, AppImage,
-   updater signatures, a complete `latest.json`, and `SHA256SUMS`, and that
-   GitHub has a verifiable attestation for every artifact.
-6. Perform the clean-machine installation checks for macOS, Windows, and
-   Ubuntu.
-7. Leave the draft unpublished while DBM is pre-launch. After launch approval,
-   publish it manually only when every gate passes. If any platform fails,
-   delete or replace the incomplete draft before retrying.
+Automatic releases skip the checks below. Before recommending DBM to others:
+
+1. Configure Windows Authenticode signing in the build job.
+2. Perform the clean-machine installation checks for macOS, Windows, and
+   Ubuntu against a published release.
+3. Verify `SHA256SUMS` and `gh attestation verify` for each downloaded
+   artifact.
 
 ## References
 
