@@ -73,11 +73,12 @@ impl AppState {
         Fut: Future<Output = AppResult<T>>,
     {
         let session = self.session(profile_id).await?;
-        match operation(session).await {
+        match operation(session.clone()).await {
             Err(error) if error.is_connection_lost() => {
                 tracing::info!(%profile_id, "database connection lost; reconnecting");
-                let profile = self.profile(profile_id)?;
-                let session = self.connect(profile).await?;
+                // Reconnect with the session's own profile so a database the user
+                // switched to stays selected instead of reverting to the saved default.
+                let session = self.connect(session.profile().clone()).await?;
                 operation(session).await
             }
             result => result,

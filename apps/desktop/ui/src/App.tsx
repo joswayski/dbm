@@ -4,7 +4,8 @@ import { MySQL, PostgreSQL, SQLDialect, sql } from "@codemirror/lang-sql";
 
 import * as commands from "./commands";
 import { parseConnectionUrl } from "./connectionUrl";
-import { lineExecutionTarget, sqlExecutionTarget, type SqlExecutionTarget } from "./sqlSelection";
+import { filterSchemaNodes } from "./schemaFilter";
+import { lineExecutionTarget, requiresConfirmation, sqlExecutionTarget, type SqlExecutionTarget } from "./sqlSelection";
 import { useDbmStore } from "./store";
 import { TableView } from "./TableView";
 import type {
@@ -141,7 +142,8 @@ export default function App() {
   const [modalProfile, setModalProfile] = useState<ConnectionProfile | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState(() => {
-    const saved = Number(window.localStorage.getItem("dbm.sidebarWidth"));
+    const stored = window.localStorage.getItem("dbm.sidebarWidth");
+    const saved = stored === null ? Number.NaN : Number(stored);
     return Number.isFinite(saved) ? Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, saved)) : DEFAULT_SIDEBAR_WIDTH;
   });
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem("dbm.sidebarCollapsed") === "true");
@@ -150,6 +152,7 @@ export default function App() {
   const [renamingTabId, setRenamingTabId] = useState<string | null>(null);
   const [tabTitleDraft, setTabTitleDraft] = useState("");
   const [refreshingSchemaId, setRefreshingSchemaId] = useState<string | null>(null);
+  const [schemaFilters, setSchemaFilters] = useState<Record<string, string>>({});
   const [toast, setToast] = useState<{ kind: "info" | "success"; message: string } | null>(null);
 
   useEffect(() => {
@@ -422,16 +425,28 @@ export default function App() {
                         disabled={refreshingSchemaId === profileId}
                       >{refreshingSchemaId === profileId ? "Refreshing…" : "Refresh"}</button>
                     </div>
-                    <div className="schema-tree">
-                      {(schemas[profileId] ?? []).map((node) => (
-                        <SchemaBranch
-                          key={`${node.kind}-${node.name}`}
-                          node={node}
-                          onTable={(schema, table) => handleOpenTable(profileId, schema, table)}
-                          selectedTable={activeTable?.profileId === profileId ? activeTable : null}
-                        />
-                      ))}
-                    </div>
+                    <input
+                      className="text-input schema-filter"
+                      type="search"
+                      value={schemaFilters[profileId] ?? ""}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        setSchemaFilters((current) => ({ ...current, [profileId]: value }));
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === "Escape") setSchemaFilters((current) => ({ ...current, [profileId]: "" }));
+                      }}
+                      placeholder={summary.profile.engine === "redis" ? "Filter keys…" : "Filter tables…"}
+                      aria-label={summary.profile.engine === "redis" ? "Filter keys" : "Filter tables"}
+                      spellCheck={false}
+                      autoCapitalize="none"
+                    />
+                    <SchemaTree
+                      nodes={schemas[profileId] ?? []}
+                      filter={schemaFilters[profileId] ?? ""}
+                      onTable={(schema, table) => handleOpenTable(profileId, schema, table)}
+                      selectedTable={activeTable?.profileId === profileId ? activeTable : null}
+                    />
                   </div>
                 ) : null}
               </div>
@@ -479,6 +494,11 @@ export default function App() {
             <div
               className={`tab ${tab.id === activeTabId ? "active" : ""} ${tab.collapsed ? "collapsed" : ""}`}
               key={tab.id}
+              onAuxClick={(event) => {
+                if (event.button !== 1) return;
+                event.preventDefault();
+                handleCloseTab(tab.id);
+              }}
               style={{
                 "--tab-color": profiles.find((summary) => summary.profile.id === tab.profileId)?.profile.color ?? DEFAULT_CONNECTION_COLOR,
               } as CSSProperties}
@@ -772,18 +792,50 @@ function ConnectionItem({
   );
 }
 
+function SchemaTree({
+  nodes,
+  filter,
+  onTable,
+  selectedTable,
+}: {
+  nodes: SchemaNode[];
+  filter: string;
+  onTable: (schema: string, table: string) => void;
+  selectedTable: { schema: string; table: string } | null;
+}) {
+  const query = filter.trim().toLowerCase();
+  const visible = query ? filterSchemaNodes(nodes, query) : nodes;
+  return (
+    <div className="schema-tree">
+      {visible.map((node) => (
+        <SchemaBranch
+          key={`${node.kind}-${node.name}`}
+          node={node}
+          onTable={onTable}
+          selectedTable={selectedTable}
+          forceOpen={Boolean(query)}
+        />
+      ))}
+      {query && visible.length === 0 ? <div className="schema-empty">No matches for “{filter.trim()}”.</div> : null}
+    </div>
+  );
+}
+
 function SchemaBranch({
   node,
   onTable,
   selectedTable,
   depth = 0,
+  forceOpen = false,
 }: {
   node: SchemaNode;
   onTable: (schema: string, table: string) => void;
   selectedTable: { schema: string; table: string } | null;
   depth?: number;
+  forceOpen?: boolean;
 }) {
-  const [open, setOpen] = useState(depth < 1);
+  const [manuallyOpen, setOpen] = useState(depth < 1);
+  const open = forceOpen || manuallyOpen;
   const isTable = Boolean(node.table && node.schema);
   const selected = isTable &&
     selectedTable?.schema === node.schema &&
@@ -809,6 +861,7 @@ function SchemaBranch({
           onTable={onTable}
           selectedTable={selectedTable}
           depth={depth + 1}
+          forceOpen={forceOpen}
         />
       )) : null}
     </div>
@@ -899,7 +952,8 @@ export function QueryView({
   const [executedSql, setExecutedSql] = useState<string | null>(null);
   const [executionRevision, setExecutionRevision] = useState(0);
   const [history, setHistory] = useState<QueryHistoryEntry[]>([]);
-  const [running, setRunning] = useState(false);
+  const [runMode, setRunMode] = useState<"run" | "refresh" | null>(null);
+  const running = runMode !== null;
   const [error, setError] = useState<string | null>(null);
   const [embeddedPendingCount, setEmbeddedPendingCount] = useState(0);
   const [executionTarget, setExecutionTarget] = useState<SqlExecutionTarget | null>(() => (
@@ -934,7 +988,7 @@ export function QueryView({
     return () => window.clearTimeout(timer);
   }, [error]);
 
-  const run = useCallback(async (statement?: string) => {
+  const run = useCallback(async (statement?: string, mode: "run" | "refresh" = "run") => {
     if (running) return;
     if (embeddedPendingCount > 0) {
       setError("Save or discard the pending table changes before running another query.");
@@ -943,7 +997,7 @@ export function QueryView({
     const executableSql = (statement ?? sqlText).trim();
     if (!executableSql) return;
     if (requiresConfirmation(executableSql, engine) && !window.confirm("This query may change or remove many rows. Run it anyway?")) return;
-    setRunning(true);
+    setRunMode(mode);
     setError(null);
     try {
       const next = await commands.runQuery({ profileId, sql: executableSql, maxRows: 10_000 });
@@ -957,7 +1011,7 @@ export function QueryView({
         QUERY_HISTORY_UPDATED_EVENT,
         { detail: { profileId, database } },
       ));
-      setRunning(false);
+      setRunMode(null);
     }
   }, [database, embeddedPendingCount, engine, profileId, running, sqlText]);
 
@@ -1009,22 +1063,16 @@ export function QueryView({
       <div className="view-toolbar">
         <div><span className="eyebrow">{engine === "redis" ? "REDIS WORKBENCH" : "SQL WORKBENCH"}</span><h2>{title}</h2></div>
         <div className="toolbar-actions">
-          {running ? (
-            <button
-              className="secondary-button"
-              onClick={() => void commands.cancelQuery().catch((reason: unknown) => setError(errorMessage(reason)))}
-            >Cancel</button>
-          ) : null}
           <button
             className="secondary-button"
-            onClick={() => void run(executedSql ?? undefined)}
+            onClick={() => void run(executedSql ?? undefined, "refresh")}
             disabled={running || !executedSql || embeddedPendingCount > 0}
             title={executedSql
               ? "Re-run the last executed statement for fresh results"
               : "Run a statement first to enable refresh"}
-          >{running && executedSql ? "Refreshing…" : "Refresh"}</button>
+          >{runMode === "refresh" ? "Refreshing…" : "Refresh"}</button>
           <button className="primary-button" onClick={runFromEditor} disabled={running || !executionTarget}>
-            {running ? "Running…" : runLabel}<kbd>{runShortcutGlyph()}</kbd>
+            {runMode === "run" ? "Running…" : runLabel}<kbd>{runShortcutGlyph()}</kbd>
           </button>
         </div>
       </div>
@@ -1076,7 +1124,7 @@ export function QueryView({
 
 function ResultTable({ columns, rows }: { columns: string[]; rows: JsonValue[][] }) {
   if (columns.length === 0) return <div className="empty-state">Statement completed without a result set.</div>;
-  return <div className="result-grid-wrap"><table className="data-grid result-grid"><thead><tr>{columns.map((column) => <th key={column}>{column}</th>)}</tr></thead><tbody>{rows.map((row, rowIndex) => <tr key={rowIndex}>{columns.map((column, columnIndex) => <td key={`${column}-${columnIndex}`}><span className={row[columnIndex] === null ? "null-value" : "cell-value"}>{commands.toDisplayValue(row[columnIndex] ?? null)}</span></td>)}</tr>)}</tbody></table></div>;
+  return <div className="result-grid-wrap"><table className="data-grid result-grid"><thead><tr>{columns.map((column, columnIndex) => <th key={columnIndex}>{column}</th>)}</tr></thead><tbody>{rows.map((row, rowIndex) => <tr key={rowIndex}>{columns.map((_column, columnIndex) => <td key={columnIndex}><span className={row[columnIndex] === null ? "null-value" : "cell-value"}>{commands.toDisplayValue(row[columnIndex] ?? null)}</span></td>)}</tr>)}</tbody></table></div>;
 }
 
 function ProfileModal({
@@ -1164,7 +1212,17 @@ function ProfileModal({
           <div><span className="eyebrow">{ENGINE_PRESETS[form.engine].label.toUpperCase()}</span><h2 id="connection-modal-title">{profile ? "Edit connection" : "New connection"}</h2></div>
           <button className="icon-button" onClick={onClose} aria-label="Close">×</button>
         </div>
-        <div className="form-grid">
+        <div
+          className="form-grid"
+          onKeyDown={(event) => {
+            // Enter in a text field saves, like submitting a form.
+            if (event.key !== "Enter" || event.defaultPrevented) return;
+            const target = event.target;
+            if (!(target instanceof HTMLInputElement) || target.type === "checkbox" || target.type === "color") return;
+            event.preventDefault();
+            if (!testing && !saving) void save();
+          }}
+        >
           <div className="form-field full">
             <span>Database engine</span>
             <div className="engine-picker" role="group" aria-label="Database engine">
@@ -1189,6 +1247,11 @@ function ProfileModal({
                 type="password"
                 value={connectionUrl}
                 onChange={(event) => setConnectionUrl(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter") return;
+                  event.preventDefault();
+                  if (connectionUrl.trim()) importConnectionUrl(connectionUrl);
+                }}
                 onPaste={(event) => {
                   const pasted = event.clipboardData.getData("text");
                   event.preventDefault();
@@ -1361,13 +1424,4 @@ function errorMessage(reason: unknown): string {
     return "DBM could not read this connection's saved password because access to the operating system credential manager was not approved. Approve the system prompt, then select the connection again.";
   }
   return message;
-}
-
-function requiresConfirmation(sqlText: string, engine: DatabaseEngine = "postgres"): boolean {
-  if (engine === "redis") {
-    return /^\s*(flushall|flushdb)\b/i.test(sqlText);
-  }
-  const normalized = sqlText.replace(/--[^\n]*/g, " ").replace(/\/\*[\s\S]*?\*\//g, " ");
-  return /\b(drop|truncate)\b/i.test(normalized) ||
-    /\b(delete|update)\b/i.test(normalized) && !/\bwhere\b/i.test(normalized);
 }

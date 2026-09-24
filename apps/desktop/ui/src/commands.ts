@@ -281,10 +281,6 @@ export function runQuery(request: QueryRequest): Promise<QueryResponse> {
   });
 }
 
-export function cancelQuery(): Promise<void> {
-  return call("cancel_query", {}, () => undefined);
-}
-
 export function listQueryHistory(profileId: string, database: string, limit = 100): Promise<QueryHistoryEntry[]> {
   return call(
     "list_query_history",

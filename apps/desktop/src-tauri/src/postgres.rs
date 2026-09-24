@@ -1,14 +1,15 @@
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::error::{AppError, AppResult};
 use crate::models::{
     ConnectionProfile, DatabaseRef, FilterCondition, FilterOperator, MutationBatch, MutationResult,
     OrderSpec, QueryColumn, QueryResponse, RowMutation, SchemaNode, TableColumn, TableMetadata,
-    TablePage, TablePageRequest, TlsMode,
+    TablePage, TablePageRequest, TlsMode, escape_like, json_integer,
 };
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
 use serde_json::Value;
-use tokio_postgres::{Client, Config, NoTls, Row, types::Type};
+use tokio_postgres::types::{FromSql, Type};
+use tokio_postgres::{Client, Config, NoTls, Row, SimpleQueryMessage};
 
 const MAX_PAGE_SIZE: u32 = 1_000;
 const DEFAULT_QUERY_ROWS: u32 = 10_000;
@@ -27,7 +28,21 @@ impl PgSession {
             ));
         }
         let client = connect_client(&profile, password.as_deref()).await?;
+        if profile.read_only {
+            // Let the server reject writes the statement-keyword check cannot see,
+            // such as data-modifying CTEs, COPY, or functions with side effects.
+            if let Err(error) = client
+                .batch_execute("SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY")
+                .await
+            {
+                tracing::warn!(%error, "could not make the read-only session read-only on the server");
+            }
+        }
         Ok(Self { profile, client })
+    }
+
+    pub fn profile(&self) -> &ConnectionProfile {
+        &self.profile
     }
 
     pub async fn list_databases(&self) -> AppResult<Vec<DatabaseRef>> {
@@ -155,12 +170,27 @@ impl PgSession {
             .into_iter()
             .map(|row| row.try_get(0))
             .collect::<Result<Vec<String>, _>>()?;
+        // Views and foreign tables have no system columns, so selecting xmin from
+        // them fails. Only heap-backed relations get optimistic xmin checks.
+        let relkind: Option<i8> = self
+            .client
+            .query_opt(
+                "SELECT c.relkind
+                 FROM pg_class c
+                 JOIN pg_namespace n ON n.oid = c.relnamespace
+                 WHERE n.nspname = $1 AND c.relname = $2",
+                &[&schema, &table],
+            )
+            .await?
+            .map(|row| row.try_get(0))
+            .transpose()?;
+        let has_xmin = relkind.is_some_and(|kind| matches!(kind as u8, b'r' | b'p' | b'm'));
         Ok(TableMetadata {
             schema: schema.to_owned(),
             table: table.to_owned(),
             columns,
             primary_key,
-            has_xmin: true,
+            has_xmin,
         })
     }
 
@@ -168,22 +198,56 @@ impl PgSession {
         let metadata = self.table_metadata(&request.schema, &request.table).await?;
         let limit = request.limit.clamp(1, MAX_PAGE_SIZE);
         let offset = request.offset;
-        let selected_columns = metadata
-            .columns
-            .iter()
-            .map(|column| quote_identifier(&column.name))
-            .chain(std::iter::once("xmin::text AS \"__dbm_xmin\"".to_owned()))
-            .collect::<Vec<_>>();
         let table_name = qualified_name(&request.schema, &request.table)?;
         let predicate = build_predicate(&metadata, &request.filters)?;
         let order_by = build_order_by(&metadata, request.order_by.as_ref())?;
-        let sql = format!(
-            "SELECT {} FROM {table_name}{predicate}{order_by} LIMIT {} OFFSET {}",
-            selected_columns.join(", "),
-            limit + 1,
-            offset
-        );
-        let rows = self.client.query(&sql, &[]).await?;
+        let page_sql = |columns: Vec<String>| {
+            let mut columns = columns;
+            if metadata.has_xmin {
+                columns.push("xmin::text AS \"__dbm_xmin\"".to_owned());
+            }
+            format!(
+                "SELECT {} FROM {table_name}{predicate}{order_by} LIMIT {} OFFSET {}",
+                columns.join(", "),
+                limit + 1,
+                offset
+            )
+        };
+        let quoted_columns = metadata
+            .columns
+            .iter()
+            .map(|column| quote_identifier(&column.name))
+            .collect::<Vec<_>>();
+        let statement = self
+            .client
+            .prepare(&page_sql(quoted_columns.clone()))
+            .await?;
+        let column_types = statement
+            .columns()
+            .iter()
+            .map(|column| column.type_().clone())
+            .collect::<Vec<_>>();
+        let rows = if column_types.iter().all(decodes_natively) {
+            self.client.query(&statement, &[]).await?
+        } else {
+            // Types without a native decoder (numeric, uuid, enums, arrays, ...) are
+            // read in their text form rather than showing up as NULL.
+            // The alias must differ from the column name: ORDER BY resolves a bare
+            // name to an output column first and would otherwise sort the text.
+            let columns = quoted_columns
+                .into_iter()
+                .zip(&column_types)
+                .enumerate()
+                .map(|(index, (column, ty))| {
+                    if decodes_natively(ty) {
+                        column
+                    } else {
+                        format!("{column}::text AS \"__dbm_text_{index}\"")
+                    }
+                })
+                .collect();
+            self.client.query(&page_sql(columns), &[]).await?
+        };
         let has_more = rows.len() > usize::try_from(limit).unwrap_or(usize::MAX);
         let rows = rows
             .into_iter()
@@ -209,7 +273,7 @@ impl PgSession {
             .columns
             .iter()
             .map(|column| column.name.clone())
-            .chain(std::iter::once("__dbm_xmin".into()))
+            .chain(metadata.has_xmin.then(|| "__dbm_xmin".into()))
             .collect();
         Ok(TablePage {
             metadata,
@@ -231,66 +295,104 @@ impl PgSession {
             return Err(AppError::Unsupported("profile is read-only".into()));
         }
         let started = Instant::now();
-        let max_rows = max_rows
-            .unwrap_or(DEFAULT_QUERY_ROWS)
-            .clamp(1, DEFAULT_QUERY_ROWS);
-        let keyword = sql
-            .split_whitespace()
-            .next()
-            .unwrap_or_default()
-            .to_ascii_lowercase();
-        let normalized_sql = sql.to_ascii_lowercase();
-        let row_query = matches!(
-            keyword.as_str(),
-            "select" | "with" | "show" | "values" | "explain" | "describe" | "desc"
-        ) || normalized_sql.contains(" returning ");
-        if row_query {
-            let rows = self.client.query(sql, &[]).await?;
-            let truncated = rows.len() > usize::try_from(max_rows).unwrap_or(usize::MAX);
-            let columns = rows
-                .first()
-                .map(|row| {
-                    row.columns()
+        let max_rows = usize::try_from(
+            max_rows
+                .unwrap_or(DEFAULT_QUERY_ROWS)
+                .clamp(1, DEFAULT_QUERY_ROWS),
+        )
+        .unwrap_or(usize::MAX);
+        // Preparing a row-returning statement reveals its column types so text
+        // results can be typed. Scripts with several statements cannot be
+        // prepared; their results stay as text.
+        let column_types = if returns_rows(sql) {
+            match self.client.prepare(sql).await {
+                Ok(statement) => Some(
+                    statement
+                        .columns()
                         .iter()
-                        .map(|column| QueryColumn {
-                            name: column.name().to_owned(),
-                            data_type: column.type_().name().to_owned(),
-                        })
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
-            let rows = rows
-                .into_iter()
-                .take(usize::try_from(max_rows).unwrap_or_default())
-                .map(|row| {
-                    (0..row.len())
-                        .map(|index| value_from_row(&row, index))
-                        .collect::<Vec<_>>()
-                })
-                .collect::<Vec<_>>();
+                        .map(|column| column.type_().clone())
+                        .collect::<Vec<_>>(),
+                ),
+                Err(error) if is_multiple_commands_error(&error) => None,
+                Err(error) => return Err(error.into()),
+            }
+        } else {
+            None
+        };
+        // The simple query protocol returns every value as text, so any column
+        // type can be shown, and multi-statement scripts run in one round trip.
+        let messages = self.client.simple_query(sql).await?;
+        let mut result = SimpleResult::default();
+        let mut current: Option<SimpleResult> = None;
+        for message in messages {
+            match message {
+                SimpleQueryMessage::RowDescription(description) => {
+                    current = Some(SimpleResult {
+                        columns: Some(
+                            description
+                                .iter()
+                                .map(|column| column.name().to_owned())
+                                .collect(),
+                        ),
+                        ..SimpleResult::default()
+                    });
+                }
+                SimpleQueryMessage::Row(row) => {
+                    let current = current.get_or_insert_with(SimpleResult::default);
+                    if current.rows.len() < max_rows {
+                        current.rows.push(
+                            (0..row.len())
+                                .map(|index| {
+                                    let ty = column_types
+                                        .as_ref()
+                                        .filter(|types| types.len() == row.len())
+                                        .map(|types| &types[index]);
+                                    value_from_text(row.get(index), ty)
+                                })
+                                .collect(),
+                        );
+                    } else {
+                        current.truncated = true;
+                    }
+                }
+                SimpleQueryMessage::CommandComplete(count) => {
+                    let mut finished = current.take().unwrap_or_default();
+                    finished.command_count = Some(count);
+                    result = finished;
+                }
+                _ => {}
+            }
+        }
+        let duration_ms = started.elapsed().as_millis();
+        let Some(column_names) = result.columns else {
             return Ok(QueryResponse {
-                columns,
-                row_count: rows.len(),
-                rows,
-                affected_rows: None,
-                duration_ms: started.elapsed().as_millis(),
-                truncated,
+                columns: Vec::new(),
+                rows: Vec::new(),
+                row_count: 0,
+                affected_rows: result.command_count,
+                duration_ms,
+                truncated: false,
                 notices: Vec::new(),
             });
-        }
-        let affected_rows = if sql.contains(';') {
-            self.client.batch_execute(sql).await?;
-            None
-        } else {
-            Some(self.client.execute(sql, &[]).await?)
         };
+        let columns = column_names
+            .into_iter()
+            .enumerate()
+            .map(|(index, name)| QueryColumn {
+                name,
+                data_type: column_types
+                    .as_ref()
+                    .and_then(|types| types.get(index))
+                    .map_or_else(|| "text".to_owned(), |ty| ty.name().to_owned()),
+            })
+            .collect();
         Ok(QueryResponse {
-            columns: Vec::new(),
-            rows: Vec::new(),
-            row_count: 0,
-            affected_rows,
-            duration_ms: started.elapsed().as_millis(),
-            truncated: false,
+            columns,
+            row_count: result.rows.len(),
+            rows: result.rows,
+            affected_rows: None,
+            duration_ms,
+            truncated: result.truncated,
             notices: Vec::new(),
         })
     }
@@ -363,15 +465,88 @@ impl PgSession {
     }
 }
 
+#[derive(Default)]
+struct SimpleResult {
+    columns: Option<Vec<String>>,
+    rows: Vec<Vec<Value>>,
+    truncated: bool,
+    command_count: Option<u64>,
+}
+
+fn returns_rows(sql: &str) -> bool {
+    let keyword = sql
+        .split_whitespace()
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    matches!(
+        keyword.as_str(),
+        "select" | "with" | "show" | "values" | "explain" | "table"
+    ) || sql.to_ascii_lowercase().contains("returning")
+}
+
+fn is_multiple_commands_error(error: &tokio_postgres::Error) -> bool {
+    error
+        .as_db_error()
+        .is_some_and(|error| error.message().contains("multiple commands"))
+}
+
+/// Types `value_from_row` decodes from the binary protocol. Everything else is
+/// selected as text.
+fn decodes_natively(ty: &Type) -> bool {
+    [
+        Type::BOOL,
+        Type::INT2,
+        Type::INT4,
+        Type::INT8,
+        Type::OID,
+        Type::FLOAT4,
+        Type::FLOAT8,
+        Type::JSON,
+        Type::JSONB,
+        Type::DATE,
+        Type::TIME,
+        Type::TIMESTAMP,
+        Type::TIMESTAMPTZ,
+    ]
+    .contains(ty)
+        || <String as FromSql>::accepts(ty)
+}
+
+fn value_from_text(text: Option<&str>, ty: Option<&Type>) -> Value {
+    let Some(text) = text else {
+        return Value::Null;
+    };
+    let text_value = || Value::String(text.to_owned());
+    match ty {
+        Some(ty) if *ty == Type::BOOL => Value::Bool(text == "t"),
+        Some(ty) if [Type::INT2, Type::INT4, Type::INT8, Type::OID].contains(ty) => text
+            .parse::<i64>()
+            .map_or_else(|_| text_value(), json_integer),
+        Some(ty) if [Type::FLOAT4, Type::FLOAT8].contains(ty) => text
+            .parse::<f64>()
+            .ok()
+            .and_then(serde_json::Number::from_f64)
+            .map_or_else(text_value, Value::Number),
+        Some(ty) if [Type::JSON, Type::JSONB].contains(ty) => {
+            serde_json::from_str(text).unwrap_or_else(|_| text_value())
+        }
+        _ => text_value(),
+    }
+}
+
 async fn connect_client(profile: &ConnectionProfile, password: Option<&str>) -> AppResult<Client> {
     if matches!(profile.tls_mode, TlsMode::Disabled) {
         return connect_without_tls(profile, password).await;
     }
     let mut connector = native_tls::TlsConnector::builder();
     if let Some(path) = profile.ca_cert_path.as_deref() {
-        let pem = std::fs::read(path).map_err(|error| AppError::Credential(error.to_string()))?;
-        let certificate = native_tls::Certificate::from_pem(&pem)
-            .map_err(|error| AppError::Credential(error.to_string()))?;
+        let pem = std::fs::read(path).map_err(|error| {
+            AppError::InvalidInput(format!("could not read CA certificate {path}: {error}"))
+        })?;
+        let certificate = native_tls::Certificate::from_pem(&pem).map_err(|error| {
+            AppError::InvalidInput(format!("could not parse CA certificate {path}: {error}"))
+        })?;
         connector.add_root_certificate(certificate);
     }
     let connector = connector
@@ -421,7 +596,11 @@ fn base_config(profile: &ConnectionProfile, password: Option<&str>) -> Config {
         .host(&profile.host)
         .port(profile.port)
         .user(&profile.username)
-        .dbname(&profile.default_database);
+        .dbname(&profile.default_database)
+        .application_name("DBM")
+        .connect_timeout(Duration::from_secs(10))
+        .keepalives(true)
+        .keepalives_idle(Duration::from_secs(60));
     if let Some(password) = password {
         config.password(password);
     }
@@ -491,16 +670,16 @@ fn build_predicate(metadata: &TableMetadata, filters: &[FilterCondition]) -> App
                 format!("{column} IS DISTINCT FROM {}", quote_literal(value))
             }
             FilterOperator::Contains => format!(
-                "{text_column} ILIKE {}",
-                quote_literal(&format!("%{value}%"))
+                "{text_column} ILIKE {} ESCAPE '!'",
+                quote_literal(&format!("%{}%", escape_like(value)))
             ),
             FilterOperator::StartsWith => format!(
-                "{text_column} ILIKE {}",
-                quote_literal(&format!("{value}%"))
+                "{text_column} ILIKE {} ESCAPE '!'",
+                quote_literal(&format!("{}%", escape_like(value)))
             ),
             FilterOperator::EndsWith => format!(
-                "{text_column} ILIKE {}",
-                quote_literal(&format!("%{value}"))
+                "{text_column} ILIKE {} ESCAPE '!'",
+                quote_literal(&format!("%{}", escape_like(value)))
             ),
             FilterOperator::GreaterThan => format!("{column} > {}", quote_literal(value)),
             FilterOperator::GreaterThanOrEqual => {
@@ -632,7 +811,7 @@ fn value_from_row(row: &Row, index: usize) -> Value {
     if *ty == Type::INT8 {
         return row
             .try_get::<_, i64>(index)
-            .map(|value| Value::Number(serde_json::Number::from(value)))
+            .map(json_integer)
             .unwrap_or(Value::Null);
     }
     if *ty == Type::OID {
@@ -817,5 +996,240 @@ mod tests {
             "ALTER TABLE users ADD COLUMN note text"
         ));
         assert!(!is_mutating_statement("SELECT * FROM users"));
+    }
+
+    #[test]
+    fn text_results_keep_their_types() {
+        assert_eq!(
+            value_from_text(Some("t"), Some(&Type::BOOL)),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            value_from_text(Some("42"), Some(&Type::INT4)),
+            Value::from(42)
+        );
+        assert_eq!(
+            value_from_text(Some("9223372036854775807"), Some(&Type::INT8)),
+            Value::String("9223372036854775807".into())
+        );
+        assert_eq!(
+            value_from_text(Some("{\"a\":1}"), Some(&Type::JSONB)),
+            serde_json::json!({ "a": 1 })
+        );
+        assert_eq!(
+            value_from_text(Some("12.50"), Some(&Type::NUMERIC)),
+            Value::String("12.50".into())
+        );
+        assert_eq!(value_from_text(None, Some(&Type::TEXT)), Value::Null);
+        assert!(decodes_natively(&Type::VARCHAR));
+        assert!(!decodes_natively(&Type::UUID));
+        assert!(!decodes_natively(&Type::NUMERIC));
+    }
+
+    /// Live checks against a real server. Set `DBM_TEST_POSTGRES_PORT` to the port
+    /// of a local PostgreSQL that trusts the `postgres` user on 127.0.0.1.
+    mod live {
+        use super::*;
+        use crate::models::{DatabaseEngine, FilterCondition, OrderSpec};
+        use uuid::Uuid;
+
+        fn profile(read_only: bool) -> Option<ConnectionProfile> {
+            let port = std::env::var("DBM_TEST_POSTGRES_PORT").ok()?.parse().ok()?;
+            let now = Utc::now();
+            Some(ConnectionProfile {
+                id: Uuid::new_v4(),
+                name: "test-postgres".into(),
+                color: None,
+                engine: DatabaseEngine::Postgres,
+                host: "127.0.0.1".into(),
+                port,
+                username: "postgres".into(),
+                default_database: "postgres".into(),
+                tls_mode: TlsMode::Disabled,
+                ca_cert_path: None,
+                ssh: None,
+                read_only,
+                created_at: now,
+                updated_at: now,
+            })
+        }
+
+        fn page_request(
+            schema: &str,
+            table: &str,
+            filters: Vec<FilterCondition>,
+        ) -> TablePageRequest {
+            TablePageRequest {
+                profile_id: Uuid::nil(),
+                schema: schema.into(),
+                table: table.into(),
+                offset: 0,
+                limit: 50,
+                filters,
+                order_by: Some(OrderSpec {
+                    column: "price".into(),
+                    descending: true,
+                }),
+                include_total: Some(true),
+            }
+        }
+
+        #[tokio::test]
+        async fn decodes_every_column_type_and_edits_by_uuid() {
+            let Some(profile) = profile(false) else {
+                return;
+            };
+            let session = PgSession::connect(profile, None).await.expect("connect");
+            let schema = format!("dbm_test_{}", Uuid::new_v4().simple());
+            session
+                .client
+                .batch_execute(&format!(
+                    "CREATE SCHEMA {schema};
+                     CREATE TYPE {schema}.mood AS ENUM ('happy', 'sad');
+                     CREATE TABLE {schema}.items (
+                         id uuid PRIMARY KEY,
+                         label text NOT NULL,
+                         price numeric(10, 2),
+                         mood {schema}.mood,
+                         tags int[],
+                         big bigint,
+                         active boolean
+                     );
+                     INSERT INTO {schema}.items VALUES
+                         ('00000000-0000-0000-0000-000000000001', '100% cotton', 12.50, 'happy', '{{1,2}}', 9007199254740993, true),
+                         ('00000000-0000-0000-0000-000000000002', '100 percent', 3.00, 'sad', NULL, 7, false);
+                     CREATE VIEW {schema}.item_labels AS SELECT label, price FROM {schema}.items;"
+                ))
+                .await
+                .expect("fixture");
+
+            let page = session
+                .table_page(&page_request(&schema, "items", Vec::new()))
+                .await
+                .expect("table page");
+            assert!(page.metadata.has_xmin);
+            assert_eq!(page.total_rows, Some(2));
+            let first = &page.rows[0];
+            assert_eq!(
+                first[0],
+                Value::String("00000000-0000-0000-0000-000000000001".into())
+            );
+            assert_eq!(first[2], Value::String("12.50".into()));
+            assert_eq!(first[3], Value::String("happy".into()));
+            assert_eq!(first[4], Value::String("{1,2}".into()));
+            assert_eq!(first[5], Value::String("9007199254740993".into()));
+            assert_eq!(first[6], Value::Bool(true));
+
+            let view = session
+                .table_page(&page_request(&schema, "item_labels", Vec::new()))
+                .await
+                .expect("views load without xmin");
+            assert!(!view.metadata.has_xmin);
+            assert_eq!(view.columns, vec!["label".to_owned(), "price".to_owned()]);
+
+            let filtered = session
+                .table_page(&page_request(
+                    &schema,
+                    "items",
+                    vec![FilterCondition {
+                        column: "label".into(),
+                        operator: FilterOperator::Contains,
+                        value: Some("100%".into()),
+                    }],
+                ))
+                .await
+                .expect("filtered page");
+            assert_eq!(filtered.total_rows, Some(1), "% is matched literally");
+
+            let xmin = first[7].as_str().map(ToOwned::to_owned);
+            let mut changes = first[..7].to_vec();
+            changes[2] = Value::String("13.75".into());
+            let result = session
+                .apply_mutations(&MutationBatch {
+                    profile_id: Uuid::nil(),
+                    schema: schema.clone(),
+                    table: "items".into(),
+                    mutations: vec![RowMutation {
+                        original: first[..7].to_vec(),
+                        changes,
+                        primary_key: vec![first[0].clone()],
+                        xmin,
+                        deleted: false,
+                    }],
+                })
+                .await
+                .expect("mutation");
+            assert_eq!(result.applied, 1);
+
+            let sum = session
+                .run_query(&format!("SELECT sum(price) AS total, count(*) AS n, bool_and(active) AS all_active FROM {schema}.items"), None)
+                .await
+                .expect("aggregate");
+            assert_eq!(
+                sum.rows,
+                vec![vec![
+                    Value::String("16.75".into()),
+                    Value::from(2),
+                    Value::Bool(false)
+                ]]
+            );
+            assert_eq!(sum.columns[0].data_type, "numeric");
+
+            let script = session
+                .run_query(
+                    &format!("SET search_path = {schema}; SELECT label FROM items WHERE label = 'a;b' OR price > 10"),
+                    None,
+                )
+                .await
+                .expect("script");
+            assert_eq!(script.rows, vec![vec![Value::String("100% cotton".into())]]);
+
+            let update = session
+                .run_query(
+                    &format!("UPDATE {schema}.items SET label = 'x;y' WHERE big = 7"),
+                    None,
+                )
+                .await
+                .expect("update with a semicolon in a literal");
+            assert_eq!(update.affected_rows, Some(1));
+
+            session
+                .client
+                .batch_execute(&format!("DROP SCHEMA {schema} CASCADE"))
+                .await
+                .expect("cleanup");
+        }
+
+        #[tokio::test]
+        async fn read_only_sessions_reject_hidden_writes() {
+            let (Some(writer), Some(reader)) = (profile(false), profile(true)) else {
+                return;
+            };
+            let writer = PgSession::connect(writer, None).await.expect("connect");
+            let table = format!("dbm_test_{}", Uuid::new_v4().simple());
+            writer
+                .client
+                .batch_execute(&format!(
+                    "CREATE TABLE {table} (id int PRIMARY KEY); INSERT INTO {table} VALUES (1)"
+                ))
+                .await
+                .expect("fixture");
+            let reader = PgSession::connect(reader, None)
+                .await
+                .expect("connect read-only");
+            let error = reader
+                .run_query(
+                    &format!("WITH gone AS (DELETE FROM {table} RETURNING id) SELECT * FROM gone"),
+                    None,
+                )
+                .await
+                .expect_err("read-only transaction rejects the CTE delete");
+            assert!(error.to_string().contains("read-only"), "{error}");
+            writer
+                .client
+                .batch_execute(&format!("DROP TABLE {table}"))
+                .await
+                .expect("cleanup");
+        }
     }
 }
