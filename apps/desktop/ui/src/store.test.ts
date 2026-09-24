@@ -48,6 +48,69 @@ describe("DBM store", () => {
     expect(state.workspaces[profile.id]).toBeUndefined();
   });
 
+  it("closes a profile's table tabs when its server or database changes", async () => {
+    const profile = await commands.saveProfile({
+      name: "Moved server",
+      color: "#38bdf8",
+      engine: "postgres",
+      host: "localhost",
+      port: 5432,
+      username: "postgres",
+      defaultDatabase: "postgres",
+      tlsMode: "disabled",
+      caCertPath: null,
+      ssh: null,
+      readOnly: false,
+    });
+    const tableTab = { id: "table-tab", title: "public.users", kind: "table" as const, profileId: profile.id, schema: "public", table: "users" };
+    const queryTab = { id: "query-tab", title: "Query 1", kind: "query" as const, profileId: profile.id, sql: "SELECT 1" };
+    useDbmStore.setState({
+      profiles: [{ profile }],
+      tabs: [tableTab, queryTab],
+      activeTabId: tableTab.id,
+      activeProfileId: profile.id,
+    });
+
+    await useDbmStore.getState().saveProfile({ ...profile, host: "db.internal" });
+
+    const state = useDbmStore.getState();
+    expect(state.tabs).toEqual([queryTab]);
+    expect(state.activeTabId).toBeNull();
+  });
+
+  it("closes table tabs from the previous database when switching databases", async () => {
+    const profile = await commands.saveProfile({
+      name: "Switch databases",
+      color: "#38bdf8",
+      engine: "postgres",
+      host: "localhost",
+      port: 5432,
+      username: "postgres",
+      defaultDatabase: "postgres",
+      tlsMode: "disabled",
+      caCertPath: null,
+      ssh: null,
+      readOnly: false,
+    });
+    const tableTab = { id: "table-tab", title: "public.users", kind: "table" as const, profileId: profile.id, schema: "public", table: "users" };
+    const queryTab = { id: "query-tab", title: "Query 1", kind: "query" as const, profileId: profile.id, sql: "SELECT 1" };
+    const otherTab = { id: "other-tab", title: "public.orders", kind: "table" as const, profileId: "other-profile", schema: "public", table: "orders" };
+    useDbmStore.setState({
+      profiles: [{ profile }],
+      tabs: [tableTab, queryTab, otherTab],
+      activeTabId: tableTab.id,
+      activeProfileId: profile.id,
+      workspaces: { [profile.id]: { profile, databases: [] } },
+    });
+
+    await useDbmStore.getState().switchDatabase(profile.id, "analytics");
+
+    const state = useDbmStore.getState();
+    expect(state.tabs.map((tab) => tab.id)).toEqual([queryTab.id, otherTab.id]);
+    expect(state.activeTabId).toBe(queryTab.id);
+    expect(state.workspaces[profile.id].profile.defaultDatabase).toBe("analytics");
+  });
+
   it("selects a newly saved profile and clears the previous profile's active tab", async () => {
     useDbmStore.setState({
       activeProfileId: "previous-profile",

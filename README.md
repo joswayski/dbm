@@ -21,6 +21,23 @@ npm run check
 npm run dev
 ```
 
+The Redis tests start a throwaway `redis-server` when one is installed and skip
+otherwise. The PostgreSQL and MySQL tests that need a live server run only when
+`DBM_TEST_POSTGRES_PORT` (a local server trusting `postgres` on 127.0.0.1) or
+`DBM_TEST_MYSQL_PORT` (a local MySQL or MariaDB allowing passwordless `root` on
+127.0.0.1) is set.
+
+### Amp orbs
+
+Amp orbs run [`.agents/setup`](.agents/setup) to prepare a fresh machine: it installs Tauri's
+Linux build dependencies, `redis-server` (the live Redis tests skip themselves without it),
+Node.js 24 with npm 11, the Rust toolchain pinned in `rust-toolchain.toml`, and the locked npm and
+Cargo dependencies. [`.agents/resume`](.agents/resume) only checks that the environment is still
+intact when an orb wakes.
+
+The Vite browser preview is declared in [`.amp/services.yaml`](.amp/services.yaml). Inside an orb,
+`amp orb services ensure` starts it supervised and prints its portal URL.
+
 ## Build and install
 
 `npm run build` creates a native build for the operating system where the
@@ -82,12 +99,14 @@ Passwords are stored in the operating system credential store when available.
 
 ## What is implemented
 
-- PostgreSQL, MySQL, and Redis direct connections with disabled, preferred, or required TLS.
+- PostgreSQL, MySQL, and Redis direct connections with disabled, preferred, or
+  required TLS. Connection attempts give up after 20 seconds.
 - Local connection profiles and query history in an application SQLite database.
 - Passwords through the macOS Keychain, Windows Credential Manager, or Linux
   secret service via `keyring`.
 - Signed in-app updates from published GitHub Releases.
-- Database list, schemas, tables/views, configurable previews up to 200 rows,
+- Database list, schemas, tables/views, a sidebar filter for tables and keys,
+  configurable previews up to 200 rows,
   structured multi-filtering, ordering, visible-page CSV copy, and full filtered
   CSV export. Redis connections show numbered databases, a SCAN-backed key
   index, and per-type key folders (strings, hashes, lists, sets, sorted sets,
@@ -98,11 +117,21 @@ Passwords are stored in the operating system credential store when available.
   edits are guarded by `xmin` optimistic concurrency; MySQL edits match on the
   primary key. Redis table views edit strings, hashes, lists, sets, and sorted
   sets in place, and can delete keys from the key index. Read-only profile
-  mode blocks GUI writes on every engine.
+  mode blocks GUI writes on every engine; PostgreSQL and MySQL sessions for
+  read-only profiles are also marked read-only on the server, so writes the
+  app cannot recognize are rejected too.
+- PostgreSQL values of any type display, including `numeric`, `uuid`, enums,
+  and arrays. Integers too large for JavaScript are shown and edited as exact
+  text.
 - SQL tabs using CodeMirror, query result grids, a 10,000-row safety cap, and
   per-profile history. Connecting a profile opens a query tab so you can run
   SQL immediately. Redis connections open a command workbench (`PING` by
-  default) instead of SQL.
+  default) instead of SQL. Scripts with several statements show the last
+  result set. The MySQL workbench keeps one connection, so `USE`, session
+  variables, and explicit transactions carry over between runs.
+- Automatically reconnects once after an idle connection closes, staying on the
+  selected database, then retries read-only browsing and SQL statements. Writes
+  are never retried automatically.
 - Refresh on table previews and query results: reload the current page and
   filters, or re-run the last executed statement, without re-authoring them.
 

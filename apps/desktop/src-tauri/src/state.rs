@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::future::Future;
 use std::sync::Arc;
 
 use tokio::sync::Mutex;
@@ -60,6 +61,28 @@ impl AppState {
             previous.close().await;
         }
         Ok(session)
+    }
+
+    pub async fn with_session_retry<T, F, Fut>(
+        &self,
+        profile_id: Uuid,
+        operation: F,
+    ) -> AppResult<T>
+    where
+        F: Fn(Arc<DbSession>) -> Fut,
+        Fut: Future<Output = AppResult<T>>,
+    {
+        let session = self.session(profile_id).await?;
+        match operation(session.clone()).await {
+            Err(error) if error.is_connection_lost() => {
+                tracing::info!(%profile_id, "database connection lost; reconnecting");
+                // Reconnect with the session's own profile so a database the user
+                // switched to stays selected instead of reverting to the saved default.
+                let session = self.connect(session.profile().clone()).await?;
+                operation(session).await
+            }
+            result => result,
+        }
     }
 
     pub async fn disconnect(&self, profile_id: Uuid) {

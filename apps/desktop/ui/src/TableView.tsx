@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from "react";
 import { createPortal } from "react-dom";
 
+import { editableText, parseCellInput } from "./cellValues";
 import * as commands from "./commands";
 import type {
   FilterCondition,
@@ -122,6 +123,7 @@ export function TableView({
   const filtersInitialized = useRef(false);
   const gridRef = useRef<HTMLDivElement>(null);
   const previewCloseTimer = useRef<number | null>(null);
+  const editCanceled = useRef(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -269,7 +271,7 @@ export function TableView({
     setPendingRows((current) => {
       const pending = current[entry.key] ?? pendingFromRow(entry.row);
       const changes = [...pending.changes];
-      changes[columnIndex] = parseCell(value);
+      changes[columnIndex] = parseCellInput(value, visibleColumns[columnIndex], pending.original[columnIndex]);
       const next = { ...current };
       if (!pending.deleted && rowsEqual(changes, pending.original)) delete next[entry.key];
       else next[entry.key] = { ...pending, changes };
@@ -572,6 +574,7 @@ export function TableView({
     window.addEventListener("mouseup", stop);
   };
 
+  const pageCount = page?.totalRows != null ? Math.max(1, Math.ceil(page.totalRows / previewLimit)) : null;
   const exportLabel = exporting
     ? `Exporting ${exportProgress.toLocaleString()}${page?.totalRows != null ? ` / ${page.totalRows.toLocaleString()}` : ""}…`
     : `Export all${page?.totalRows != null ? ` (${page.totalRows.toLocaleString()})` : ""}`;
@@ -619,7 +622,7 @@ export function TableView({
           <strong>Filters</strong>
           <span className="filter-join">All filters must match</span>
           <button className="text-button" onClick={() => setFilterDrafts((current) => [...current, createFilterDraft(visibleColumns[0]?.name ?? "")])} disabled={!page}>＋ Add filter</button>
-          {page ? <span className="row-count">{page.totalRows ?? "—"} rows · {page.metadata.columns.length} columns</span> : null}
+          {page ? <span className="row-count">{page.totalRows?.toLocaleString() ?? "—"} rows · {page.metadata.columns.length} columns</span> : null}
         </div>
         {filterDrafts.map((filter) => (
           <div className="filter-row" key={filter.id}>
@@ -784,10 +787,11 @@ export function TableView({
                     onDoubleClick={(event) => {
                       event.stopPropagation();
                       if (editable && !collapsed && !isPrimaryKey && !deleted) {
+                        editCanceled.current = false;
                         setEditing({
                           rowKey: entry.key,
                           column: columnIndex,
-                          value: displayValue === "NULL" ? "" : displayValue,
+                          value: editableText(entry.values[columnIndex]),
                         });
                       }
                     }}
@@ -806,6 +810,12 @@ export function TableView({
                           : current);
                       }}
                       onBlur={() => {
+                        // Escape unmounts the editor, which can still fire blur; don't save then.
+                        if (editCanceled.current) {
+                          editCanceled.current = false;
+                          setEditing(null);
+                          return;
+                        }
                         if (editing?.rowKey === entry.key && editing.column === columnIndex) {
                           setCell(entry, columnIndex, editing.value);
                         }
@@ -817,6 +827,7 @@ export function TableView({
                           event.currentTarget.blur();
                         } else if (event.key === "Escape") {
                           event.preventDefault();
+                          editCanceled.current = true;
                           setEditing(null);
                         }
                       }}
@@ -832,7 +843,7 @@ export function TableView({
 
       {pageIndex > 0 || page?.hasMore ? <div className="pagination">
         {pageIndex > 0 ? <button className="secondary-button" disabled={loading} onClick={() => setPageIndex((value) => value - 1)}>← Previous</button> : null}
-        <span>Page {pageIndex + 1}</span>
+        <span>Page {pageIndex + 1}{pageCount !== null ? ` of ${pageCount.toLocaleString()}` : ""}</span>
         {page?.hasMore ? <button className="secondary-button" disabled={loading} onClick={() => setPageIndex((value) => value + 1)}>Next →</button> : null}
       </div> : null}
 
@@ -945,15 +956,6 @@ function defaultColumnWidth(column: TableColumn): number {
   if (/json|array/i.test(column.dataType)) return 320;
   if (/text|character|timestamp/i.test(column.dataType)) return 220;
   return 160;
-}
-
-function parseCell(value: string): JsonValue {
-  if (value.trim() === "") return null;
-  if (value === "true") return true;
-  if (value === "false") return false;
-  if (/^-?\d+$/.test(value)) return Number(value);
-  if (/^-?\d+\.\d+$/.test(value)) return Number(value);
-  return value;
 }
 
 function toStringValue(value: JsonValue | undefined): string | null {

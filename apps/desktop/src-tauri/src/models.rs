@@ -80,6 +80,40 @@ impl ConnectionProfile {
     }
 }
 
+/// Largest integer a JavaScript number represents exactly (`Number.MAX_SAFE_INTEGER`).
+const MAX_SAFE_JSON_INTEGER: u64 = (1 << 53) - 1;
+
+/// Serializes an integer for the UI, falling back to a string when a JavaScript
+/// number would round it (for example, 64-bit snowflake IDs).
+pub fn json_integer(value: i64) -> Value {
+    if value.unsigned_abs() <= MAX_SAFE_JSON_INTEGER {
+        Value::from(value)
+    } else {
+        Value::String(value.to_string())
+    }
+}
+
+pub fn json_unsigned(value: u64) -> Value {
+    if value <= MAX_SAFE_JSON_INTEGER {
+        Value::from(value)
+    } else {
+        Value::String(value.to_string())
+    }
+}
+
+/// Escapes `LIKE` wildcards so filters match the user's text literally. Pair
+/// the pattern with `ESCAPE '!'`, which behaves the same in PostgreSQL and MySQL.
+pub fn escape_like(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        if matches!(character, '!' | '%' | '_') {
+            escaped.push('!');
+        }
+        escaped.push(character);
+    }
+    escaped
+}
+
 pub fn parse_redis_database(value: &str) -> AppResult<i64> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -291,4 +325,32 @@ pub struct QueryHistoryEntry {
     pub executed_at: DateTime<Utc>,
     pub duration_ms: u128,
     pub success: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn large_integers_stay_exact_for_javascript() {
+        assert_eq!(json_integer(42), Value::from(42));
+        assert_eq!(
+            json_integer(-9_007_199_254_740_991),
+            Value::from(-9_007_199_254_740_991_i64)
+        );
+        assert_eq!(
+            json_integer(1_234_567_890_123_456_789),
+            Value::String("1234567890123456789".into())
+        );
+        assert_eq!(
+            json_unsigned(u64::MAX),
+            Value::String("18446744073709551615".into())
+        );
+    }
+
+    #[test]
+    fn like_wildcards_are_escaped() {
+        assert_eq!(escape_like("100%_off!"), "100!%!_off!!");
+        assert_eq!(escape_like("plain"), "plain");
+    }
 }

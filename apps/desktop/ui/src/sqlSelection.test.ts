@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { lineExecutionTarget, sqlExecutionTarget, sqlStatementAtCursor, sqlToRun } from "./sqlSelection";
+import { lineExecutionTarget, requiresConfirmation, sqlExecutionTarget, sqlStatementAtCursor, sqlToRun } from "./sqlSelection";
 
 describe("sqlToRun", () => {
   it("runs the selected SQL exactly instead of the entire editor", () => {
@@ -54,5 +54,30 @@ describe("lineExecutionTarget", () => {
       sql: "GET greeting",
       kind: "statement",
     });
+  });
+});
+
+describe("requiresConfirmation", () => {
+  it("asks before drops, truncates, and unfiltered deletes or updates", () => {
+    expect(requiresConfirmation("DROP TABLE users")).toBe(true);
+    expect(requiresConfirmation("truncate orders")).toBe(true);
+    expect(requiresConfirmation("DELETE FROM users")).toBe(true);
+    expect(requiresConfirmation("UPDATE users SET active = false")).toBe(true);
+    expect(requiresConfirmation("UPDATE users u SET active = false")).toBe(true);
+    expect(requiresConfirmation("WITH gone AS (DELETE FROM users RETURNING id) SELECT * FROM gone")).toBe(true);
+    expect(requiresConfirmation("SELECT 1; DELETE FROM users")).toBe(true);
+    expect(requiresConfirmation("FLUSHALL", "redis")).toBe(true);
+  });
+
+  it("does not ask for filtered writes or keywords inside text", () => {
+    expect(requiresConfirmation("DELETE FROM users WHERE id = 1")).toBe(false);
+    expect(requiresConfirmation("UPDATE users SET active = false WHERE id = 1")).toBe(false);
+    expect(requiresConfirmation("SELECT * FROM jobs FOR UPDATE")).toBe(false);
+    expect(requiresConfirmation("SELECT 'drop table users' AS note")).toBe(false);
+    expect(requiresConfirmation('SELECT "update", "delete" FROM audit')).toBe(false);
+    expect(requiresConfirmation("-- drop later\nSELECT 1")).toBe(false);
+    expect(requiresConfirmation("CREATE TABLE a (b int REFERENCES c ON DELETE CASCADE ON UPDATE SET NULL)")).toBe(false);
+    expect(requiresConfirmation("INSERT INTO t VALUES (1) ON CONFLICT (id) DO UPDATE SET v = 2")).toBe(false);
+    expect(requiresConfirmation("GET drop", "redis")).toBe(false);
   });
 });

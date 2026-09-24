@@ -1,4 +1,6 @@
-use crate::error::AppResult;
+use std::time::Duration;
+
+use crate::error::{AppError, AppResult};
 use crate::models::{
     ConnectionProfile, DatabaseEngine, DatabaseRef, MutationBatch, MutationResult, QueryResponse,
     SchemaNode, TablePage, TablePageRequest,
@@ -6,6 +8,10 @@ use crate::models::{
 use crate::mysql::MysqlSession;
 use crate::postgres::PgSession;
 use crate::redis::RedisSession;
+
+/// Upper bound for opening a session, including a TLS attempt and any plaintext
+/// fallback, so an unreachable host fails promptly instead of waiting on the OS.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
 
 pub enum DbSession {
     Postgres(PgSession),
@@ -15,6 +21,18 @@ pub enum DbSession {
 
 impl DbSession {
     pub async fn connect(profile: ConnectionProfile, password: Option<String>) -> AppResult<Self> {
+        let target = format!("{}:{}", profile.host, profile.port);
+        tokio::time::timeout(CONNECT_TIMEOUT, Self::open(profile, password))
+            .await
+            .map_err(|_| {
+                AppError::Database(format!(
+                    "timed out after {} seconds connecting to {target}",
+                    CONNECT_TIMEOUT.as_secs()
+                ))
+            })?
+    }
+
+    async fn open(profile: ConnectionProfile, password: Option<String>) -> AppResult<Self> {
         match profile.engine {
             DatabaseEngine::Postgres => {
                 Ok(Self::Postgres(PgSession::connect(profile, password).await?))
@@ -28,6 +46,8 @@ impl DbSession {
         }
     }
 
+    /// The profile this session connected with, including the database the user
+    /// switched to, which may differ from the saved default.
     pub fn profile(&self) -> &ConnectionProfile {
         match self {
             Self::Postgres(session) => session.profile(),

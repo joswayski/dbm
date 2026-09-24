@@ -195,3 +195,27 @@ function trimSqlRange(sqlText: string, range: SqlRange): SqlRange | null {
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value));
 }
+
+/**
+ * Whether running `sqlText` should ask first: it drops or truncates something,
+ * or deletes or updates rows without a WHERE clause. Comments, string literals,
+ * and quoted identifiers are ignored so `SELECT 'drop'` or a column named
+ * "update" do not trigger the prompt.
+ */
+export function requiresConfirmation(sqlText: string, engine: "postgres" | "mysql" | "redis" = "postgres"): boolean {
+  if (engine === "redis") {
+    return /^\s*(flushall|flushdb)\b/i.test(sqlText);
+  }
+  const normalized = sqlText
+    .replace(/--[^\n]*/g, " ")
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/'(?:[^']|'')*'/g, "''")
+    .replace(/"(?:[^"]|"")*"/g, "x")
+    .replace(/`(?:[^`]|``)*`/g, "x");
+  return normalized.split(";").some((statement) => {
+    if (/\b(drop|truncate)\b/i.test(statement)) return true;
+    const deletes = /^\s*delete\b|\bdelete\s+from\b/i.test(statement);
+    const updates = /(?:^|[\s(])update\s+(?:only\s+)?[^\s(]+(?:\s+(?:as\s+)?[^\s(]+)?\s+set\b/i.test(statement);
+    return (deletes || updates) && !/\bwhere\b/i.test(statement);
+  });
+}
