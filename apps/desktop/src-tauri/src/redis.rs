@@ -40,7 +40,6 @@ impl RedisSession {
         })
     }
 
-    #[cfg(test)]
     pub fn profile(&self) -> &ConnectionProfile {
         &self.profile
     }
@@ -128,6 +127,9 @@ impl RedisSession {
             return Err(AppError::Unsupported(format!(
                 "{command} is not supported in the Redis workbench"
             )));
+        }
+        if let Some(message) = connection_state_command_error(&command, &argv) {
+            return Err(AppError::Unsupported(message.into()));
         }
         if self.profile.read_only && !is_read_command(&argv) {
             return Err(AppError::Unsupported("profile is read-only".into()));
@@ -1095,6 +1097,28 @@ fn is_unsupported_command(command: &str, argv: &[String]) -> bool {
         && argv.iter().any(|arg| arg.eq_ignore_ascii_case("block")))
 }
 
+/// Commands that would change the shared connection's state out from under the
+/// sidebar and table views, which assume the selected database and RESP2.
+fn connection_state_command_error(command: &str, argv: &[String]) -> Option<&'static str> {
+    match command {
+        "select" => Some(
+            "SELECT is not supported in the Redis workbench; choose the database index in the sidebar instead",
+        ),
+        "hello" if argv.len() > 1 => {
+            Some("HELLO with arguments is not supported in the Redis workbench")
+        }
+        "quit" | "reset" => Some("QUIT and RESET are not supported in the Redis workbench"),
+        "client"
+            if argv
+                .get(1)
+                .is_some_and(|sub| sub.eq_ignore_ascii_case("reply")) =>
+        {
+            Some("CLIENT REPLY is not supported in the Redis workbench")
+        }
+        _ => None,
+    }
+}
+
 fn is_read_command(argv: &[String]) -> bool {
     let command = argv[0].to_ascii_lowercase();
     let sub = argv.get(1).map(|value| value.to_ascii_lowercase());
@@ -1173,7 +1197,6 @@ fn is_read_command(argv: &[String]) -> bool {
                 | "hello"
                 | "lolwut"
                 | "auth"
-                | "select"
                 | "readonly"
         ),
     }
@@ -1543,6 +1566,17 @@ mod tests {
             ["HSET", "user:1", "name", "Ada Lovelace"]
         );
         assert!(tokenize_redis_cli(r#"SET broken "unterminated"#).is_err());
+    }
+
+    #[test]
+    fn connection_state_commands_are_rejected() {
+        let argv = |input: &str| tokenize_redis_cli(input).expect("tokens");
+        assert!(connection_state_command_error("select", &argv("SELECT 2")).is_some());
+        assert!(connection_state_command_error("hello", &argv("HELLO 3")).is_some());
+        assert!(connection_state_command_error("hello", &argv("HELLO")).is_none());
+        assert!(connection_state_command_error("client", &argv("CLIENT REPLY OFF")).is_some());
+        assert!(connection_state_command_error("client", &argv("CLIENT LIST")).is_none());
+        assert!(connection_state_command_error("get", &argv("GET key")).is_none());
     }
 
     #[test]

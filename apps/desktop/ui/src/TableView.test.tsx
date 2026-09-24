@@ -50,6 +50,36 @@ describe("TableView", () => {
     expect(screen.queryByRole("button", { name: "Save changes (1)" })).not.toBeInTheDocument();
   });
 
+  it("does not stage a change when an editor closes without edits or with Escape", async () => {
+    const page = await commands.loadTablePage({
+      profileId: "preview", schema: "public", table: "users", offset: 0, limit: 200, filters: [], orderBy: null,
+    });
+    vi.spyOn(commands, "loadTablePage").mockResolvedValue({
+      ...page,
+      rows: [[1, "", true, "100"], [2, "NULL", false, "101"]],
+      totalRows: 2,
+    });
+    const { container } = render(<TableView profileId="preview" schema="public" table="users" />);
+    const literalNull = await screen.findByText("NULL");
+    const rows = container.querySelectorAll("tbody tr");
+
+    const emptyCell = rows[0].querySelectorAll("td")[1];
+    fireEvent.doubleClick(emptyCell);
+    const emptyEditor = within(rows[0] as HTMLElement).getByRole("textbox");
+    expect(emptyEditor).toHaveValue("");
+    fireEvent.blur(emptyEditor);
+
+    fireEvent.doubleClick(literalNull.closest("td")!);
+    const nullTextEditor = within(rows[1] as HTMLElement).getByRole("textbox");
+    expect(nullTextEditor).toHaveValue("NULL");
+    fireEvent.change(nullTextEditor, { target: { value: "changed" } });
+    fireEvent.keyDown(nullTextEditor, { key: "Escape" });
+    fireEvent.blur(nullTextEditor);
+
+    expect(container.querySelectorAll("tr.staged-row")).toHaveLength(0);
+    expect(screen.queryByRole("button", { name: /Save changes/ })).not.toBeInTheDocument();
+  });
+
   it("selects a range by clicking rows and stages multiple deletions without checkboxes", async () => {
     const { container } = render(<TableView profileId="preview" schema="public" table="users" />);
     await screen.findByText("person1@example.com");

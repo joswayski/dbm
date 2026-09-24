@@ -135,7 +135,8 @@ async fn connect_database(
     }
     let mut profile = state.profile(profile_id).map_err(command_error)?;
     profile.default_database = database.to_owned();
-    state.disconnect(profile_id).await;
+    // `connect` replaces the current session only after the new one opens, so a
+    // failed switch leaves the workspace on its previous database.
     let session = state
         .connect(profile.clone())
         .await
@@ -222,6 +223,15 @@ async fn run_query(
     state: tauri::State<'_, AppState>,
     request: QueryRequest,
 ) -> Result<models::QueryResponse, String> {
+    // Record history against the database the session is using, which differs
+    // from the saved default after the user switches databases.
+    let database = state
+        .session(request.profile_id)
+        .await
+        .map_err(command_error)?
+        .profile()
+        .default_database
+        .clone();
     let response = if is_read_only_query(&request.sql) {
         state
             .with_session_retry(request.profile_id, |session| {
@@ -240,10 +250,6 @@ async fn run_query(
     let success = response.is_ok();
     let response = response.map_err(command_error);
     let duration_ms = response.as_ref().map_or(0, |result| result.duration_ms);
-    let database = state
-        .profile(request.profile_id)
-        .map_err(command_error)?
-        .default_database;
     let entry = QueryHistoryEntry {
         id: Uuid::new_v4(),
         profile_id: request.profile_id,
@@ -255,11 +261,6 @@ async fn run_query(
     };
     state.store.add_history(&entry).map_err(command_error)?;
     response
-}
-
-#[tauri::command]
-async fn cancel_query() -> Result<(), String> {
-    Err("query cancellation is not available for this connection".into())
 }
 
 #[tauri::command]
@@ -323,7 +324,6 @@ pub fn run() {
             load_schema_tree,
             load_table_page,
             run_query,
-            cancel_query,
             list_query_history,
             apply_table_mutations,
             updates::get_update_status,

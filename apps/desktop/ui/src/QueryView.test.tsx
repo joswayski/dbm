@@ -178,7 +178,7 @@ describe("QueryView", () => {
     expect(runQuery).toHaveBeenCalledTimes(1);
   });
 
-  it("shows Cancel only while a query is running", async () => {
+  it("shows the running state without a cancel action and labels refreshes separately", async () => {
     let resolveQuery: ((response: QueryResponse) => void) | undefined;
     vi.spyOn(commands, "runQuery").mockImplementation(() => new Promise((resolve) => {
       resolveQuery = resolve;
@@ -186,10 +186,12 @@ describe("QueryView", () => {
     render(<QueryView profileId="preview" initialSql="SELECT now();" title="Slow query" />);
 
     fireEvent.click(screen.getByRole("button", { name: /Run statement/ }));
-    expect(await screen.findByRole("button", { name: "Cancel" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /Running…/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Refresh" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Slow query" })).toBeInTheDocument();
 
-    act(() => resolveQuery?.({
+    const response: QueryResponse = {
       columns: [],
       rows: [],
       rowCount: 0,
@@ -197,9 +199,35 @@ describe("QueryView", () => {
       durationMs: 1,
       truncated: false,
       notices: [],
-    }));
+    };
+    act(() => resolveQuery?.(response));
+    const refresh = await screen.findByRole("button", { name: "Refresh" });
+    await waitFor(() => expect(refresh).toBeEnabled());
 
-    await waitFor(() => expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument());
+    fireEvent.click(refresh);
+    expect(await screen.findByRole("button", { name: "Refreshing…" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Run statement/ })).toBeDisabled();
+    act(() => resolveQuery?.(response));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Refresh" })).toBeEnabled());
+  });
+
+  it("renders result columns that share a name", async () => {
+    vi.spyOn(commands, "runQuery").mockResolvedValue({
+      columns: [{ name: "?column?", dataType: "int4" }, { name: "?column?", dataType: "int4" }],
+      rows: [[1, 2]],
+      rowCount: 1,
+      affectedRows: null,
+      durationMs: 1,
+      truncated: false,
+      notices: [],
+    });
+    const consoleError = vi.spyOn(console, "error");
+    render(<QueryView profileId="preview" initialSql="SELECT 1, 2;" />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Run statement/ }));
+    expect(await screen.findByText("2")).toBeInTheDocument();
+    expect(screen.getAllByRole("columnheader", { name: "?column?" })).toHaveLength(2);
+    expect(consoleError).not.toHaveBeenCalledWith(expect.stringContaining("same key"), expect.anything(), expect.anything());
   });
 
   it("shows a play action for selected SQL and runs only that selection", async () => {
