@@ -25,6 +25,7 @@
 - Reuse established patterns in the repository before introducing a new abstraction or dependency. Match existing naming (`profileId`, `workspace`, tab kinds `"table" | "query"`).
 - Treat macOS, Windows, and Linux parity as the default. Prefer shared UI and logic that works on every supported platform; when a fix or feature must be platform-specific, implement or stub the equivalent path on the others (or explicitly gate with `cfg` / runtime checks), and document any unavoidable limitation in the PR and README if user-facing. Do not assume “works on my Mac” is enough—call out what was and was not verified on other platforms.
 - Do not add telemetry, cloud sync, or network calls that send connection profiles, query history, or database results off-device.
+- Every merge to `main` that changes the app is built and published as the latest release, and installed builds update to it. Keep `main` releasable.
 - Keep this file concise and update it when a recurring repository convention or correction should persist across future work.
 
 ## Visual design

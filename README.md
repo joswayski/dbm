@@ -80,18 +80,21 @@ On Linux, the build creates `.deb` and AppImage packages under
 `target/release/bundle`, plus the unpackaged executable at
 `target/release/dbm`.
 
-One local build only targets the current operating system. Pushing a version
-tag runs the release workflow on macOS, Windows, and Linux and creates a draft
-GitHub release with all three platforms' installers, signed updater artifacts,
-and a validated `latest.json` manifest. Official builds check that manifest
-from the top bar and install authenticated updates in place where the platform
-supports it.
+One local build only targets the current operating system. Every merge to
+`main` that changes the app runs the release workflow on macOS, Windows, and
+Linux and publishes a GitHub release with all three platforms' installers,
+signed updater artifacts, `SHA256SUMS`, and a validated `latest.json`
+manifest. Install DBM once from the
+[latest release](https://github.com/joswayski/dbm/releases/latest); after that,
+official builds check for updates at launch and every 4 hours (or on demand
+from the top bar's **Check for updates** button) and install authenticated
+updates in place where the platform supports it. `.deb` installs open the
+release page instead.
 
-Creating installers is not the same as preparing a public release. Public
-publishing also requires Developer ID signing and notarization on macOS,
-Authenticode signing on Windows, and checksums plus build-provenance
-attestations for every downloadable artifact. The required account setup,
-workflow gates, and clean-machine acceptance checks are documented in
+These per-merge releases are meant for the maintainer's own machines: the
+macOS build is signed and notarized, but Windows installers are not yet
+Authenticode-signed. Versioning, the workflow's steps, required secrets, and
+the remaining gates for a wider public release are documented in
 [docs/releases.md](docs/releases.md).
 
 DBM never uploads connection profiles, query history, or database results.
@@ -104,7 +107,8 @@ Passwords are stored in the operating system credential store when available.
 - Local connection profiles and query history in an application SQLite database.
 - Passwords through the macOS Keychain, Windows Credential Manager, or Linux
   secret service via `keyring`.
-- Signed in-app updates from published GitHub Releases.
+- Signed in-app updates from the GitHub Release published for each merge to
+  `main`.
 - Database list, schemas, tables/views, a sidebar filter for tables and keys,
   configurable previews up to 200 rows,
   structured multi-filtering, ordering, visible-page CSV copy, and full filtered

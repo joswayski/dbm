@@ -9,9 +9,10 @@
     "dev": "npm run tauri:dev --workspace @dbm/desktop",
     "build": "node scripts/build.mjs",
     "build:ui": "npm run build --workspace @dbm/desktop",
-    "check": "npm run check --workspace @dbm/desktop",
+    "check": "npm run test:release && npm run check --workspace @dbm/desktop",
     "test": "npm run test --workspace @dbm/desktop",
     "tauri:dev": "npm run tauri:dev --workspace @dbm/desktop",
-    "tauri:build": "npm run tauri:build --workspace @dbm/desktop"
+    "tauri:build": "npm run tauri:build --workspace @dbm/desktop",
+    "test:release": "node --test scripts/release.test.mjs"
   }
 }
