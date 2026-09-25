@@ -180,7 +180,15 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, Qu
             return pane
         } ?? welcome!
         for view in content.subviews where view !== current { view.removeFromSuperview() }
-        if current.superview !== content { content.pin(current) }
+        if current.superview !== content {
+            content.pin(current)
+            // `tab-pane-in`: a 120 ms settle from 85% opacity.
+            current.alphaValue = 0.85
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.12
+                current.animator().alphaValue = 1
+            }
+        }
         welcome.show(profile: activeProfileID.flatMap(profile),
                      connected: activeProfileID.map { workspaces[$0] != nil } ?? false, hasProfiles: !profiles.isEmpty)
         reloadPane(activeTab)
@@ -726,6 +734,24 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, Qu
             editMenu.addItem(withTitle: title, action: Selector((action)), keyEquivalent: key)
         }
         editMenu.addItem(.separator())
+        // The editor's find bar, as CodeMirror's search keymap.
+        let findItem = editMenu.addItem(withTitle: "Find", action: nil, keyEquivalent: "")
+        let findMenu = NSMenu(title: "Find")
+        let finds: [(String, NSTextFinder.Action, String, NSEvent.ModifierFlags)] = [
+            ("Find…", NSTextFinder.Action.showFindInterface, "f", NSEvent.ModifierFlags.command),
+            ("Find and Replace…", NSTextFinder.Action.showReplaceInterface, "f", [.command, .option]),
+            ("Find Next", NSTextFinder.Action.nextMatch, "g", .command),
+            ("Find Previous", NSTextFinder.Action.previousMatch, "g", [.command, .shift]),
+            ("Use Selection for Find", NSTextFinder.Action.setSearchString, "e", .command),
+        ]
+        for (title, tag, key, modifiers) in finds {
+            let item = findMenu.addItem(withTitle: title, action: #selector(NSTextView.performFindPanelAction(_:)), keyEquivalent: key)
+            item.keyEquivalentModifierMask = modifiers
+            item.tag = tag.rawValue
+        }
+        findItem.submenu = findMenu
+        editMenu.addItem(withTitle: "Toggle Comment", action: #selector(SQLTextView.toggleComment(_:)), keyEquivalent: "/")
+        editMenu.addItem(.separator())
         editMenu.addItem(withTitle: "Complete", action: #selector(NSTextView.complete(_:)), keyEquivalent: "\u{1b}").keyEquivalentModifierMask = [.option]
         editItem.submenu = editMenu
 
@@ -761,26 +787,27 @@ final class SnapshotDriver {
     func start() {
         let app = self.app
         let postgres = "00000000-0000-0000-0000-000000000001"
-        let redis = "00000000-0000-0000-0000-000000000002"
+        let redis = "00000000-0000-0000-0000-000000000004"
         steps = [
             ("01-welcome", {}),
             ("02-query", { [app] in app.selectProfile(postgres) }),
-            ("03-results", { [app] in app.activeQueryPane?.editor.setSelectedRange(NSRange(location: 0, length: 0)); if let tab = app.activeTab { app.runQuery(tab, sql: "SELECT customer, revenue FROM revenue_by_month;", refresh: false) } }),
-            ("04-table", { [app] in app.openTable(postgres, schema: "public", table: "customers") }),
+            ("03-results", { [app] in app.activeQueryPane?.editor.setSelectedRange(NSRange(location: 0, length: 0)); if let tab = app.activeTab { app.runQuery(tab, sql: "SELECT now();", refresh: false) } }),
+            ("04-table", { [app] in app.openTable(postgres, schema: "public", table: "users") }),
             ("05-pending", { [app] in
                 guard let tab = app.activeTab, let state = tab.tableState else { return }
                 state.selected = IndexSet(integer: 1)
-                state.stage(row: 1, column: 1, text: "ada@example.com")
-                state.stage(row: 1, column: 3, text: "")
+                state.stage(row: 1, column: 1, text: "changed@example.com")
+                state.stage(row: 1, column: 2, text: "")
                 state.toggleDelete([3])
                 app.activeTablePane?.grid.reloadData()
                 app.refresh()
             }),
+            ("05b-change-preview", { [app] in app.activeTablePane?.hoverRow(1) }),
             ("06-embedded", { [app] in
                 app.openQuery(postgres)
                 if let tab = app.activeTab {
-                    app.activeQueryPane?.editor.string = "SELECT * FROM public.customers;"
-                    tab.sql = "SELECT * FROM public.customers;"
+                    app.activeQueryPane?.editor.string = "SELECT * FROM public.users;"
+                    tab.sql = "SELECT * FROM public.users;"
                     app.runQuery(tab, sql: tab.sql, refresh: false)
                 }
             }),
@@ -821,6 +848,13 @@ final class SnapshotDriver {
         guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { exit(1) }
         view.cacheDisplay(in: view.bounds, to: bitmap)
         write(bitmap, name)
+        // Floating cards such as the change preview live in child windows.
+        for (index, child) in (app.window.childWindows ?? []).enumerated() {
+            if let content = child.contentView, let bitmap = content.bitmapImageRepForCachingDisplay(in: content.bounds) {
+                content.cacheDisplay(in: content.bounds, to: bitmap)
+                write(bitmap, "\(name)-popover\(index)")
+            }
+        }
         if let sheet = app.profileSheetWindow?.contentView, let sheetBitmap = sheet.bitmapImageRepForCachingDisplay(in: sheet.bounds) {
             sheet.cacheDisplay(in: sheet.bounds, to: sheetBitmap)
             write(sheetBitmap, "\(name)-sheet")

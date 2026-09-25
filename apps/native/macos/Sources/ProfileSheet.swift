@@ -6,19 +6,30 @@ final class ColorSwatch: RowControl {
     init(hex: String) {
         self.hex = hex
         super.init(frame: .zero)
-        widthAnchor.constraint(equalToConstant: 22).isActive = true
-        heightAnchor.constraint(equalToConstant: 22).isActive = true
+        // 22 pt dot plus room for the selection ring.
+        widthAnchor.constraint(equalToConstant: 30).isActive = true
+        heightAnchor.constraint(equalToConstant: 30).isActive = true
         setAccessibilityLabel("Use connection color \(hex)")
         toolTip = "Use connection color \(hex)"
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    override func hoverChanged() { needsDisplay = true }
+
+    /// `.color-swatch`: a hairline inner ring, grown 8% on hover; selected
+    /// swatches get a chrome gap and a text-coloured outer ring.
     override func draw(_ dirtyRect: NSRect) {
+        let inset: CGFloat = hovering && !selected ? 3.1 : 4
+        let dot = bounds.insetBy(dx: inset, dy: inset)
         (NSColor(css: hex) ?? Graphite.accent).setFill()
-        NSBezierPath(ovalIn: bounds.insetBy(dx: 3, dy: 3)).fill()
+        NSBezierPath(ovalIn: dot).fill()
+        NSColor(white: 1, alpha: 0.12).setStroke()
+        let hairline = NSBezierPath(ovalIn: dot.insetBy(dx: 0.5, dy: 0.5))
+        hairline.lineWidth = 1
+        hairline.stroke()
         if selected {
-            Graphite.textStrong.setStroke()
+            Graphite.text.setStroke()
             let ring = NSBezierPath(ovalIn: bounds.insetBy(dx: 1, dy: 1))
             ring.lineWidth = 2
             ring.stroke()
@@ -83,12 +94,14 @@ final class ProfileSheet: NSWindowController {
     private let readOnlyBox = NSButton(checkboxWithTitle: "Read-only profile (blocks GUI edits and mutations)", target: nil, action: nil)
     private let usernameLabel = label("", font: Graphite.ui(12), color: Graphite.muted)
     private let databaseLabel = label("", font: Graphite.ui(12), color: Graphite.muted)
-    private let feedback = label("", font: Graphite.ui(12.5), color: Graphite.accentText)
+    private let feedback = label("", font: Graphite.ui(12), color: Graphite.accentText)
+    private let feedbackBox = PanelView(fill: Graphite.accentSoft)
     private var swatches: [ColorSwatch] = []
     private let customWell = NSColorWell(frame: NSRect(x: 0, y: 0, width: 26, height: 22))
     private lazy var testButton = GButton("Test connection", style: .secondary) { [weak self] in self?.test() }
     private lazy var saveButton = GButton("Save & connect", style: .primary) { [weak self] in self?.save() }
     private var busy = false
+    private var deleteButton: GButton?
 
     init(profile: Profile?, onTest: @escaping ([String: Any], @escaping (Error?) -> Void) -> Void,
          onSave: @escaping ([String: Any], @escaping (Error?) -> Void) -> Void, onDelete: (() -> Void)?) {
@@ -138,12 +151,28 @@ final class ProfileSheet: NSWindowController {
 
         engineSegment.onSelect = { [weak self] engine in self?.setEngine(engine) }
         let importButton = GButton("Import URL", style: .secondary) { [weak self] in self?.importURL() }
-        urlField.onCommit = { [weak self] _ in
-            if NSApp.currentEvent?.keyCode == 36 { self?.importURL() }
+        importButton.isEnabled = false
+        // Return imports; pasting a URL imports it straight away.
+        urlField.behavior.onReturn = { [weak self] in self?.importURL() }
+        var previousURL = ""
+        urlField.onChange = { [weak self, weak importButton] text in
+            importButton?.isEnabled = !text.trimmingCharacters(in: .whitespaces).isEmpty
+            let pasted = NSApp.currentEvent?.modifierFlags.contains(.command) == true
+                && NSApp.currentEvent?.charactersIgnoringModifiers == "v"
+            if pasted || (text.count - previousURL.count > 1 && text.contains("://")) { self?.importURL() }
+            previousURL = text
         }
+        // Return anywhere else saves, like submitting the desktop form.
+        for field in [nameField, hostField, portField, usernameField, databaseField, caField] {
+            field.behavior.onReturn = { [weak self] in self?.save() }
+            field.onCancel = { [weak self] in self?.dismiss() }
+        }
+        passwordField.behavior.onReturn = { [weak self] in self?.save() }
+        passwordField.behavior.onCancel = { [weak self] in self?.dismiss() }
+        urlField.behavior.onCancel = { [weak self] in self?.dismiss() }
         let urlRow = hstack([urlField, importButton], spacing: 8)
 
-        let colorRow = hstack([], spacing: 4)
+        let colorRow = hstack([], spacing: 0)
         for hex in Graphite.connectionColors {
             let swatch = ColorSwatch(hex: hex)
             swatch.onClick = { [weak self] in self?.setColor(hex) }
@@ -151,19 +180,24 @@ final class ProfileSheet: NSWindowController {
             colorRow.addArrangedSubview(swatch)
         }
         customWell.translatesAutoresizingMaskIntoConstraints = false
-        customWell.widthAnchor.constraint(equalToConstant: 30).isActive = true
-        customWell.heightAnchor.constraint(equalToConstant: 22).isActive = true
+        customWell.widthAnchor.constraint(equalToConstant: 26).isActive = true
+        customWell.heightAnchor.constraint(equalToConstant: 26).isActive = true
         customWell.target = self
         customWell.action = #selector(customColor)
         customWell.toolTip = "Choose a custom color"
         colorRow.addArrangedSubview(customWell)
-        colorRow.setCustomSpacing(10, after: swatches.last!)
+        colorRow.setCustomSpacing(8, after: swatches.last!)
+        colorRow.setCustomSpacing(6, after: customWell)
         colorRow.addArrangedSubview(label("Custom", font: Graphite.ui(12.5), color: Graphite.muted))
 
         readOnlyBox.attributedTitle = NSAttributedString(string: readOnlyBox.title, attributes: [.font: Graphite.ui(12.5), .foregroundColor: Graphite.text])
-        feedback.maximumNumberOfLines = 3
+        feedback.maximumNumberOfLines = 6
         feedback.lineBreakMode = .byWordWrapping
-        feedback.preferredMaxLayoutWidth = 520
+        feedback.preferredMaxLayoutWidth = 494
+        // `.modal-feedback`: a tinted, outlined status box.
+        feedbackBox.radius = 7
+        feedbackBox.pin(feedback, insets: NSEdgeInsets(top: 9, left: 12, bottom: 9, right: 12))
+        feedbackBox.isHidden = true
         let note = label("Passwords are stored in your operating system credential manager and are never written to DBM's profile database.",
                          font: Graphite.ui(11.5), color: Graphite.faint)
         note.maximumNumberOfLines = 2
@@ -172,7 +206,9 @@ final class ProfileSheet: NSWindowController {
 
         var actions: [NSView] = []
         if onDelete != nil {
-            actions.append(GButton("Delete", style: .danger) { [weak self] in self?.delete() })
+            let delete = GButton("Delete", style: .danger) { [weak self] in self?.delete() }
+            deleteButton = delete
+            actions.append(delete)
         }
         actions += [spacer(), testButton, saveButton]
         let form = vstack([
@@ -185,7 +221,7 @@ final class ProfileSheet: NSWindowController {
             pair(labeledField(usernameLabel, usernameField), labeledField(databaseLabel, databaseField)),
             pair(field("Password", passwordField), field("TLS", tlsPopup)),
             field("CA certificate path (optional)", caField),
-            readOnlyBox, feedback, note, hstack(actions, spacing: 8),
+            readOnlyBox, feedbackBox, note, hstack(actions, spacing: 8),
         ], spacing: 12)
         form.setCustomSpacing(16, after: header)
         for view in form.arrangedSubviews where !(view === readOnlyBox) {
@@ -208,7 +244,7 @@ final class ProfileSheet: NSWindowController {
         usernameField.stringValue = original?.username ?? engine.presetUser
         databaseField.stringValue = original?.database ?? engine.defaults.database
         passwordField.placeholderAttributedString = NSAttributedString(
-            string: original == nil ? "Stored in OS credential store" : "Leave blank to keep saved password",
+            string: original == nil ? "Stored in OS keychain" : "Leave blank to keep saved password",
             attributes: [.font: Graphite.ui(12.5), .foregroundColor: Graphite.faint])
         tlsPopup.selectItem(withTitle: (original?.tlsMode ?? "preferred").capitalized)
         caField.stringValue = original?.caCertPath ?? ""
@@ -287,14 +323,27 @@ final class ProfileSheet: NSWindowController {
 
     private func show(_ message: String, color: NSColor) {
         feedback.stringValue = message
-        feedback.textColor = color
-        feedback.isHidden = message.isEmpty
+        feedbackBox.isHidden = message.isEmpty
+        if color == Graphite.danger {
+            feedback.textColor = NSColor(hex: 0xffb3ac)
+            feedbackBox.fill = Graphite.dangerSoft
+            feedbackBox.outline = NSColor(hex: 0xff6b61, alpha: 0.3)
+        } else if color == Graphite.success {
+            feedback.textColor = NSColor(hex: 0x9be7bf)
+            feedbackBox.fill = NSColor(hex: 0x5ad394, alpha: 0.1)
+            feedbackBox.outline = NSColor(hex: 0x5ad394, alpha: 0.3)
+        } else {
+            feedback.textColor = Graphite.accentText
+            feedbackBox.fill = Graphite.accentSoft
+            feedbackBox.outline = NSColor(hex: 0x4c9aff, alpha: 0.3)
+        }
     }
 
     private func setBusy(_ busy: Bool, testing: Bool = false) {
         self.busy = busy
         testButton.isEnabled = !busy
         saveButton.isEnabled = !busy
+        deleteButton?.isEnabled = !busy
         testButton.title = busy && testing ? "Testing…" : "Test connection"
     }
 

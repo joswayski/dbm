@@ -5,8 +5,11 @@ class RowControl: NSView {
     var onClick: (() -> Void)?
     var onDoubleClick: (() -> Void)?
     var onMiddleClick: (() -> Void)?
-    var hovering = false
+    var hovering = false { didSet { if hovering != oldValue { hoverChanged() } } }
     var selected = false { didSet { needsDisplay = true } }
+
+    /// Subclasses show or hide hover-only controls here.
+    func hoverChanged() {}
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -49,11 +52,11 @@ final class ConnectionRow: RowControl {
 
     override func draw(_ dirtyRect: NSRect) {
         if selected {
-            Graphite.control.setFill()
-            NSBezierPath(roundedRect: bounds, xRadius: 7, yRadius: 7).fill()
+            NSColor(white: 1, alpha: 0.07).setFill()
+            NSBezierPath(roundedRect: bounds, xRadius: 6, yRadius: 6).fill()
         } else if hovering {
             Graphite.hoverWash.setFill()
-            NSBezierPath(roundedRect: bounds, xRadius: 7, yRadius: 7).fill()
+            NSBezierPath(roundedRect: bounds, xRadius: 6, yRadius: 6).fill()
         }
         let dot = NSRect(x: 8, y: 11, width: 8, height: 8)
         if connected {
@@ -69,7 +72,7 @@ final class ConnectionRow: RowControl {
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineBreakMode = .byTruncatingTail
         NSAttributedString(string: profile.name, attributes: [
-            .font: Graphite.ui(13, .semibold), .foregroundColor: Graphite.textStrong, .paragraphStyle: paragraph,
+            .font: Graphite.ui(13, .medium), .foregroundColor: Graphite.text, .paragraphStyle: paragraph,
         ]).draw(with: NSRect(x: 26, y: 6, width: width, height: 17), options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
         NSAttributedString(string: profile.subtitle, attributes: [
             .font: Graphite.ui(11), .foregroundColor: Graphite.faint, .paragraphStyle: paragraph,
@@ -96,7 +99,7 @@ final class TreeRow: RowControl {
 
     override func draw(_ dirtyRect: NSRect) {
         if selected {
-            color.withAlphaComponent(0.3).setFill()
+            color.withAlphaComponent(0.24).setFill()
             NSBezierPath(roundedRect: bounds, xRadius: 6, yRadius: 6).fill()
         } else if hovering {
             Graphite.hoverWash.setFill()
@@ -108,13 +111,17 @@ final class TreeRow: RowControl {
         }
         x += 14
         let icon: Icon = !node.isLeaf ? .folder : node.kind == "key" ? .key : node.kind == "view" ? .view : .table
-        icon.draw(in: NSRect(x: x, y: 6.5, width: 13, height: 13), color: selected ? color : Graphite.muted)
+        // `.schema-icon`: faint, the schema folder muted, and the selected icon
+        // the connection colour mixed 55% with white.
+        let iconColor = selected ? (color.blended(withFraction: 0.45, of: .white) ?? color)
+            : node.kind == "schema" ? Graphite.muted : Graphite.faint
+        icon.draw(in: NSRect(x: x, y: 6.5, width: 13, height: 13), color: iconColor)
         x += 20
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineBreakMode = .byTruncatingTail
         NSAttributedString(string: node.name, attributes: [
-            .font: Graphite.ui(13, selected ? .medium : .regular),
-            .foregroundColor: selected ? Graphite.textStrong : Graphite.secondary, .paragraphStyle: paragraph,
+            .font: Graphite.ui(12.5, selected ? .medium : .regular),
+            .foregroundColor: selected ? NSColor.white : hovering ? Graphite.text : Graphite.secondary, .paragraphStyle: paragraph,
         ]).draw(with: NSRect(x: x, y: 5, width: bounds.width - x - 6, height: 17), options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
     }
 }
@@ -176,16 +183,17 @@ final class SidebarView: PanelView {
         pin(collapsedBar)
         collapsedBar.isHidden = true
 
-        let handle = ResizeHandle { [weak self] delta in self?.resize(by: delta) } reset: { [weak self] in
+        let grip = ResizeHandle { [weak self] delta in self?.resize(by: delta) } reset: { [weak self] in
             self?.widthConstraint.constant = Self.defaultWidth
             UserDefaults.standard.set(Self.defaultWidth, forKey: "dbm.sidebarWidth")
         }
-        addSubview(handle)
+        handle = grip
+        addSubview(grip)
         NSLayoutConstraint.activate([
-            handle.topAnchor.constraint(equalTo: topAnchor),
-            handle.bottomAnchor.constraint(equalTo: bottomAnchor),
-            handle.trailingAnchor.constraint(equalTo: trailingAnchor, constant: 3),
-            handle.widthAnchor.constraint(equalToConstant: 6),
+            grip.topAnchor.constraint(equalTo: topAnchor),
+            grip.bottomAnchor.constraint(equalTo: bottomAnchor),
+            grip.trailingAnchor.constraint(equalTo: trailingAnchor),
+            grip.widthAnchor.constraint(equalToConstant: 5),
         ])
         if UserDefaults.standard.bool(forKey: "dbm.sidebarCollapsed") { setCollapsed(true) }
     }
@@ -193,6 +201,7 @@ final class SidebarView: PanelView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     private var expandedWidth: CGFloat = SidebarView.defaultWidth
+    private var handle: ResizeHandle?
 
     private func setCollapsed(_ collapsed: Bool) {
         if collapsed {
@@ -203,6 +212,8 @@ final class SidebarView: PanelView {
         }
         collapsedBar.isHidden = !collapsed
         expandedContent.isHidden = collapsed
+        // The collapsed rail has a fixed width.
+        handle?.isHidden = collapsed
         UserDefaults.standard.set(collapsed, forKey: "dbm.sidebarCollapsed")
     }
 
@@ -291,6 +302,7 @@ final class SidebarView: PanelView {
             app?.schemaFilters[id] = text
             self?.reloadTree(profile: profile)
         }
+        filter.behavior.keepsFocusOnCancel = true
         filter.onCancel = { [weak self, weak app, weak filter] in
             app?.schemaFilters[id] = ""
             filter?.stringValue = ""
@@ -375,16 +387,21 @@ final class SidebarView: PanelView {
     }
 }
 
+/// `.sidebar-resize-handle`: an invisible grip whose 2 pt accent line shows on
+/// hover and while dragging; after a click, arrow keys resize by 10 pt.
 final class ResizeHandle: NSView {
     private let onDrag: (CGFloat) -> Void
     private let onReset: () -> Void
     private var last: CGFloat = 0
+    private var hovering = false { didSet { needsDisplay = true } }
+    private var dragging = false { didSet { needsDisplay = true } }
 
     init(onDrag: @escaping (CGFloat) -> Void, reset: @escaping () -> Void) {
         self.onDrag = onDrag
         self.onReset = reset
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect], owner: self, userInfo: nil))
         setAccessibilityElement(true)
         setAccessibilityRole(.splitter)
         setAccessibilityLabel("Resize sidebar")
@@ -392,14 +409,37 @@ final class ResizeHandle: NSView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    // Clicking the grip gives it the arrow keys; it stays out of the key view
+    // loop so the window never opens with it focused.
+    override var acceptsFirstResponder: Bool { true }
+    override var canBecomeKeyView: Bool { false }
+
     override func resetCursorRects() { addCursorRect(bounds, cursor: .resizeLeftRight) }
+    override func mouseEntered(with event: NSEvent) { hovering = true }
+    override func mouseExited(with event: NSEvent) { hovering = false }
     override func mouseDown(with event: NSEvent) {
         last = event.locationInWindow.x
+        dragging = true
+        window?.makeFirstResponder(self)
         if event.clickCount == 2 { onReset() }
     }
     override func mouseDragged(with event: NSEvent) {
         onDrag(event.locationInWindow.x - last)
         last = event.locationInWindow.x
+    }
+    override func mouseUp(with event: NSEvent) { dragging = false }
+    override func keyDown(with event: NSEvent) {
+        switch event.keyCode {
+        case 123: onDrag(-10)
+        case 124: onDrag(10)
+        default: super.keyDown(with: event)
+        }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard hovering || dragging else { return }
+        Graphite.accent.setFill()
+        NSRect(x: bounds.midX - 1, y: 0, width: 2, height: bounds.height).fill()
     }
 }
 
@@ -445,14 +485,14 @@ final class TabButton: RowControl {
         self.tab = tab
         super.init(frame: .zero)
         selected = active
+        // Like `.tab-close`: shown on the active tab and on hover.
+        let close = TabButton.small(.close, "Close \(tab.title)", onClose)
+        closeButton = close
         var buttons: [NSView] = []
-        if !tab.collapsed, let onRename {
-            buttons.append(TabButton.small(.pencil, "Rename \(tab.title)", onRename))
-        }
         if !tab.collapsed, active, let onCollapse {
             buttons.append(TabButton.small(.collapse, "Collapse \(tab.title)", onCollapse))
         }
-        buttons.append(TabButton.small(.close, "Close \(tab.title)", onClose))
+        buttons.append(close)
         let actions = hstack(buttons, spacing: 0)
         addSubview(actions)
         let width = tab.collapsed ? 64 : min(230, max(96, titleWidth + 42 + CGFloat(buttons.count) * 22))
@@ -463,6 +503,19 @@ final class TabButton: RowControl {
             widthAnchor.constraint(equalToConstant: width),
         ])
         actionsWidth = CGFloat(buttons.count) * 22
+        // Like `.tab-rename`: floats over the title end on hover only.
+        if !tab.collapsed, let onRename {
+            let plate = PanelView(fill: active ? Graphite.bg : Graphite.chrome)
+            plate.radius = 5
+            plate.pin(TabButton.small(.pencil, "Rename \(tab.title)", onRename))
+            addSubview(plate)
+            NSLayoutConstraint.activate([
+                plate.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -(3 + actionsWidth + 3)),
+                plate.centerYAnchor.constraint(equalTo: centerYAnchor),
+            ])
+            renamePlate = plate
+        }
+        hoverChanged()
         setAccessibilityRole(.radioButton)
         setAccessibilityLabel(tab.collapsed ? "Expand \(tab.title)" : tab.title)
         toolTip = tab.collapsed ? "Expand \(tab.title)" : nil
@@ -471,6 +524,14 @@ final class TabButton: RowControl {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     private var actionsWidth: CGFloat = 22
+    private weak var closeButton: NSView?
+    private weak var renamePlate: NSView?
+
+    override func hoverChanged() {
+        needsDisplay = true
+        closeButton?.alphaValue = hovering || selected || tab.collapsed ? 1 : 0
+        renamePlate?.isHidden = !hovering || renameField != nil
+    }
 
     private static func small(_ icon: Icon, _ tooltip: String, _ action: @escaping () -> Void) -> GButton {
         let button = GButton("", icon: icon, style: .icon, tooltip: tooltip, handler: action)
@@ -524,24 +585,48 @@ final class TabButton: RowControl {
     }
 }
 
+/// Scrolls sideways only, with no scroller, and turns vertical wheel motion
+/// into horizontal motion, like the desktop's `.tab-strip { overflow-x: auto }`.
+final class TabScrollView: NSScrollView {
+    override func scrollWheel(with event: NSEvent) {
+        guard abs(event.scrollingDeltaY) > abs(event.scrollingDeltaX), let document = documentView else {
+            super.scrollWheel(with: event)
+            return
+        }
+        let clip = contentView
+        let maxX = max(0, document.frame.width - clip.bounds.width)
+        let delta = event.hasPreciseScrollingDeltas ? event.scrollingDeltaY : event.scrollingDeltaY * 10
+        clip.scroll(to: NSPoint(x: min(maxX, max(0, clip.bounds.origin.x - delta)), y: 0))
+        reflectScrolledClipView(clip)
+    }
+}
+
 final class TabStrip: PanelView {
     unowned let app: AppController
     private let row = hstack([], spacing: 1)
+    private let scroll = TabScrollView()
 
     init(app: AppController) {
         self.app = app
         super.init(fill: Graphite.chrome, edges: [.bottom])
         row.alignment = .bottom
-        // Many tabs clip at the edge instead of widening the window.
-        row.setClippingResistancePriority(.defaultLow, for: .horizontal)
-        clipsToBounds = true
-        addSubview(row)
-        let trailing = row.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -6)
-        trailing.priority = .defaultHigh
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        scroll.drawsBackground = false
+        scroll.hasHorizontalScroller = false
+        scroll.hasVerticalScroller = false
+        scroll.verticalScrollElasticity = .none
+        scroll.horizontalScrollElasticity = .allowed
+        scroll.documentView = row
+        addSubview(scroll)
+        let clip = scroll.contentView
         NSLayoutConstraint.activate([
-            row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
-            row.bottomAnchor.constraint(equalTo: bottomAnchor),
-            trailing,
+            scroll.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
+            scroll.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
+            scroll.topAnchor.constraint(equalTo: topAnchor),
+            scroll.bottomAnchor.constraint(equalTo: bottomAnchor),
+            row.leadingAnchor.constraint(equalTo: clip.leadingAnchor),
+            row.topAnchor.constraint(equalTo: clip.topAnchor),
+            row.bottomAnchor.constraint(equalTo: clip.bottomAnchor),
             heightAnchor.constraint(equalToConstant: 36),
         ])
     }
@@ -567,6 +652,12 @@ final class TabStrip: PanelView {
             let add = GButton("", icon: .plus, style: .icon, tooltip: "New query") { [weak app] in app?.openQuery(profile) }
             row.addArrangedSubview(add)
             row.setCustomSpacing(4, after: row.arrangedSubviews[max(0, row.arrangedSubviews.count - 2)])
+        }
+        // Keep the active tab in view after the strip re-lays out.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let active = self.row.arrangedSubviews.first(where: { ($0 as? TabButton)?.selected == true }) else { return }
+            self.layoutSubtreeIfNeeded()
+            active.scrollToVisible(active.bounds)
         }
     }
 

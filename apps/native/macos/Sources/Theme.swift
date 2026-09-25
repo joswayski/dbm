@@ -29,7 +29,7 @@ enum Graphite {
     static let success = NSColor(hex: 0x5ad394)
     static let danger = NSColor(hex: 0xff8a80)
     static let dangerSoft = NSColor(hex: 0xff6b61, alpha: 0.09)
-    static let hoverWash = NSColor(white: 1, alpha: 0.03)
+    static let hoverWash = NSColor(white: 1, alpha: 0.06)  // --panel-hover
 
     static let connectionColors = ["#4c9aff", "#ff9f43", "#3dd6c6", "#b48cff", "#ff6b8a", "#7ed957", "#f0b14c", "#8e8e93"]
     static let defaultConnectionColor = "#4c9aff"

@@ -39,6 +39,121 @@ final class SQLTextView: NSTextView {
         }
     }
 
+    // MARK: Bracket and quote pairing (CodeMirror's closeBrackets)
+
+    private static let pairs: [String: String] = ["(": ")", "[": "]", "{": "}", "'": "'", "\"": "\"", "`": "`"]
+    private static let closers: Set<String> = [")", "]", "}", "'", "\"", "`"]
+
+    override func insertText(_ insertString: Any, replacementRange: NSRange) {
+        guard let typed = insertString as? String, typed.count == 1, replacementRange.location == NSNotFound else {
+            super.insertText(insertString, replacementRange: replacementRange)
+            return
+        }
+        let text = string as NSString
+        let selection = selectedRange()
+        let end = NSMaxRange(selection)
+        let next = end < text.length ? text.substring(with: NSRange(location: end, length: 1)) : ""
+        // Type over a closer that is already there.
+        if selection.length == 0, Self.closers.contains(typed), next == typed {
+            setSelectedRange(NSRange(location: end + 1, length: 0))
+            return
+        }
+        if let closer = Self.pairs[typed] {
+            if selection.length > 0 {
+                let inner = text.substring(with: selection)
+                super.insertText(typed + inner + closer, replacementRange: selection)
+                setSelectedRange(NSRange(location: selection.location + 1, length: selection.length))
+                return
+            }
+            let previous = selection.location > 0 ? text.substring(with: NSRange(location: selection.location - 1, length: 1)) : ""
+            let beforeWord = previous.first.map { $0.isLetter || $0.isNumber || $0 == "_" } ?? false
+            let nextFree = next.isEmpty || next.rangeOfCharacter(from: .whitespacesAndNewlines) != nil || ")]},;".contains(next)
+            if nextFree && !(typed == closer && beforeWord) {
+                super.insertText(typed + closer, replacementRange: replacementRange)
+                setSelectedRange(NSRange(location: selection.location + 1, length: 0))
+                return
+            }
+        }
+        super.insertText(insertString, replacementRange: replacementRange)
+    }
+
+    /// Backspace inside an empty pair removes both halves.
+    override func deleteBackward(_ sender: Any?) {
+        let selection = selectedRange()
+        let text = string as NSString
+        if selection.length == 0, selection.location > 0, selection.location < text.length {
+            let previous = text.substring(with: NSRange(location: selection.location - 1, length: 1))
+            let next = text.substring(with: NSRange(location: selection.location, length: 1))
+            let pair = NSRange(location: selection.location - 1, length: 2)
+            if Self.pairs[previous] == next, shouldChangeText(in: pair, replacementString: "") {
+                replaceCharacters(in: pair, with: "")
+                didChangeText()
+                return
+            }
+        }
+        super.deleteBackward(sender)
+    }
+
+    /// Command+/ toggles `-- ` line comments on the selected lines.
+    @objc func toggleComment(_ sender: Any?) {
+        guard engine != .redis else { return }
+        let text = string as NSString
+        let selection = selectedRange()
+        let lines = text.lineRange(for: selection)
+        let block = text.substring(with: lines)
+        let trailingNewline = block.hasSuffix("\n")
+        var parts = block.components(separatedBy: "\n")
+        if trailingNewline { parts.removeLast() }
+        let content = parts.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        guard !content.isEmpty else { return }
+        let commented = content.allSatisfy { $0.trimmingCharacters(in: .whitespaces).hasPrefix("--") }
+        let indent = content.map { line in line.prefix { $0 == " " || $0 == "\t" }.count }.min() ?? 0
+        let updated = parts.map { line -> String in
+            if line.trimmingCharacters(in: .whitespaces).isEmpty { return line }
+            if commented {
+                guard let marker = line.range(of: "--") else { return line }
+                var rest = line[marker.upperBound...]
+                if rest.hasPrefix(" ") { rest = rest.dropFirst() }
+                return String(line[..<marker.lowerBound]) + rest
+            }
+            let index = line.index(line.startIndex, offsetBy: indent)
+            return String(line[..<index]) + "-- " + line[index...]
+        }
+        let replacement = updated.joined(separator: "\n") + (trailingNewline ? "\n" : "")
+        guard shouldChangeText(in: lines, replacementString: replacement) else { return }
+        replaceCharacters(in: lines, with: replacement)
+        didChangeText()
+        if selection.length == 0 {
+            let shift = (updated[0] as NSString).length - (parts[0] as NSString).length
+            setSelectedRange(NSRange(location: max(lines.location, selection.location + shift), length: 0))
+        } else {
+            setSelectedRange(NSRange(location: lines.location, length: (replacement as NSString).length - (trailingNewline ? 1 : 0)))
+        }
+    }
+
+    override func setSelectedRanges(_ ranges: [NSValue], affinity: NSSelectionAffinity, stillSelecting: Bool) {
+        super.setSelectedRanges(ranges, affinity: affinity, stillSelecting: stillSelecting)
+        // Repaint the current-line band.
+        needsDisplay = true
+        enclosingScrollView?.verticalRulerView?.needsDisplay = true
+    }
+
+    /// The line holding the insertion point, in view coordinates.
+    var currentLineRect: NSRect? {
+        guard let layoutManager else { return nil }
+        let text = string as NSString
+        let location = min(selectedRange().location, text.length)
+        let origin = textContainerOrigin
+        if location == text.length, text.length == 0 || text.hasSuffix("\n") {
+            let extra = layoutManager.extraLineFragmentRect
+            guard !extra.isEmpty else { return nil }
+            return NSRect(x: 0, y: extra.minY + origin.y, width: bounds.width, height: extra.height)
+        }
+        let glyph = layoutManager.glyphIndexForCharacter(at: min(location, max(0, text.length - 1)))
+        let line = layoutManager.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
+        return NSRect(x: 0, y: line.minY + origin.y, width: bounds.width, height: line.height)
+    }
+
     override func completions(forPartialWordRange charRange: NSRange, indexOfSelectedItem index: UnsafeMutablePointer<Int>) -> [String]? {
         index.pointee = -1
         return Helpers.completions(engine: engine, prefix: (string as NSString).substring(with: charRange))
@@ -48,7 +163,7 @@ final class SQLTextView: NSTextView {
         guard let storage = textStorage else { return }
         let full = NSRange(location: 0, length: storage.length)
         storage.beginEditing()
-        storage.setAttributes([.font: Graphite.mono(13), .foregroundColor: Graphite.text], range: full)
+        storage.setAttributes([.font: Graphite.mono(12.5), .foregroundColor: Graphite.text], range: full)
         for (range, kind) in Helpers.highlight(engine: engine, text: string) where NSMaxRange(range) <= storage.length {
             let color: NSColor
             switch kind {
@@ -61,7 +176,7 @@ final class SQLTextView: NSTextView {
             storage.addAttribute(.foregroundColor, value: color, range: range)
         }
         storage.endEditing()
-        typingAttributes = [.font: Graphite.mono(13), .foregroundColor: Graphite.text]
+        typingAttributes = [.font: Graphite.mono(12.5), .foregroundColor: Graphite.text]
     }
 
     /// Recomputes the outlined statement; returns the current run target.
@@ -78,6 +193,11 @@ final class SQLTextView: NSTextView {
 
     override func drawBackground(in rect: NSRect) {
         super.drawBackground(in: rect)
+        // `.cm-activeLine`.
+        if let line = currentLineRect {
+            NSColor(white: 1, alpha: 0.025).setFill()
+            line.fill()
+        }
         guard let activeRange, let layoutManager, let textContainer else { return }
         let glyphs = layoutManager.glyphRange(forCharacterRange: activeRange, actualCharacterRange: nil)
         var union = NSRect.null
@@ -88,9 +208,14 @@ final class SQLTextView: NSTextView {
         _ = textContainer
         let origin = textContainerOrigin
         let band = NSRect(x: 0, y: union.minY + origin.y, width: bounds.width, height: union.height)
-        Graphite.accent.withAlphaComponent(0.06).setFill()
+        // `.cm-active-sql-line`: a faint band, a left bar, and hairlines above
+        // and below the statement.
+        Graphite.accent.withAlphaComponent(0.05).setFill()
         band.fill()
-        Graphite.accent.withAlphaComponent(0.7).setFill()
+        Graphite.accent.withAlphaComponent(0.2).setFill()
+        NSRect(x: 0, y: band.minY, width: band.width, height: 1).fill()
+        NSRect(x: 0, y: band.maxY - 1, width: band.width, height: 1).fill()
+        Graphite.accent.withAlphaComponent(0.5).setFill()
         NSRect(x: 0, y: band.minY, width: 2, height: band.height).fill()
     }
 }
@@ -114,12 +239,18 @@ final class LineNumberRuler: NSRulerView {
         Graphite.hairline.setFill()
         NSRect(x: bounds.maxX - 1, y: 0, width: 1, height: bounds.height).fill()
         guard let editor, let layoutManager = editor.layoutManager, let container = editor.textContainer else { return }
+        // `.cm-activeLineGutter`.
+        if let line = (editor as? SQLTextView)?.currentLineRect {
+            let top = convert(NSPoint(x: 0, y: line.minY), from: editor).y
+            NSColor(white: 1, alpha: 0.025).setFill()
+            NSRect(x: 0, y: top, width: bounds.width - 1, height: line.height).fill()
+        }
         let text = editor.string as NSString
         let visible = editor.visibleRect
         let glyphs = layoutManager.glyphRange(forBoundingRect: visible, in: container)
         let characters = layoutManager.characterRange(forGlyphRange: glyphs, actualGlyphRange: nil)
         var line = text.substring(to: characters.location).components(separatedBy: "\n").count
-        let attributes: [NSAttributedString.Key: Any] = [.font: Graphite.mono(11.5), .foregroundColor: Graphite.faint]
+        let attributes: [NSAttributedString.Key: Any] = [.font: Graphite.mono(11.5), .foregroundColor: NSColor(hex: 0x5c5c62)]
         let yOffset = convert(NSPoint.zero, from: editor).y
         var index = characters.location
         func draw(_ number: Int, _ lineRect: NSRect) {
@@ -165,7 +296,11 @@ final class HistoryRow: NSView {
     override var isFlipped: Bool { true }
     override func mouseEntered(with event: NSEvent) { hovering = true; needsDisplay = true }
     override func mouseExited(with event: NSEvent) { hovering = false; needsDisplay = true }
-    override func mouseUp(with event: NSEvent) { onPick(string(entry["sql"])) }
+    override func mouseDown(with event: NSEvent) {}
+    override func mouseUp(with event: NSEvent) {
+        guard bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
+        onPick(string(entry["sql"]))
+    }
     override func accessibilityPerformPress() -> Bool { onPick(string(entry["sql"])); return true }
 
     static let timeFormat: DateFormatter = {
@@ -176,7 +311,7 @@ final class HistoryRow: NSView {
     }()
 
     override func draw(_ dirtyRect: NSRect) {
-        if hovering { Graphite.hoverWash.setFill(); bounds.fill() }
+        if hovering { Graphite.hoverWash.setFill(); NSBezierPath(roundedRect: bounds, xRadius: 6, yRadius: 6).fill() }
         let success = bool(entry["success"])
         (success ? Icon.check : Icon.alert).draw(in: NSRect(x: 14, y: 11, width: 12, height: 12),
                                                  color: success ? Graphite.success : Graphite.danger)
@@ -185,7 +320,7 @@ final class HistoryRow: NSView {
         paragraph.lineBreakMode = .byTruncatingTail
         (sql as NSString).draw(with: NSRect(x: 34, y: 9, width: bounds.width - 44, height: 16),
                                options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine],
-                               attributes: [.font: Graphite.mono(12), .foregroundColor: Graphite.secondary, .paragraphStyle: paragraph])
+                               attributes: [.font: Graphite.mono(12), .foregroundColor: hovering ? Graphite.text : Graphite.secondary, .paragraphStyle: paragraph])
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         let raw = string(entry["executedAt"])
@@ -205,6 +340,8 @@ final class QueryPane: NSView, NSTextViewDelegate, NSSplitViewDelegate {
     let editor = SQLTextView()
     private let editorScroll = NSScrollView()
     private let hint = label("", font: Graphite.ui(11), color: Graphite.faint)
+    // `.editor-selection-run`: floats over the editor while text is selected.
+    private lazy var selectionRunButton = GButton("Run selection", icon: .play, style: .primary) { [weak self] in self?.runFromEditor() }
     private let historyCount = label("0", font: Graphite.ui(11), color: Graphite.faint)
     private let historyList = vstack([], spacing: 0)
     private let historyEmpty = label("Run a query to start history.", font: Graphite.ui(13), color: Graphite.muted)
@@ -220,7 +357,8 @@ final class QueryPane: NSView, NSTextViewDelegate, NSSplitViewDelegate {
     // Optional: the editor's selection delegate reloads before `build()` ends.
     private var metaBelowTop: NSLayoutConstraint?
     private var metaBelowError: NSLayoutConstraint?
-    private let placeholder = label("Results will appear here.", font: Graphite.ui(13), color: Graphite.muted)
+    // `.query-empty` / `.empty-state`: faint 12.5 pt, centred.
+    private let placeholder = label("Results will appear here.", font: Graphite.ui(12.5), color: Graphite.faint)
     private(set) var embeddedPane: TablePane?
     private var shownResult: UUID?
     private let split = NSSplitView()
@@ -257,10 +395,12 @@ final class QueryPane: NSView, NSTextViewDelegate, NSSplitViewDelegate {
         editor.isAutomaticSpellingCorrectionEnabled = false
         editor.isContinuousSpellCheckingEnabled = false
         editor.smartInsertDeleteEnabled = false
+        editor.usesFindBar = true
+        editor.isIncrementalSearchingEnabled = true
         editor.drawsBackground = true
         editor.backgroundColor = Graphite.bg
         editor.insertionPointColor = Graphite.accent
-        editor.selectedTextAttributes = [.backgroundColor: Graphite.accent.withAlphaComponent(0.3)]
+        editor.selectedTextAttributes = [.backgroundColor: Graphite.accent.withAlphaComponent(0.28)]
         editor.textContainerInset = NSSize(width: 6, height: 8)
         editor.isVerticallyResizable = true
         editor.isHorizontallyResizable = true
@@ -268,7 +408,7 @@ final class QueryPane: NSView, NSTextViewDelegate, NSSplitViewDelegate {
         editor.textContainer?.widthTracksTextView = false
         editor.textContainer?.containerSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         editor.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
-        editor.font = Graphite.mono(13)
+        editor.font = Graphite.mono(12.5)
         editor.string = tab.sql
         editor.setAccessibilityLabel(engine == .redis ? "Redis command editor" : "SQL editor")
         editor.onRun = { [weak self] in self?.runFromEditor() }
@@ -304,6 +444,21 @@ final class QueryPane: NSView, NSTextViewDelegate, NSSplitViewDelegate {
         hintBar.widthAnchor.constraint(equalTo: editorColumn.widthAnchor).isActive = true
         editorScroll.setContentHuggingPriority(.init(1), for: .vertical)
         editorCard.pin(editorColumn, insets: NSEdgeInsets(top: 1, left: 1, bottom: 1, right: 1))
+        selectionRunButton.minHeight = 26
+        selectionRunButton.labelFont = Graphite.ui(12, .semibold)
+        selectionRunButton.toolTip = engine == .redis
+            ? "Run the selected command (Command/Ctrl+Enter)" : "Run the selected SQL (Command/Ctrl+Enter)"
+        let lift = NSShadow()
+        lift.shadowColor = NSColor(white: 0, alpha: 0.35)
+        lift.shadowOffset = NSSize(width: 0, height: -6)
+        lift.shadowBlurRadius = 18
+        selectionRunButton.shadow = lift
+        selectionRunButton.isHidden = true
+        editorCard.addSubview(selectionRunButton)
+        NSLayoutConstraint.activate([
+            selectionRunButton.topAnchor.constraint(equalTo: editorCard.topAnchor, constant: 9),
+            selectionRunButton.trailingAnchor.constraint(equalTo: editorCard.trailingAnchor, constant: -11),
+        ])
 
         let historyCard = PanelView(fill: Graphite.chrome)
         historyCard.radius = 10
@@ -416,6 +571,8 @@ final class QueryPane: NSView, NSTextViewDelegate, NSSplitViewDelegate {
         runButton.title = running == "run" ? "Running…"
             : target?.selection == true ? "Run selection" : engine == .redis ? "Run command" : "Run statement"
         runButton.isEnabled = running == nil && target != nil
+        selectionRunButton.isHidden = target?.selection != true
+        selectionRunButton.isEnabled = running == nil
         refreshButton.title = running == "refresh" ? "Refreshing…" : "Refresh"
         refreshButton.isEnabled = running == nil && tab.lastExecuted != nil && !(embeddedPane?.tab.dirty ?? false)
         refreshButton.toolTip = tab.lastExecuted != nil
@@ -452,6 +609,7 @@ final class QueryPane: NSView, NSTextViewDelegate, NSSplitViewDelegate {
             [resultMeta, editableChip, readOnlyChip, truncatedChip, resultCard].forEach { $0.isHidden = true }
             embeddedPane?.removeFromSuperview()
             embeddedPane = nil
+            placeholder.stringValue = "Results will appear here."
             placeholder.isHidden = false
             shownResult = nil
             return
@@ -489,6 +647,10 @@ final class QueryPane: NSView, NSTextViewDelegate, NSSplitViewDelegate {
         readOnlyChip.isHidden = columns.isEmpty
         readOnlyChip.toolTip = "This query does not resolve to one complete table, so DBM cannot safely map edits back to rows."
         resultCard.isHidden = columns.isEmpty
+        if columns.isEmpty {
+            placeholder.stringValue = "Statement completed without a result set."
+            placeholder.isHidden = false
+        }
         if shownResult != tab.resultID {
             shownResult = tab.resultID
             resultGrid.show(columns: columns, rows: result["rows"] as? [[Any]] ?? [])

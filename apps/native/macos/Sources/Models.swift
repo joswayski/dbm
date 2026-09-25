@@ -26,6 +26,15 @@ func displayValue(_ value: Any) -> String {
     if let number = value as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() {
         return number.boolValue ? "true" : "false"
     }
+    if let number = value as? NSNumber {
+        // JSONSerialization writes doubles with 17 significant digits
+        // (17169.849999999999); print the shortest form, like JavaScript.
+        let type = String(cString: number.objCType)
+        guard type == "d" || type == "f" else { return number.stringValue }
+        let double = number.doubleValue
+        if double.isFinite, double == double.rounded(), abs(double) < 1e15 { return String(Int64(double)) }
+        return "\(double)"
+    }
     return jsonKey(value)
 }
 
@@ -267,6 +276,17 @@ final class TableState {
     }
 
     /// Stages deletion of `rows`, or restores them when all are already staged.
+    /// Like the desktop's `discardPendingRow`: undoing a delete keeps the
+    /// row's edits; otherwise the staged change is dropped.
+    func discardPending(_ row: Int) {
+        guard let pendingRow = pending[row] else { return }
+        if pendingRow.deleted, !jsonEqual(pendingRow.changes, pendingRow.original) {
+            pendingRow.deleted = false
+        } else {
+            pending[row] = nil
+        }
+    }
+
     func toggleDelete(_ rows: [Int]) {
         guard let page else { return }
         let restore = rows.allSatisfy { pending[$0]?.deleted == true }
@@ -354,6 +374,15 @@ enum Helpers {
         }
     }
 
+    /// The common prefix and suffix of two values and what changed between.
+    static func inlineDiff(before: String, after: String) -> (prefix: String, removed: String, added: String, suffix: String) {
+        guard case .success(let value) = Bridge.helper(["command": "inlineDiff", "before": before, "after": after]) else {
+            return ("", before, after, "")
+        }
+        let diff = dictionary(value)
+        return (string(diff["prefix"]), string(diff["removed"]), string(diff["added"]), string(diff["suffix"]))
+    }
+
     static func completions(engine: Engine, prefix: String) -> [String] {
         guard case .success(let value) = Bridge.helper(["command": "completions", "engine": engine.rawValue, "prefix": prefix]) else { return [] }
         return value as? [String] ?? []
@@ -397,4 +426,15 @@ func largeValueSize(_ value: Any?) -> String? {
     let bytes = text.utf8.count
     guard bytes > 64 * 1024 else { return nil }
     return bytes >= 1024 * 1024 ? String(format: "%.1f MiB", Double(bytes) / 1_048_576) : "\(bytes / 1024) KiB"
+}
+
+private let countFormatter: NumberFormatter = {
+    let formatter = NumberFormatter()
+    formatter.numberStyle = .decimal
+    return formatter
+}()
+
+/// A count with grouping separators, like the desktop's `toLocaleString()`.
+func formatCount(_ value: Int) -> String {
+    countFormatter.string(from: NSNumber(value: value)) ?? String(value)
 }
