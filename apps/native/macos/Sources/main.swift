@@ -121,8 +121,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, Qu
             showError("Save or discard staged changes before closing DBM.")
             return .terminateCancel
         }
-        if !saving.isEmpty || !running.isEmpty {
-            showError("Wait for the active database operation to finish before closing DBM.")
+        // Reads can be abandoned; a save or export stopped halfway can't.
+        if !saving.isEmpty || !exporting.isEmpty {
+            showError("Wait for the save or export to finish before closing DBM.")
             return .terminateCancel
         }
         return .terminateNow

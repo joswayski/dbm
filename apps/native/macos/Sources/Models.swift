@@ -389,3 +389,12 @@ enum Helpers {
         Bridge.helper(["command": "parseConnectionUrl", "url": url]).map { dictionary($0) }
     }
 }
+
+/// Text values above 64 KiB are previewed, not edited in place: laying out
+/// megabytes in a text field is slow. Returns a size like "1.0 MiB".
+func largeValueSize(_ value: Any?) -> String? {
+    guard let text = value as? String else { return nil }
+    let bytes = text.utf8.count
+    guard bytes > 64 * 1024 else { return nil }
+    return bytes >= 1024 * 1024 ? String(format: "%.1f MiB", Double(bytes) / 1_048_576) : "\(bytes / 1024) KiB"
+}

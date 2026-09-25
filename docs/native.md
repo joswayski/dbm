@@ -132,6 +132,34 @@ cold launch, idle CPU/wakeups, resident memory, connect/query latency, scrolling
 10k rows, large fields, and repeated connection cycles. Record OS/hardware and
 multiple runs; do not compare an optimized native client against debug Tauri.
 
+### First measurements (Linux, 2026-09-25)
+
+Release builds of both apps, same VM, same profile store and disposable
+PostgreSQL 16. The VM has no GPU (Xvfb, software Vulkan, WebKitGTK without
+compositing), so treat these as relative numbers only; repeat them on real
+macOS and Windows hardware before cutover.
+
+| | egui workbench | Tauri |
+| --- | --- | --- |
+| Resident memory, idle (all processes) | 145 MB (3 processes) | 380 MB (5 processes) |
+| Idle CPU over 20 s | ~0% | ~0.05% |
+| Warm launch to window | under 0.5 s | under 0.5 s |
+| First (cold) launch | 3.5 s | 2.0 s |
+
+egui workbench under load:
+- A 10,000-row result (4 columns, 200-byte text) returned in 368 ms at
+  213 MB. Scrolling stays smooth because only visible rows are laid out.
+- 20 rows of 1 MiB text render truncated in the grid at 218 MB.
+- A value above 64 KiB is shown as a read-only preview in the inspector and
+  refused by the inline editor, with a note to update it with a query. An
+  editable 1 MiB field took 3.4 s of CPU and grew memory to 786 MB. The
+  AppKit host applies the same limit.
+- Stopping PostgreSQL mid-session shows the connection error inline; after
+  a restart the next refresh reconnects.
+- Closing the window while a long query runs exits immediately; the server
+  finishes that statement on its own, as with Tauri. Closing is refused only
+  with staged edits or while a save or export is writing.
+
 ## Validation
 
 ```sh
