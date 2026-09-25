@@ -21,6 +21,13 @@ otherwise. The PostgreSQL and MySQL tests that need a live server run only when
 `DBM_TEST_MYSQL_PORT` (a local MySQL or MariaDB allowing passwordless `root` on
 127.0.0.1) is set.
 
+The database adapters, models, session state, credentials, and SQLite store live
+in `crates/dbm-core`, shared by Tauri and the experimental native clients. They can
+be tested without WebKit/Tauri using `cargo test -p dbm-core -p dbm-native-bridge`.
+See [native development](native.md) for the macOS AppKit/C ABI build and the
+separate Windows/Linux egui Cargo workspace and checks. These do not replace
+`npm run dev`, installers, or the shipping updater until parity is verified.
+
 ## Amp orbs
 
 Amp orbs run [`.agents/setup`](../.agents/setup) to prepare a fresh machine: it installs Tauri's

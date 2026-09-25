@@ -53,3 +53,60 @@ jobs:
       - run: cargo check --workspace --all-targets
       - run: cargo test --workspace --all-targets
       - run: cargo clippy --workspace --all-targets -- -D warnings
+
+  appkit:
+    name: AppKit (macos-14)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.94.0
+      - name: Build AppKit development preview
+        run: bash apps/native/macos/build.sh
+      - name: Archive AppKit development preview
+        run: ditto -c -k --keepParent 'target/native/DBM Native.app' target/native/DBM-Native-macos.zip
+      - name: Render isolated AppKit fixture states
+        run: |
+          mkdir -p target/native/snapshots
+          python3 -c 'import subprocess; subprocess.run(["target/native/DBM Native.app/Contents/MacOS/DBMNative", "--demo", "--snapshot-dir", "target/native/snapshots"], check=True, timeout=120)'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: DBM-Native-macos-development
+          path: |
+            target/native/DBM-Native-macos.zip
+            target/native/snapshots
+
+  native-workbench:
+    name: Native workbench (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2025, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Native Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev pkg-config libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev libxi-dev libxrandr-dev libvulkan1 mesa-vulkan-drivers
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.94.0
+          components: rustfmt, clippy
+      - run: cargo fmt --manifest-path apps/native/workbench/Cargo.toml --all -- --check
+      - run: cargo test --manifest-path apps/native/workbench/Cargo.toml --locked
+      - run: cargo clippy --manifest-path apps/native/workbench/Cargo.toml --locked --all-targets -- -D warnings
+      - run: cargo build --manifest-path apps/native/workbench/Cargo.toml --locked --release
+      - name: Archive Linux native development binary
+        if: runner.os == 'Linux'
+        run: tar -czf DBM-Native-linux.tar.gz -C apps/native/workbench/target/release dbm-workbench
+      - name: Archive Windows native development binary
+        if: runner.os == 'Windows'
+        run: Compress-Archive apps/native/workbench/target/release/dbm-workbench.exe DBM-Native-windows.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DBM-Native-${{ runner.os }}-development
+          path: DBM-Native-*

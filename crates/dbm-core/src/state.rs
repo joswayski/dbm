@@ -7,7 +7,10 @@ use uuid::Uuid;
 
 use crate::error::{AppError, AppResult};
 use crate::keyring_store::CredentialStore;
-use crate::models::{ConnectionProfile, ProfileSummary, SaveProfileInput};
+use crate::models::{
+    ConnectionProfile, ProfileSummary, QueryHistoryEntry, QueryRequest, QueryResponse,
+    SaveProfileInput,
+};
 use crate::session::DbSession;
 use crate::storage::LocalStore;
 
@@ -94,5 +97,60 @@ impl AppState {
 
     pub fn save_profile(&self, input: SaveProfileInput) -> AppResult<ConnectionProfile> {
         self.store.save_profile(&input)
+    }
+
+    pub async fn run_query(&self, request: QueryRequest) -> AppResult<QueryResponse> {
+        // History follows the active database, not the saved default.
+        let database = self
+            .session(request.profile_id)
+            .await?
+            .profile()
+            .default_database
+            .clone();
+        let response = if is_read_only_query(&request.sql) {
+            self.with_session_retry(request.profile_id, |session| {
+                let request = &request;
+                async move { session.run_query(&request.sql, request.max_rows).await }
+            })
+            .await
+        } else {
+            self.session(request.profile_id)
+                .await?
+                .run_query(&request.sql, request.max_rows)
+                .await
+        };
+        self.store.add_history(&QueryHistoryEntry {
+            id: Uuid::new_v4(),
+            profile_id: request.profile_id,
+            database,
+            sql: request.sql,
+            executed_at: chrono::Utc::now(),
+            duration_ms: response.as_ref().map_or(0, |result| result.duration_ms),
+            success: response.is_ok(),
+        })?;
+        response
+    }
+}
+
+fn is_read_only_query(sql: &str) -> bool {
+    matches!(
+        sql.split_whitespace()
+            .next()
+            .map(str::to_ascii_lowercase)
+            .as_deref(),
+        Some("select" | "show" | "describe" | "desc" | "explain")
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_read_only_query;
+
+    #[test]
+    fn retries_only_read_only_queries() {
+        assert!(is_read_only_query("SELECT * FROM users"));
+        assert!(is_read_only_query("  EXPLAIN SELECT * FROM users"));
+        assert!(!is_read_only_query("UPDATE users SET active = true"));
+        assert!(!is_read_only_query("DELETE FROM users"));
     }
 }

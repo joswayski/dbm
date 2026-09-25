@@ -1,0 +1,26 @@
+[package]
+name = "dbm-workbench"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.94"
+publish = false
+
+[workspace]
+
+[dependencies]
+chrono = "0.4"
+dbm-core = { path = "../../../crates/dbm-core" }
+eframe = { version = "=0.33.3", default-features = false, features = ["accesskit", "default_fonts", "persistence", "wgpu", "wayland", "x11"] }
+wgpu = { version = "=27.0.1", default-features = false, features = ["std", "vulkan", "dx12", "metal", "wgsl"] }
+egui_extras = "=0.33.3"
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "time"] }
+uuid = { version = "1", features = ["v4"] }
+rfd = { version = "0.17", default-features = false, features = ["xdg-portal"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = "deny"
+pedantic = { level = "allow", priority = -1 }
