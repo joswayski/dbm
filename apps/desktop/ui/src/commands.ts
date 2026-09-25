@@ -1,5 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
+import { DEMO_MODE, DEMO_SCHEMA, demoHistory, demoProfiles, demoQueryResponse, demoRows, demoTableMetadata } from "./browserDemo";
+
 import type {
   ConnectionProfile,
   DatabaseRef,
@@ -20,8 +22,8 @@ import type {
   WorkspaceInfo,
 } from "./types";
 
-let browserProfiles: ProfileSummary[] = [];
-const browserHistory: QueryHistoryEntry[] = [];
+let browserProfiles: ProfileSummary[] = DEMO_MODE ? demoProfiles() : [];
+const browserHistory: QueryHistoryEntry[] = DEMO_MODE ? demoHistory() : [];
 const browserRows: Record<string, JsonValue[][]> = {
   users: Array.from({ length: 12 }, (_, index) => [index + 1, `person${index + 1}@example.com`, index % 3 !== 0, String(index + 100)]),
   orders: Array.from({ length: 12 }, (_, index) => [index + 1, index + 10, index % 2 ? "paid" : "pending", String(index + 100)]),
@@ -31,6 +33,7 @@ const browserRows: Record<string, JsonValue[][]> = {
   ],
   greeting: [["greeting", "hello"]],
   "user:1": [["name", "Ada"], ["role", "engineer"]],
+  ...(DEMO_MODE ? demoRows() : {}),
 };
 
 function inTauri(): boolean {
@@ -215,7 +218,7 @@ export function loadSchemaTree(profileId: string): Promise<SchemaNode[]> {
         ],
       }];
     }
-    return browserSchema;
+    return DEMO_MODE ? DEMO_SCHEMA : browserSchema;
   });
 }
 
@@ -257,6 +260,7 @@ export function runQuery(request: QueryRequest): Promise<QueryResponse> {
       success: true,
     };
     browserHistory.unshift(entry);
+    if (DEMO_MODE && /\bselect\b/i.test(request.sql)) return demoQueryResponse();
     if (/^\s*(select|show|with|values|ping|get|hgetall|scan|keys|info)/i.test(request.sql)) {
       const redisPing = /^\s*ping\s*$/i.test(request.sql);
       return {
@@ -394,6 +398,8 @@ export async function revealExportedFile(path: string): Promise<void> {
 }
 
 function browserTableMetadata(schema: string, table: string): TableMetadata {
+  const demo = DEMO_MODE ? demoTableMetadata(schema, table) : null;
+  if (demo) return demo;
   if (schema === "keys" && table === "all") {
     return {
       schema,

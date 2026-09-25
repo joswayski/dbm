@@ -43,3 +43,8 @@ export function parseCellInput(text: string, column: TableColumn, original: Json
   }
   return text;
 }
+
+/** Numeric columns right-align in grids so digits line up. */
+export function numericColumn(column: Pick<TableColumn, "dataType">): boolean {
+  return /^(?:smallint|integer|bigint|int\d?|tinyint|mediumint|serial\d?|bigserial|smallserial|numeric|decimal|real|double|float\d?|money)\b/i.test(column.dataType);
+}

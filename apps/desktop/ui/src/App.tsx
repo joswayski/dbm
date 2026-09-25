@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import CodeMirror, { Decoration, ViewPlugin, type DecorationSet, type EditorView, type ReactCodeMirrorRef, type ViewUpdate } from "@uiw/react-codemirror";
 import { MySQL, PostgreSQL, SQLDialect, sql } from "@codemirror/lang-sql";
 
+import { numericColumn } from "./cellValues";
 import * as commands from "./commands";
 import { parseConnectionUrl } from "./connectionUrl";
 import { filterSchemaNodes } from "./schemaFilter";
@@ -1122,15 +1123,16 @@ export function QueryView({
             >Read-only result</span> : null}
           </span>
         </div>
-        <ResultTable columns={response.columns.map((column) => column.name)} rows={response.rows} />
+        <ResultTable columns={response.columns} rows={response.rows} />
       </div> : <div className="query-empty">Results will appear here.</div>}
     </div>
   );
 }
 
-function ResultTable({ columns, rows }: { columns: string[]; rows: JsonValue[][] }) {
+function ResultTable({ columns, rows }: { columns: QueryResponse["columns"]; rows: JsonValue[][] }) {
   if (columns.length === 0) return <div className="empty-state">Statement completed without a result set.</div>;
-  return <div className="result-grid-wrap"><table className="data-grid result-grid"><thead><tr>{columns.map((column, columnIndex) => <th key={columnIndex}>{column}</th>)}</tr></thead><tbody>{rows.map((row, rowIndex) => <tr key={rowIndex}>{columns.map((_column, columnIndex) => <td key={columnIndex}><span className={row[columnIndex] === null ? "null-value" : "cell-value"}>{commands.toDisplayValue(row[columnIndex] ?? null)}</span></td>)}</tr>)}</tbody></table></div>;
+  const numeric = columns.map((column) => numericColumn(column));
+  return <div className="result-grid-wrap"><table className="data-grid result-grid"><thead><tr>{columns.map((column, columnIndex) => <th key={columnIndex} className={numeric[columnIndex] ? "numeric-cell" : undefined}>{column.name}</th>)}</tr></thead><tbody>{rows.map((row, rowIndex) => <tr key={rowIndex}>{columns.map((_column, columnIndex) => <td key={columnIndex} className={numeric[columnIndex] ? "numeric-cell" : undefined}><span className={row[columnIndex] === null ? "null-value" : "cell-value"}>{commands.toDisplayValue(row[columnIndex] ?? null)}</span></td>)}</tr>)}</tbody></table></div>;
 }
 
 function ProfileModal({

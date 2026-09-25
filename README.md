@@ -6,6 +6,16 @@ and Redis: saved connections, database and schema or keyspace exploration,
 paginated table and key browsing, SQL or Redis command execution, and safe
 local profile storage.
 
+![Editing a table: a staged edit, a staged delete, a cell mid-edit, and the row inspector](docs/screenshots/table-editing.png)
+
+| | |
+| --- | --- |
+| ![SQL workbench with results and history](docs/screenshots/query.png) | ![Connection editor](docs/screenshots/connection.png) |
+| ![Before/after preview of a staged edit](docs/screenshots/change-preview.png) | ![Browsing a table with the row inspector](docs/screenshots/table-browsing.png) |
+
+The screenshots come from the browser preview's demo data (see below), not a
+real database.
+
 ## Development
 
 Prerequisites:
@@ -147,6 +157,11 @@ Passwords are stored in the operating system credential store when available.
 
 The browser preview used by Vite has a small in-memory mock so the layout can be
 worked on without launching Tauri. The real desktop app uses the Rust commands.
+Add `?demo` to the preview URL to load a larger sample dataset (four
+connections, a `public` schema with several tables, query results, and
+history). `node scripts/screenshots.mjs` uses that dataset to regenerate
+`docs/screenshots/`. It needs Playwright with Chromium installed
+(`npm install --global playwright && npx playwright install chromium`).
 
 ## Deliberate follow-ups
 

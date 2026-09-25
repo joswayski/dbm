@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from "react";
 import { createPortal } from "react-dom";
 
-import { editableText, parseCellInput } from "./cellValues";
+import { editableText, numericColumn, parseCellInput } from "./cellValues";
 import * as commands from "./commands";
 import { Icon } from "./Icon";
 import type {
@@ -1070,13 +1070,12 @@ function tableRowKey(metadata: TableMetadata, row: JsonValue[], fallbackIndex: n
   return `pk:${JSON.stringify(values)}`;
 }
 
-function numericColumn(column: TableColumn): boolean {
-  return /^(?:smallint|integer|bigint|int\d?|tinyint|mediumint|serial\d?|bigserial|smallserial|numeric|decimal|real|double|float\d?|money)\b/i.test(column.dataType);
-}
-
 function defaultColumnWidth(column: TableColumn): number {
   if (/json|array/i.test(column.dataType)) return 320;
-  if (/text|character|timestamp/i.test(column.dataType)) return 220;
+  if (/timestamp/i.test(column.dataType)) return 230;
+  if (/text|character|uuid/i.test(column.dataType)) return 220;
+  if (/^bool/i.test(column.dataType)) return 110;
+  if (numericColumn(column)) return 130;
   return 160;
 }
 
