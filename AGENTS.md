@@ -12,7 +12,7 @@
 - `apps/desktop` contains the Tauri desktop application (`@dbm/desktop`) and its React UI.
 - `apps/desktop/ui/src` is the React frontend (Vite, Zustand, CodeMirror SQL editor).
 - `apps/desktop/src-tauri/src` is the Rust backend (Postgres, MySQL, keyring, local SQLite storage, updates).
-- `docs/releases.md` contains public-release signing, notarization, and publishing requirements.
+- `docs/` holds features, development setup, releases (signing, notarization, publishing), the design system, and screenshots.
 - `scripts` contains build and install helpers.
 - There is no separate monorepo package for the UI; frontend and backend live under `apps/desktop`.
 - UI calls Tauri through `commands.ts`. The Vite browser preview uses in-memory mocks in that module so layout work does not require Tauri.
@@ -46,8 +46,8 @@
 
 ## Documentation
 
-- Every pull request must leave the root `README.md` accurate. Update it when a change affects features, platform support, setup, build commands, privacy, networking, releases, or what is implemented vs planned.
-- Keep the root README product- and developer-focused. Put detailed public-release signing and publishing procedures in `docs/releases.md`.
+- Every pull request must leave the root `README.md` and the docs it links to accurate. Update it when a change affects features, platform support, setup, build commands, privacy, networking, releases, or what is implemented vs planned.
+- Keep the root README short and visual: screenshots, the download link, a few feature bullets, and links. Put details in `docs/`: features and follow-ups in `docs/features.md`, setup and builds in `docs/development.md`, releases in `docs/releases.md`.
 - If a pull request does not need a README edit, still verify that its changes do not make the README inaccurate; do not add no-op wording solely to touch the file.
 - Keep current behavior and roadmap / deliberate follow-ups distinct, especially for adapters and transports that are not implemented yet.
 
