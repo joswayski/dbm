@@ -90,7 +90,7 @@ jobs:
       matrix:
         include:
           - os: macos-14
-            args: "--bundles dmg"
+            args: "--bundles app,dmg"
           - os: windows-2025
             args: "--bundles nsis"
           - os: ubuntu-24.04
