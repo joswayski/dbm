@@ -148,10 +148,10 @@ private final class ChangePreviewCard: PanelView {
         values.alignment = .top
         values.distribution = .fill
         beforeBox.widthAnchor.constraint(equalTo: afterBox.widthAnchor).isActive = true
-        let column = vstack([rule, name, values], spacing: 6)
-        column.setCustomSpacing(10, after: rule)
-        [rule, values].forEach { $0.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true }
-        return column
+        let block = vstack([rule, name, values], spacing: 6)
+        block.setCustomSpacing(10, after: rule)
+        [rule, values].forEach { $0.widthAnchor.constraint(equalTo: block.widthAnchor).isActive = true }
+        return block
     }
 
     /// `.change-diff-values pre`: wrapped mono text with the changed middle marked.

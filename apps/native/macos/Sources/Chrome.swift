@@ -183,17 +183,17 @@ final class SidebarView: PanelView {
         pin(collapsedBar)
         collapsedBar.isHidden = true
 
-        handle = ResizeHandle { [weak self] delta in self?.resize(by: delta) } reset: { [weak self] in
+        let grip = ResizeHandle { [weak self] delta in self?.resize(by: delta) } reset: { [weak self] in
             self?.widthConstraint.constant = Self.defaultWidth
             UserDefaults.standard.set(Self.defaultWidth, forKey: "dbm.sidebarWidth")
         }
-        let handle = handle!
-        addSubview(handle)
+        handle = grip
+        addSubview(grip)
         NSLayoutConstraint.activate([
-            handle.topAnchor.constraint(equalTo: topAnchor),
-            handle.bottomAnchor.constraint(equalTo: bottomAnchor),
-            handle.trailingAnchor.constraint(equalTo: trailingAnchor),
-            handle.widthAnchor.constraint(equalToConstant: 5),
+            grip.topAnchor.constraint(equalTo: topAnchor),
+            grip.bottomAnchor.constraint(equalTo: bottomAnchor),
+            grip.trailingAnchor.constraint(equalTo: trailingAnchor),
+            grip.widthAnchor.constraint(equalToConstant: 5),
         ])
         if UserDefaults.standard.bool(forKey: "dbm.sidebarCollapsed") { setCollapsed(true) }
     }
