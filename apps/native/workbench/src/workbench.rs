@@ -23,6 +23,7 @@ use uuid::Uuid;
 
 use crate::backend::{Command, ExportRequest, Payload, RequestId, Work, Worker};
 use crate::icons::{self, Icon};
+use crate::messages::{self, Message};
 use crate::table_view::{
     self, PENDING_REFRESH_ERROR, TableAction, TableContext, TableState, result_grid,
 };
@@ -31,8 +32,6 @@ use crate::theme::{self, chip, eyebrow, mono, primary_button, section_label, ui_
 const MAX_QUERY_ROWS: u32 = 10_000;
 const SIDEBAR_COLLAPSED_KEY: &str = "dbm.sidebarCollapsed";
 const LARGE_EXPORT_WARNING_ROWS: u64 = 100_000;
-const ERROR_SECONDS: f64 = 10.0;
-const NOTICE_SECONDS: f64 = 6.0;
 fn engine_label(engine: DatabaseEngine) -> &'static str {
     match engine {
         DatabaseEngine::Postgres => "PostgreSQL",
@@ -282,12 +281,11 @@ struct Completion {
     selected: usize,
 }
 
+/// Bottom-right toast, as the desktop app uses for schema refresh summaries.
 struct Toast {
-    message: String,
-    error: bool,
-    shown_at: f64,
-    /// An exported file the notice can open or reveal.
-    file: Option<std::path::PathBuf>,
+    message: Message,
+    /// A green dot when something changed, the accent dot otherwise.
+    success: bool,
 }
 
 pub struct Workbench {
@@ -308,6 +306,10 @@ pub struct Workbench {
     pending_requests: HashMap<RequestId, RequestMeta>,
     queued: VecDeque<Queued>,
     toast: Option<Toast>,
+    /// App-level error strip under the top bar.
+    banner: Option<Message>,
+    /// Inline errors under each query tab's editor.
+    query_errors: HashMap<u64, Message>,
     profile_form: Option<ProfileForm>,
     confirm_delete: Option<Uuid>,
     confirm_query: Option<ConfirmQuery>,
@@ -349,6 +351,8 @@ impl Workbench {
             pending_requests: HashMap::new(),
             queued: VecDeque::new(),
             toast: None,
+            banner: None,
+            query_errors: HashMap::new(),
             profile_form: None,
             confirm_delete: None,
             confirm_query: None,
@@ -439,34 +443,54 @@ impl Workbench {
                     return;
                 }
             }
-            RequestKind::Table => {
-                if let Some(state) = meta.tab.and_then(|tab| self.tables.get_mut(&tab)) {
-                    state.restore_loaded();
+            RequestKind::Table | RequestKind::Mutation | RequestKind::Export => {
+                if let Some(tab) = meta.tab.filter(|tab| self.tables.contains_key(tab)) {
+                    if meta.kind == RequestKind::Table {
+                        if let Some(state) = self.tables.get_mut(&tab) {
+                            state.restore_loaded();
+                        }
+                    }
+                    self.table_error(tab, error);
+                    return;
                 }
             }
-            RequestKind::Query => self.queue_history(meta.tab),
-            RequestKind::Mutation => {}
-            RequestKind::Export | RequestKind::Other => {}
+            RequestKind::Query => {
+                self.queue_history(meta.tab);
+                if let Some(tab) = meta.tab {
+                    self.query_errors
+                        .insert(tab, Message::error(error, self.now));
+                    return;
+                }
+            }
+            RequestKind::Other => {}
         }
         self.show_error(error);
     }
 
+    /// App-level errors go to the strip under the top bar.
     fn show_error(&mut self, message: impl Into<String>) {
+        self.banner = Some(Message::error(message, self.now));
+    }
+
+    fn show_toast(&mut self, message: impl Into<String>, success: bool) {
         self.toast = Some(Toast {
-            message: message.into(),
-            error: true,
-            shown_at: self.now,
-            file: None,
+            message: Message::notice(message, self.now),
+            success,
         });
     }
 
-    fn show_notice(&mut self, message: impl Into<String>) {
-        self.toast = Some(Toast {
-            message: message.into(),
-            error: false,
-            shown_at: self.now,
-            file: None,
-        });
+    fn table_error(&mut self, tab: u64, message: impl Into<String>) {
+        let now = self.now;
+        match self.tables.get_mut(&tab) {
+            Some(state) => state.message = Some(Message::error(message, now)),
+            None => self.show_error(message),
+        }
+    }
+
+    fn table_notice(&mut self, tab: u64, message: Message) {
+        if let Some(state) = self.tables.get_mut(&tab) {
+            state.message = Some(message);
+        }
     }
 
     fn apply(&mut self, payload: Payload, meta: &RequestMeta) {
@@ -512,9 +536,9 @@ impl Workbench {
                         } else {
                             "Schema"
                         };
-                        let (_, message) =
+                        let (changed, message) =
                             describe_schema_refresh(&previous, &self.schemas[&id], kind);
-                        self.show_notice(message);
+                        self.show_toast(message, changed);
                     }
                 }
             }
@@ -544,26 +568,28 @@ impl Workbench {
                     } else {
                         "changes"
                     };
-                    self.show_notice(format!("{} {noun} saved.", result.applied));
+                    let notice = format!("{} {noun} saved.", result.applied);
+                    self.table_notice(tab, Message::notice(notice, self.now));
                 } else {
-                    self.show_error(format!(
-                        "{} row conflict(s); the table was refreshed.",
-                        result.conflicts.len()
-                    ));
+                    self.table_error(
+                        tab,
+                        format!(
+                            "{} row conflict(s); the table was refreshed.",
+                            result.conflicts.len()
+                        ),
+                    );
                 }
             }
             Payload::Exported(Some((path, rows))) => {
-                let name = path.file_name().map_or_else(
-                    || path.display().to_string(),
-                    |n| n.to_string_lossy().into_owned(),
-                );
-                let noun = if rows == 1 { "row" } else { "rows" };
-                self.show_notice(format!("Exported {rows} filtered {noun} to {name}."));
-                if let Some(toast) = &mut self.toast {
-                    toast.file = Some(path);
+                if let Some(tab) = target {
+                    self.table_notice(tab, Message::exported(path, rows, self.now));
                 }
             }
-            Payload::Exported(None) => self.show_notice("Export canceled."),
+            Payload::Exported(None) => {
+                if let Some(tab) = target {
+                    self.table_notice(tab, Message::notice("Export canceled.", self.now));
+                }
+            }
         }
     }
 
@@ -804,6 +830,7 @@ impl Workbench {
         self.tabs.remove(index);
         self.tables.remove(&tab_id);
         self.query_results.remove(&tab_id);
+        self.query_errors.remove(&tab_id);
         for meta in self.pending_requests.values_mut() {
             if meta.tab == Some(tab_id) {
                 meta.stale = true;
@@ -856,7 +883,8 @@ impl Workbench {
             .map(|tab| tab.id)
             .collect();
         for tab in removed {
-            self.query_results.remove(&tab);
+            self.tables.remove(&tab);
+            self.query_errors.remove(&tab);
             self.tables.remove(&tab);
         }
         self.workspaces.remove(&id);
@@ -907,7 +935,7 @@ impl Workbench {
             .get(&tab_id)
             .is_some_and(|state| !state.pending.is_empty())
         {
-            self.show_error(PENDING_REFRESH_ERROR);
+            self.table_error(tab_id, PENDING_REFRESH_ERROR);
             return;
         }
         let Some((profile, schema, table)) = self.table_target(tab_id) else {
@@ -915,6 +943,15 @@ impl Workbench {
         };
         let state = self.tables.entry(tab_id).or_default();
         state.loading = true;
+        // Paging, filtering, or sorting replaces a stale notice, as in the
+        // desktop app; errors and export results stay until they expire.
+        if state
+            .message
+            .as_ref()
+            .is_some_and(|m| m.kind == messages::Kind::Notice && m.export.is_none())
+        {
+            state.message = None;
+        }
         let request = state.request(profile, &schema, &table);
         state.requested = Some(request.clone());
         self.dispatch(
@@ -936,8 +973,12 @@ impl Workbench {
             return;
         }
         if self.tab_dirty(tab_id) {
-            self.show_error(
-                "Save or discard the pending table changes before running another query.",
+            self.query_errors.insert(
+                tab_id,
+                Message::error(
+                    "Save or discard the pending table changes before running another query.",
+                    self.now,
+                ),
             );
             return;
         }
@@ -952,6 +993,7 @@ impl Workbench {
         if let Some(tab) = self.tabs.iter_mut().find(|t| t.id == tab_id) {
             tab.last_executed = Some(sql.clone());
         }
+        self.query_errors.remove(&tab_id);
         self.dispatch(
             Command::Query(QueryRequest {
                 profile_id: profile,
@@ -1032,7 +1074,12 @@ impl Workbench {
                 .map(|c| c.name.clone())
                 .collect(),
             file_name: format!("{}.{}.csv", safe_file_name(&schema), safe_file_name(&table)),
+            progress: std::sync::Arc::default(),
         };
+        if let Some(state) = self.tables.get_mut(&tab_id) {
+            state.export_progress = Some(request.progress.clone());
+            state.message = None;
+        }
         self.dispatch(
             Command::ExportCsv(request),
             "Exporting CSV",
@@ -1067,6 +1114,7 @@ impl eframe::App for Workbench {
         }
         self.sidebar(ctx);
         self.top_bar(ctx);
+        self.banner_ui(ctx);
         self.tab_strip(ctx);
         egui::CentralPanel::default()
             .frame(Frame::new().fill(theme::BG))
@@ -1654,71 +1702,42 @@ impl Workbench {
 
     fn toast_ui(&mut self, ctx: &egui::Context) {
         let Some(toast) = &self.toast else { return };
-        let lifetime = if toast.error {
-            ERROR_SECONDS
-        } else {
-            NOTICE_SECONDS
-        };
-        let remaining = lifetime - (self.now - toast.shown_at);
-        if remaining <= 0.0 {
+        let Some(opacity) = toast.message.opacity(ctx, self.now) else {
             self.toast = None;
             return;
+        };
+        let dot = if toast.success {
+            theme::SUCCESS
+        } else {
+            theme::ACCENT
+        };
+        if messages::toast(ctx, &toast.message.text, dot, opacity) {
+            self.toast = None;
         }
-        ctx.request_repaint_after(std::time::Duration::from_secs_f64(remaining));
+    }
+
+    fn banner_ui(&mut self, ctx: &egui::Context) {
+        let Some(banner) = &self.banner else { return };
+        let Some(opacity) = banner.opacity(ctx, self.now) else {
+            self.banner = None;
+            return;
+        };
         let mut dismiss = false;
-        egui::Area::new(egui::Id::new("toast"))
-            .anchor(egui::Align2::RIGHT_BOTTOM, Vec2::new(-16.0, -16.0))
-            .order(egui::Order::Foreground)
+        egui::TopBottomPanel::top("error-banner")
+            .frame(messages::banner_frame(opacity))
+            .show_separator_line(false)
             .show(ctx, |ui| {
-                Frame::new()
-                    .fill(theme::POPOVER)
-                    .stroke(Stroke::new(
-                        1.0,
-                        if toast.error {
-                            theme::DANGER.gamma_multiply(0.6)
-                        } else {
-                            theme::BORDER_STRONG
-                        },
-                    ))
-                    .corner_radius(CornerRadius::same(10))
-                    .inner_margin(Margin::symmetric(12, 8))
-                    .shadow(egui::Shadow {
-                        offset: [0, 16],
-                        blur: 40,
-                        spread: 0,
-                        color: Color32::from_black_alpha(140),
-                    })
-                    .show(ui, |ui| {
-                        ui.set_max_width(440.0);
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new(&toast.message).color(if toast.error {
-                                theme::DANGER
-                            } else {
-                                theme::SUCCESS
-                            }));
-                            if let Some(file) = &toast.file {
-                                if ui.button("Open").clicked() {
-                                    open_path(file, false);
-                                }
-                                if ui.button("Show in folder").clicked() {
-                                    open_path(file, true);
-                                }
-                            }
-                            if icon_btn(ui, true, Icon::Close, None, "Dismiss") {
-                                dismiss = true;
-                            }
-                        });
-                    });
+                dismiss = messages::banner(ui, banner, opacity) == messages::Response::Dismiss;
             });
         if dismiss {
-            self.toast = None;
+            self.banner = None;
         }
     }
 }
 
 /// Opens an exported file with its default app, or reveals it in the file
 /// manager (Windows selects it; Linux opens its folder).
-fn open_path(path: &std::path::Path, reveal: bool) {
+pub(crate) fn open_path(path: &std::path::Path, reveal: bool) {
     #[cfg(target_os = "windows")]
     let result = if reveal {
         std::process::Command::new("explorer")
@@ -2041,9 +2060,9 @@ impl Workbench {
                                 ui.horizontal(|ui| {
                                     ui.label(
                                         RichText::new(if redis {
-                                            "The highlighted command or selection will run · Command/Ctrl+Enter · results capped at 10,000 rows"
+                                            "The outlined command or selection will run · Command/Ctrl+Enter · results capped at 10,000 rows"
                                         } else {
-                                            "The highlighted statement or selected SQL will run · Command/Ctrl+Enter · results capped at 10,000 rows"
+                                            "The outlined statement or selected SQL will run · Command/Ctrl+Enter · results capped at 10,000 rows"
                                         })
                                         .font(ui_font(11.0))
                                         .color(theme::FAINT),
@@ -2058,6 +2077,30 @@ impl Workbench {
 
         if let Some((sql, refresh)) = run {
             self.run_query(tab_id, sql, refresh, false);
+        }
+
+        if let Some(error) = self.query_errors.get(&tab_id).cloned() {
+            match error.opacity(ui.ctx(), self.now) {
+                None => {
+                    self.query_errors.remove(&tab_id);
+                }
+                Some(opacity) => {
+                    egui::TopBottomPanel::top(egui::Id::new(("query-error", tab_id)))
+                        .frame(Frame::new().fill(theme::BG).inner_margin(Margin {
+                            left: 2,
+                            right: 2,
+                            top: 0,
+                            bottom: 8,
+                        }))
+                        .show_separator_line(false)
+                        .show_inside(ui, |ui| {
+                            if messages::inline(ui, &error, opacity) == messages::Response::Dismiss
+                            {
+                                self.query_errors.remove(&tab_id);
+                            }
+                        });
+                }
+            }
         }
 
         egui::CentralPanel::default()
@@ -2574,7 +2617,8 @@ impl Workbench {
                 TableAction::Save => self.save_changes(tab_id),
                 TableAction::Copy(text, which) => {
                     ui.ctx().copy_text(text);
-                    self.show_notice(format!("Copied {which} as CSV."));
+                    let notice = Message::notice(format!("Copied {which} as CSV."), self.now);
+                    self.table_notice(tab_id, notice);
                 }
                 TableAction::Export => {
                     let total = self
@@ -2588,7 +2632,7 @@ impl Workbench {
                         self.start_export(tab_id);
                     }
                 }
-                TableAction::Error(message) => self.show_error(message),
+                TableAction::Error(message) => self.table_error(tab_id, message),
             }
         }
     }

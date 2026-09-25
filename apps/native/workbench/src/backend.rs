@@ -40,6 +40,8 @@ pub struct ExportRequest {
     pub page: TablePageRequest,
     pub columns: Vec<String>,
     pub file_name: String,
+    /// Rows written so far, for the "Exporting N / total…" label.
+    pub progress: std::sync::Arc<std::sync::atomic::AtomicU64>,
 }
 
 pub enum Payload {
@@ -258,7 +260,7 @@ async fn live_table_page(state: &AppState, request: TablePageRequest) -> Result<
 /// shared exporter. `None` means the dialog was canceled.
 async fn export_csv<F, Fut>(
     request: ExportRequest,
-    load: F,
+    mut load: F,
 ) -> Result<Option<(PathBuf, u64)>, String>
 where
     F: FnMut(TablePageRequest) -> Fut,
@@ -271,7 +273,15 @@ where
     else {
         return Ok(None);
     };
-    let rows = dbm_core::export::export_csv(&path, &request.columns, &request.page, load).await?;
+    let progress = request.progress;
+    progress.store(0, std::sync::atomic::Ordering::Relaxed);
+    // Each page request starts at the number of rows already written.
+    let tracked = |page: TablePageRequest| {
+        progress.store(u64::from(page.offset), std::sync::atomic::Ordering::Relaxed);
+        load(page)
+    };
+    let rows =
+        dbm_core::export::export_csv(&path, &request.columns, &request.page, tracked).await?;
     Ok(Some((path, rows)))
 }
 

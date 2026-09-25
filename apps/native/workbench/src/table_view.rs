@@ -3,6 +3,8 @@
 //! `apps/desktop/ui/src/TableView.tsx`.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use dbm_core::cell_values::{editable_text, numeric_column, parse_cell_input};
 use dbm_core::models::{
@@ -15,6 +17,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::icons::{self, Icon};
+use crate::messages::{self, Message};
 use crate::theme::{self, chip, mono, primary_button, ui_font};
 
 pub const MAX_PREVIEW_ROWS: u32 = 200;
@@ -84,6 +87,10 @@ pub struct TableState {
     pub loading: bool,
     /// When the current load started, for the delayed "Refreshing…" overlay.
     loading_since: Option<f64>,
+    /// Inline error, notice, or export result under the filters.
+    pub message: Option<Message>,
+    /// Rows written so far by a running export.
+    pub export_progress: Option<Arc<AtomicU64>>,
     pub page_index: u32,
     pub limit: u32,
     limit_input: String,
@@ -111,6 +118,8 @@ impl Default for TableState {
             requested: None,
             loading: false,
             loading_since: None,
+            message: None,
+            export_progress: None,
             page_index: 0,
             limit: MAX_PREVIEW_ROWS,
             limit_input: MAX_PREVIEW_ROWS.to_string(),
@@ -330,6 +339,7 @@ pub fn show(ui: &mut egui::Ui, cx: &TableContext<'_>, state: &mut TableState) ->
         .frame(bar(Margin::symmetric(14, 0)))
         .show_inside(ui, |ui| toolbar(ui, cx, state, &mut actions));
     let Some(page) = state.page.clone() else {
+        message_panel(ui, id("table-message"), state);
         egui::CentralPanel::default()
             .frame(Frame::new().fill(theme::BG))
             .show_inside(ui, |ui| {
@@ -346,6 +356,7 @@ pub fn show(ui: &mut egui::Ui, cx: &TableContext<'_>, state: &mut TableState) ->
     egui::TopBottomPanel::top(id("table-filters"))
         .frame(bar(Margin::symmetric(14, 8)))
         .show_inside(ui, |ui| filter_panel(ui, state, &page, &mut actions));
+    message_panel(ui, id("table-message"), state);
     egui::TopBottomPanel::bottom(id("table-status"))
         .exact_height(theme::STATUS_BAR_HEIGHT)
         .frame(bar(Margin::symmetric(14, 0)))
@@ -475,7 +486,16 @@ fn toolbar(
                 .total_rows()
                 .map_or_else(String::new, |n| format!(" ({n})"));
             let export_label = if cx.exporting {
-                "Exporting…".to_owned()
+                ui.ctx()
+                    .request_repaint_after(std::time::Duration::from_millis(200));
+                let done = state
+                    .export_progress
+                    .as_ref()
+                    .map_or(0, |rows| rows.load(Ordering::Relaxed));
+                match state.total_rows() {
+                    Some(total) => format!("Exporting {done} / {total}…"),
+                    None => format!("Exporting {done}…"),
+                }
             } else {
                 format!("Export all{total}")
             };
@@ -927,6 +947,35 @@ fn hairline(ui: &egui::Ui) {
 
 /// Grid chrome shared by result and table grids: a header band across the
 /// full width, and column resize lines that only show on hover.
+/// The inline error, notice, or export result between the filters and grid.
+fn message_panel(ui: &mut egui::Ui, id: egui::Id, state: &mut TableState) {
+    let Some(message) = &state.message else {
+        return;
+    };
+    let now = ui.input(|i| i.time);
+    let Some(opacity) = message.opacity(ui.ctx(), now) else {
+        state.message = None;
+        return;
+    };
+    let mut response = messages::Response::None;
+    egui::TopBottomPanel::top(id)
+        .frame(Frame::new().fill(theme::BG).inner_margin(Margin {
+            left: 0,
+            right: 0,
+            top: 0,
+            bottom: 8,
+        }))
+        .show_separator_line(false)
+        .show_inside(ui, |ui| response = messages::inline(ui, message, opacity));
+    let path = message.export.as_ref().map(|(path, _)| path.clone());
+    match (response, path) {
+        (messages::Response::Dismiss, _) => state.message = None,
+        (messages::Response::Open, Some(path)) => crate::workbench::open_path(&path, false),
+        (messages::Response::Reveal, Some(path)) => crate::workbench::open_path(&path, true),
+        _ => {}
+    }
+}
+
 /// Up/down arrows beside the preview limit, like the desktop stepper.
 fn limit_stepper(ui: &mut egui::Ui) -> i64 {
     let mut step = 0;

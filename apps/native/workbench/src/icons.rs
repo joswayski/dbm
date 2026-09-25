@@ -32,6 +32,7 @@ pub enum Icon {
     Code,
     SortUp,
     SortDown,
+    Folder,
 }
 
 /// Paints `icon` centered in `rect` using a 16 px design grid.
@@ -96,6 +97,19 @@ pub fn paint(painter: &egui::Painter, rect: Rect, icon: Icon, color: Color32) {
             line(p(8.1, 8.0), p(13.5, 8.0));
             line(p(11.5, 8.0), p(11.5, 10.5));
             line(p(13.5, 8.0), p(13.5, 10.0));
+        }
+        Icon::Folder => {
+            painter.add(Shape::closed_line(
+                vec![
+                    p(2.0, 4.0),
+                    p(6.0, 4.0),
+                    p(7.5, 5.5),
+                    p(14.0, 5.5),
+                    p(14.0, 12.5),
+                    p(2.0, 12.5),
+                ],
+                stroke,
+            ));
         }
         Icon::View => {
             painter.rect_stroke(

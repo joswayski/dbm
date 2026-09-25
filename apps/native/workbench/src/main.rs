@@ -2,6 +2,7 @@
 
 mod backend;
 mod icons;
+mod messages;
 mod table_view;
 mod theme;
 mod workbench;
