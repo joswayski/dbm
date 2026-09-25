@@ -39,6 +39,14 @@ final class GridHeaderCell: NSTableHeaderCell {
         }
         var x = cellFrame.minX + 10
         let midY = cellFrame.midY
+        // Result tables right-align numeric headers (`th.numeric-cell`).
+        if rightAligned, dataType.isEmpty, !primaryKey, sort == nil {
+            let title = NSAttributedString(string: stringValue, attributes: [.font: Graphite.ui(12, .medium), .foregroundColor: Graphite.text])
+            let width = min(title.size().width, cellFrame.width - 20)
+            title.draw(with: NSRect(x: cellFrame.maxX - 10 - width, y: midY - title.size().height / 2, width: width, height: title.size().height),
+                       options: [.truncatesLastVisibleLine, .usesLineFragmentOrigin])
+            return
+        }
         if primaryKey {
             Icon.key.draw(in: NSRect(x: x, y: midY - 5.5, width: 11, height: 11), color: Graphite.modified)
             x += 16
@@ -285,6 +293,8 @@ final class ResultGrid: NSObject, NSTableViewDataSource, NSTableViewDelegate {
         table.dataSource = self
         table.delegate = self
         table.allowsMultipleSelection = true
+        // Like the desktop's auto-width result table, columns share the width.
+        table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
     }
 
     func show(columns: [[String: Any]], rows: [[Any]]) {
@@ -296,6 +306,7 @@ final class ResultGrid: NSObject, NSTableViewDataSource, NSTableViewDelegate {
             table.addGridColumn(id: String(index), title: model.name, dataType: "", primaryKey: false,
                                 width: defaultColumnWidth(model), rightAligned: numeric[index])
         }
+        table.sizeToFit()
         table.reloadData()
     }
 
