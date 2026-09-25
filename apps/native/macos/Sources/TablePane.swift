@@ -195,8 +195,14 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
             status.bottomAnchor.constraint(equalTo: bottomAnchor),
             pendingHeight,
         ])
-        filters.setContentHuggingPriority(.required, for: .vertical)
-        filters.setContentCompressionResistancePriority(.required, for: .vertical)
+        // Stack views stretch at the default hugging priority, and the scroll
+        // view has no intrinsic height, so pin the filter panel to its content.
+        for stack in [filterStack, filterRows, header] {
+            stack.setHuggingPriority(.required, for: .vertical)
+        }
+        let grow = body.heightAnchor.constraint(equalToConstant: 10_000)
+        grow.priority = .defaultLow
+        grow.isActive = true
         reload()
     }
 
