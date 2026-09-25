@@ -12,7 +12,7 @@
 - `apps/desktop` contains the Tauri desktop application (`@dbm/desktop`) and its React UI.
 - `apps/desktop/ui/src` is the React frontend (Vite, Zustand, CodeMirror SQL editor).
 - `apps/desktop/src-tauri/src` contains the Tauri command shell and updates; `crates/dbm-core` owns database adapters, sessions, keyring, and local SQLite storage.
-- `apps/native` contains the development-only Swift/AppKit host and private Rust stdio bridge. Tauri remains shipping on all platforms; see `docs/native.md` for scope and acceptance gaps.
+- `apps/native` contains development-only Swift/AppKit + Rust C ABI (macOS) and Rust egui/wgpu (Windows/Linux) hosts. The egui host has its own Cargo workspace. Tauri remains shipping on all platforms; see `docs/native.md` for required parity and acceptance gaps.
 - `docs/` holds features, development setup, releases (signing, notarization, publishing), the design system, and screenshots.
 - `scripts` contains build and install helpers.
 - There is no separate monorepo package for the React UI; it lives under `apps/desktop`.

@@ -1,94 +1,111 @@
-# Native development preview
+# Native development clients
 
-DBM is migrating incrementally toward native UI. **Tauri remains the shipping
-application on macOS, Windows, and Linux.** This is the first macOS workbench
-slice, not a feature-complete replacement or a demonstrated performance win.
+DBM is migrating toward browser-free clients on **macOS, Windows, and Linux**.
+**These are development clients, not feature/UI-parity replacements yet.**
+The downloadable, auto-updating application still uses Tauri on all platforms.
+No CPU or memory improvement has been measured yet.
 
 ## Architecture
 
-- `crates/dbm-core`: existing PostgreSQL, MySQL, Redis, session, SQLite, and
-  credential-store implementation, now reused by both hosts. Query execution
-  and history recording have one implementation. Storage paths, SQLite schema,
-  keyring service/account names, and database safety behavior are unchanged.
-- `apps/native/macos`: Swift/AppKit `NSWindow`, `NSTextView`, `NSTableView`,
-  menus, and controls. No WebView or JavaScript. Uses macOS system appearance
-  and fonts for this functional preview; full Graphite/connection-color parity
-  is still pending.
-- `apps/native/bridge`: a bundled Rust child process using the shared core.
-  Newline-delimited JSON travels over private stdin/stdout pipes, never an HTTP
-  server or listening socket. A serial Swift worker queue performs I/O and
-  decoding off the UI thread; a two-thread Tokio runtime drives database I/O.
-  There is no UI polling loop or new off-device service.
+- `crates/dbm-core` shares the existing PostgreSQL, MySQL, Redis, sessions,
+  query history, SQLite profile storage, and OS credential-store implementation
+  between Tauri and the native clients. Storage paths and credential identities
+  are unchanged.
+- `apps/native/macos` uses Swift/AppKit windows, text views, tables, and controls.
+  It calls the Rust library in-process through the C header in
+  `apps/native/bridge/include`. A serial background queue owns an opaque session,
+  calls, and disposal; Rust owns response allocations and exposes their free
+  function. Requests/results currently use JSON across this boundary (including
+  profile passwords when saving), not a subprocess or a network service.
+- `apps/native/workbench` uses Rust with egui/wgpu on Windows and Linux, calling
+  the core directly on a serialized worker with a two-thread Tokio runtime.
+  Rendering uses native graphics backends and bundled Geist fonts. **egui draws
+  its own controls, not Windows/GTK system widgets.** It has no browser engine.
 
-The reference migrations use Swift/AppKit plus a Rust C ABI on macOS, and
-egui/wgpu on Windows/Linux. This preview deliberately starts with a safe Rust
-process boundary instead of C pointers. That adds a process and JSON copies;
-compare measured end-to-end costs before deciding whether an in-process bridge
-is needed. egui/wgpu is browser-free but **not native OS widgets**. A Windows/Linux
-native UI choice is still open; those platforms continue using Tauri, not a new
-egui host that is being presented as system-native.
+Neither native client uses Tauri, Electron, JavaScript, or a WebView. Database
+I/O runs off the UI thread. Passwords remain in the OS credential store, not
+SQLite. Profiles, queries, and results are not sent to an off-device service.
 
-## Try it on macOS
+## Build and try
 
-Requires macOS 13+, Xcode Command Line Tools, and the repository's Rust toolchain.
-From the repository root:
+On macOS 13+ with Xcode Command Line Tools and the repository Rust toolchain:
 
 ```sh
 bash apps/native/macos/build.sh
 open 'target/native/DBM Native.app'
+# Isolated fixture, without loading local profiles or connecting to databases:
+'target/native/DBM Native.app/Contents/MacOS/DBMNative' --demo
 ```
 
-The script builds for the current Mac architecture and ad-hoc signs a separate
-`DBM Native.app`. It does not install over `/Applications/DBM.app`, register
-associations, notarize, publish, or change the installed app's updater.
-The macOS CI job compiles it and uploads a development ZIP, not a release.
-Gatekeeper and Keychain may prompt for this separately signed development app.
+The script ad-hoc signs a separate development app. It does not overwrite an
+installed DBM, notarize, publish, or change its updater. Gatekeeper/Keychain may
+prompt for this separately signed application.
 
-Create profiles in the shipping DBM app first. The preview can reload those
-profiles, connect to their default database, run SQL or Redis commands, display
-results/notices/errors, and disconnect. Command-Return runs the selected text,
-or the entire editor when there is no selection (not statement-under-cursor).
-The editor opens with `SELECT 1;` or `PING`. Results are capped at 10,000 rows;
-requests are limited to 1 MiB. Existing read-only profile rules still apply.
+On Windows or Linux, with the repository Rust toolchain:
 
-**Use disposable databases or read-only profiles first.** This is real database
-access, not demo data. Query history is written to the same local SQLite store
-as Tauri. Passwords stay in the OS credential store and never cross the Swift
-pipe. Closing the window terminates the helper, but is not query cancellation
-or a guarantee of rollback. Transport failures are never automatically replayed;
-check a submitted write's outcome before rerunning it.
+```sh
+cargo run --manifest-path apps/native/workbench/Cargo.toml --locked --release
+# Isolated in-memory fixture:
+cargo run --manifest-path apps/native/workbench/Cargo.toml --locked --release -- --demo
+```
 
-## Remaining migration and acceptance work
+Linux builds need OpenSSL/pkg-config and X11/Wayland development libraries;
+running needs a working display server and Vulkan driver. CI lists the Ubuntu
+packages. The separate Cargo workspace keeps egui's dependency graph out of
+the shipping Tauri application. CI builds development artifacts for all three
+platforms; these are not signed release installers.
 
-- Profile create/edit/test, schema/key browser, database switching, workbench
-  tabs, statement-under-cursor, history UI, refresh, CSV, staged edits/deletes,
-  connection colors, and keyboard/accessibility parity.
-- Query cancellation and bounded handling of very large individual cell values.
-  The existing row limit is not a byte/memory limit.
-- Native Windows/Linux hosts and platform-specific credential/install testing.
-- macOS compiled/runtime and visual validation, VoiceOver, IME, selection,
-  clipboard, resizing, dark/light appearance, and repeated connect/disconnect.
-- Signing, notarization, installation, update migration, and release acceptance.
+**Use disposable databases or read-only profiles first.** Outside `--demo`, these
+clients use real saved profiles and write query history to the same local store
+as Tauri. They support profile forms, connection/database/schema navigation,
+query and table tabs, history, refresh, paging, basic filters/order, and staged
+PK-backed edits/deletes. Existing core read-only and concurrency checks apply.
+Queries are capped at 10,000 rows; the AppKit bridge limits requests to 1 MiB.
+Neither limit bounds memory consumed by very large individual cells.
 
-Before any cutover, compare release builds on the **same machine and dataset**:
-cold launch, idle CPU/wakeups, total resident memory of host plus all helpers,
-connect/query latency, scrolling a 10k-row result, large fields, and repeated
-connection cycles. Record OS/hardware and multiple runs; do not compare a debug
-Tauri build against an optimized AppKit build or count only the Swift process.
-No CPU/RAM reduction has been measured yet.
+## Required before replacing Tauri
 
-## Checks
+Feature and visual parity is the migration acceptance criterion, not optional
+follow-up polish. The current clients do not meet it. Outstanding work includes:
+
+- Full Graphite layout, connection-color, tab-strip, light/dark, and interaction
+  parity with the React application; AppKit and egui currently differ visually.
+- SQL syntax highlighting, statement-under-cursor/selection execution parity,
+  completion, keyboard navigation, and editor ergonomics.
+- Full Redis typed-key browsing/editing and recursive keyspace navigation.
+- CSV export/copy, all filter operators, full inspector/null/type editing, and
+  confirmation behavior across every destructive/navigation path.
+- Native accessibility, screen readers, IME, clipboard, resizing, and real
+  credential-store testing on each supported OS.
+- Query cancellation and stress testing of large results, reconnects, errors,
+  conflicting edits, and shutdown during active work.
+- Signing, notarization, installers, updates, and migration/release acceptance.
+
+Demo results are synthetic; they do not validate SQL semantics or database
+writes. Automated fixtures and Linux screenshots are not a substitute for
+macOS/Windows hardware validation.
+
+Before cutover, compare release builds on the **same machine and dataset**:
+cold launch, idle CPU/wakeups, resident memory, connect/query latency, scrolling
+10k rows, large fields, and repeated connection cycles. Record OS/hardware and
+multiple runs; do not compare an optimized native client against debug Tauri.
+
+## Validation
 
 ```sh
 npm run check
 cargo fmt --all -- --check
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
-# On macOS, compile and sign the actual native app:
-bash apps/native/macos/build.sh
+cargo fmt --manifest-path apps/native/workbench/Cargo.toml --all -- --check
+cargo test --manifest-path apps/native/workbench/Cargo.toml --locked
+cargo clippy --manifest-path apps/native/workbench/Cargo.toml --locked --all-targets -- -D warnings
 ```
 
-The Rust tests retain adapter/storage coverage, including disposable live Redis
-tests when available. The Linux bridge process test uses isolated XDG storage
-and checks protocol ordering, malformed-input recovery, errors, and EOF exit.
-They do not establish AppKit visual correctness or physical-platform acceptance.
+The Linux C ABI integration test isolates XDG storage and exercises session
+ownership, response freeing, input errors, and recovery. Workbench unit tests
+cover request routing, dirty-state guards, PK/xmin preservation, and paging.
+macOS CI compiles the actual Swift host and captures an isolated AppKit fixture.
+Redis adapter tests start a disposable server when `redis-server` is available;
+PostgreSQL/MySQL live tests skip unless `DBM_TEST_POSTGRES_PORT` or
+`DBM_TEST_MYSQL_PORT` points to the documented disposable local server.
