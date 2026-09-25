@@ -1252,18 +1252,17 @@ fn header_cell(
         return response.clicked().then_some(HeaderClick::Toggle);
     }
     let response = ui
-        .horizontal(|ui| {
+        .horizontal_centered(|ui| {
             ui.spacing_mut().item_spacing.x = 5.0;
-            ui.add_space(4.0);
+            ui.add_space(10.0);
             if primary_key {
                 icons::show(ui, Icon::Key, 11.0, theme::MODIFIED).on_hover_text("Primary key");
             }
-            ui.label(
-                RichText::new(name)
-                    .size(12.5)
-                    .strong()
-                    .color(theme::TEXT_STRONG),
-            );
+            ui.label(RichText::new(name).size(12.0).color(if sort.is_some() {
+                theme::TEXT_STRONG
+            } else {
+                theme::TEXT
+            }));
             if !data_type.is_empty() {
                 ui.label(
                     RichText::new(data_type)
@@ -1407,20 +1406,40 @@ pub fn result_grid(ui: &mut egui::Ui, tab_id: u64, columns: &[QueryColumn], rows
         .id_salt(("result-scroll", tab_id))
         .show(ui, |ui| {
             grid_scope(ui);
+            // Like the desktop's auto-width result table, columns share the
+            // full width when they would otherwise leave it empty.
+            let width = (ui.available_width() / columns.len() as f32).max(DEFAULT_COLUMN_WIDTH);
             TableBuilder::new(ui)
                 .id_salt(("result", tab_id))
                 .auto_shrink([false, false])
                 .columns(
-                    Column::initial(DEFAULT_COLUMN_WIDTH)
+                    Column::initial(width)
                         .at_least(60.0)
                         .resizable(true)
                         .clip(true),
                     columns.len(),
                 )
                 .header(theme::HEADER_HEIGHT, |mut header| {
-                    for column in columns {
+                    for (index, column) in columns.iter().enumerate() {
                         header.col(|ui| {
-                            header_cell(ui, &column.name, "", false, None, None);
+                            if numeric[index] {
+                                // `th.numeric-cell { text-align: right }`
+                                let rect = ui.max_rect();
+                                ui.painter().vline(
+                                    rect.right() - 0.5,
+                                    rect.y_range(),
+                                    Stroke::new(1.0, Color32::from_rgb(0x24, 0x24, 0x27)),
+                                );
+                                ui.painter().text(
+                                    rect.right_center() - Vec2::new(10.0, 0.0),
+                                    egui::Align2::RIGHT_CENTER,
+                                    &column.name,
+                                    ui_font(12.0),
+                                    theme::TEXT,
+                                );
+                            } else {
+                                header_cell(ui, &column.name, "", false, None, None);
+                            }
                         });
                     }
                 })
@@ -1432,7 +1451,7 @@ pub fn result_grid(ui: &mut egui::Ui, tab_id: u64, columns: &[QueryColumn], rows
                                 hairline(ui);
                                 ui.add_space(6.0);
                                 aligned(ui, numeric[column], |ui| {
-                                    ui.add_space(6.0);
+                                    ui.add_space(10.0);
                                     ui.label(cell_text(value));
                                 });
                             });
@@ -1599,7 +1618,7 @@ fn grid(
                                     text = text.color(theme::DANGER).strikethrough();
                                 }
                                 aligned(ui, right_align, |ui| {
-                                    ui.add_space(8.0);
+                                    ui.add_space(10.0);
                                     ui.label(text);
                                 });
                             });
