@@ -204,6 +204,8 @@ final class TableState {
     var inspectorOpen = true
     /// Column indexes collapsed to a narrow strip.
     var collapsedColumns = Set<Int>()
+    /// Inline error, notice, or export result above the grid.
+    var message: InlineMessage?
 
     var dirty: Bool { !pending.isEmpty }
 
@@ -302,6 +304,8 @@ final class WorkTab {
     var lastExecuted: String?
     /// A `SELECT * FROM table` result shown in the editable table viewer.
     var embedded: (schema: String, table: String)?
+    /// Inline error under the editor, like the desktop query view.
+    var queryError: InlineMessage?
     var result: [String: Any]? { didSet { resultID = UUID() } }
     /// Shrunk to a narrow pill in the tab strip until selected again.
     var collapsed = false

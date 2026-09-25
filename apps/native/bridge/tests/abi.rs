@@ -196,6 +196,21 @@ fn demo_sessions_answer_from_the_fixture_and_refuse_writes() {
         &json!({"command": "listQueryHistory", "profile_id": id, "database": "analytics"}),
     );
     assert_eq!(history[0]["sql"], "SELECT 1");
+    let path = std::env::temp_dir().join(format!("dbm-bridge-demo-{}.csv", std::process::id()));
+    let path_text = path.to_string_lossy().into_owned();
+    let exported = call(
+        session,
+        &json!({"command": "exportCsv", "path": path_text, "columns": ["id", "email", "active", "note"], "request": {"profileId": id, "schema": "public", "table": "customers", "offset": 0, "limit": 5, "filters": [], "orderBy": null}}),
+    );
+    assert_eq!(exported["rows"], 500);
+    let csv = std::fs::read_to_string(&path).unwrap();
+    assert!(csv.starts_with("\u{feff}id,email,active,note\n1,"));
+    assert_eq!(csv.lines().count(), 501);
+    std::fs::remove_file(&path).unwrap();
+    let progress =
+        serde_json::to_vec(&json!({"command": "exportProgress", "path": path_text})).unwrap();
+    let reply = unsafe { take(dbm_bridge_helper_call(progress.as_ptr(), progress.len())) };
+    assert_eq!(reply, json!({"ok": true, "value": null}));
     let save = br#"{"command":"applyTableMutations","batch":{"profileId":"00000000-0000-0000-0000-000000000001","schema":"public","table":"customers","mutations":[]}}"#;
     let reply = unsafe { take(dbm_bridge_session_call(session, save.as_ptr(), save.len())) };
     assert_eq!(reply["ok"], false);

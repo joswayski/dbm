@@ -38,6 +38,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, Qu
     private let content = FlippedView()
     private var welcome: WelcomeView!
     private let toast = ToastView()
+    private let banner = MessageView(banner: true)
+    private var bannerHeight: NSLayoutConstraint!
+    private var exportRows: [UUID: Int] = [:]
     private var panes: [UUID: NSView] = [:]
     private var sheet: ProfileSheet?
 
@@ -70,12 +73,20 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, Qu
         content.translatesAutoresizingMaskIntoConstraints = false
         let main = FlippedView()
         main.translatesAutoresizingMaskIntoConstraints = false
-        for view in [topBar!, tabStrip!, content] as [NSView] { main.addSubview(view) }
+        for view in [topBar!, banner, tabStrip!, content] as [NSView] { main.addSubview(view) }
+        // The error strip collapses to zero height while hidden.
+        bannerHeight = banner.heightAnchor.constraint(equalToConstant: 0)
+        bannerHeight.priority = .init(999)
+        banner.onDismiss = { [weak self] in self?.bannerHeight.isActive = true }
         NSLayoutConstraint.activate([
             topBar.topAnchor.constraint(equalTo: main.topAnchor),
             topBar.leadingAnchor.constraint(equalTo: main.leadingAnchor),
             topBar.trailingAnchor.constraint(equalTo: main.trailingAnchor),
-            tabStrip.topAnchor.constraint(equalTo: topBar.bottomAnchor),
+            banner.topAnchor.constraint(equalTo: topBar.bottomAnchor),
+            banner.leadingAnchor.constraint(equalTo: main.leadingAnchor),
+            banner.trailingAnchor.constraint(equalTo: main.trailingAnchor),
+            bannerHeight,
+            tabStrip.topAnchor.constraint(equalTo: banner.bottomAnchor),
             tabStrip.leadingAnchor.constraint(equalTo: main.leadingAnchor),
             tabStrip.trailingAnchor.constraint(equalTo: main.trailingAnchor),
             content.topAnchor.constraint(equalTo: tabStrip.bottomAnchor),
@@ -136,8 +147,16 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, Qu
         }
     }
 
-    func showError(_ message: String) { toast.show(message, error: true) }
-    func showNotice(_ message: String) { toast.show(message, error: false) }
+    /// App-level errors go to the strip under the top bar.
+    func showError(_ message: String) {
+        banner.show(.error(message))
+        bannerHeight.isActive = false
+    }
+
+    private func showTableMessage(_ tab: WorkTab, _ message: InlineMessage) {
+        tab.tableState?.message = message
+        reloadPane(tab)
+    }
 
     // MARK: Rendering
 
@@ -363,7 +382,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, Qu
                     let kind = self.profile(id)?.engine == .redis ? "Keyspace" : "Schema"
                     let reply = Bridge.helper(["command": "describeSchemaRefresh", "previous": previous.map(\.raw),
                                                "next": next.map(\.raw), "kind": kind])
-                    if case .success(let summary) = reply { self.showNotice(string(dictionary(summary)["message"])) }
+                    if case .success(let summary) = reply {
+                        let summary = dictionary(summary)
+                        self.toast.show(string(summary["message"]), success: bool(summary["changed"]))
+                    }
                 }
             case .failure(let error):
                 self.showError(error.localizedDescription)
@@ -500,7 +522,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, Qu
         let sql = sql.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !sql.isEmpty, running[tab.id] == nil else { return }
         if tab.dirty {
-            showError("Save or discard the pending table changes before running another query.")
+            tab.queryError = .error("Save or discard the pending table changes before running another query.")
+            reloadPane(tab)
             return
         }
         let engine = self.engine(of: tab)
@@ -522,6 +545,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, Qu
 
     private func execute(_ tab: WorkTab, sql: String, refresh: Bool) {
         running[tab.id] = refresh ? "refresh" : "run"
+        tab.queryError = nil
         reloadPane(tab)
         send(["command": "query", "request": ["profileId": tab.profileID, "sql": sql, "maxRows": 10_000]], profile: tab.profileID) { [weak self] result in
             guard let self, self.tabs.contains(where: { $0 === tab }) else { return }
@@ -534,7 +558,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, Qu
                 tab.result = dictionary(value)
                 if tab.embedded != nil { self.loadTable(tab) }
             case .failure(let error):
-                self.showError(error.localizedDescription)
+                tab.queryError = .error(error.localizedDescription)
             }
             self.loadHistory(tab.profileID)
             self.reloadPane(tab)
@@ -549,7 +573,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, Qu
 
     func loadTable(_ tab: WorkTab) {
         guard let state = tab.tableState, let target = tab.target else { return }
-        guard state.pending.isEmpty else { showError(pendingRefreshError); return }
+        guard state.pending.isEmpty else { showTableMessage(tab, .error(pendingRefreshError)); return }
+        // Paging, filtering, or sorting replaces a stale notice, as in the
+        // desktop app; errors and export results stay until they expire.
+        if state.message?.isPlainNotice == true { state.message = nil }
         let request = state.request(profileID: tab.profileID, schema: target.schema, table: target.table)
         state.requested = request
         state.loading = true
@@ -563,7 +590,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, Qu
                 state.loaded(TablePage(dictionary(value)))
             case .failure(let error):
                 state.restoreLoaded()
-                self.showError(error.localizedDescription)
+                state.message = .error(error.localizedDescription)
             }
             self.reloadPane(tab)
             self.sidebar.reload()
@@ -590,13 +617,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, Qu
                 let conflicts = (reply["conflicts"] as? [Any])?.count ?? 0
                 let applied = int(reply["applied"])
                 self.loadTable(tab)
-                if conflicts > 0 {
-                    self.showError("\(conflicts) row conflict(s); the table was refreshed.")
-                } else {
-                    self.showNotice("\(applied) \(applied == 1 ? "change" : "changes") saved.")
-                }
+                state.message = conflicts > 0
+                    ? .error("\(conflicts) row conflict(s); the table was refreshed.")
+                    : .notice("\(applied) \(applied == 1 ? "change" : "changes") saved.")
             case .failure(let error):
-                self.showError(error.localizedDescription)
+                state.message = .error(error.localizedDescription)
             }
             self.reloadPane(tab)
         }
@@ -624,21 +649,29 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, Qu
         panel.allowedContentTypes = [.commaSeparatedText]
         panel.beginSheetModal(for: window) { [weak self] response in
             guard let self else { return }
-            guard response == .OK, let url = panel.url else { self.showNotice("Export canceled."); return }
+            guard response == .OK, let url = panel.url else { self.showTableMessage(tab, .notice("Export canceled.")); return }
             self.exporting.insert(tab.id)
+            self.exportRows[tab.id] = 0
+            tab.tableState?.message = nil
             self.reloadPane(tab)
+            // The export holds the session, so poll the session-free helper.
+            let poll = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
+                guard let self, self.exporting.contains(tab.id) else { return }
+                if case .success(let rows) = Bridge.helper(["command": "exportProgress", "path": url.path]), !(rows is NSNull) {
+                    self.exportRows[tab.id] = int(rows)
+                    self.reloadPane(tab)
+                }
+            }
             let command: [String: Any] = ["command": "exportCsv", "request": request, "columns": page.columns.map(\.name), "path": url.path]
             self.send(command, profile: tab.profileID) { result in
+                poll.invalidate()
                 self.exporting.remove(tab.id)
+                self.exportRows[tab.id] = nil
                 switch result {
                 case .success(let value):
-                    let rows = int(dictionary(value)["rows"])
-                    self.toast.show("Exported \(rows) filtered \(rows == 1 ? "row" : "rows") to \(url.lastPathComponent).", error: false, actions: [
-                        ("Open", { [weak self] in self?.revealExport(url, open: true) }),
-                        ("Show in Finder", { [weak self] in self?.revealExport(url, open: false) }),
-                    ])
+                    tab.tableState?.message = .exported(url, rows: int(dictionary(value)["rows"]))
                 case .failure(let error):
-                    self.showError(error.localizedDescription)
+                    tab.tableState?.message = .error(error.localizedDescription)
                 }
                 self.reloadPane(tab)
             }
@@ -649,10 +682,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, Qu
         if open { NSWorkspace.shared.open(url) } else { NSWorkspace.shared.activateFileViewerSelecting([url]) }
     }
 
-    func copyText(_ text: String, notice: String) {
+    func exportProgress(_ tab: WorkTab) -> Int? { exportRows[tab.id] }
+
+    func copyText(_ text: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
-        showNotice(notice)
     }
 
     // MARK: Menus
@@ -755,6 +789,17 @@ final class SnapshotDriver {
                 app.selectProfile(redis)
             }),
             ("09-redis-hash", { [app] in app.openTable(redis, schema: "hash", table: "user:1") }),
+            ("10-messages", { [app] in
+                app.openTable(postgres, schema: "public", table: "orders")
+                app.activeTab?.tableState?.message = .exported(URL(fileURLWithPath: "/tmp/public.orders.csv"), rows: 500)
+                app.showError("Demo fixture: saving is disabled.")
+                app.refresh()
+            }),
+            ("11-query-error", { [app] in
+                app.openQuery(postgres)
+                app.activeTab?.queryError = .error("database error: syntax error at or near \"SELEC\" (SQLSTATE 42601)")
+                app.refresh()
+            }),
         ]
         next(0)
     }

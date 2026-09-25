@@ -8,8 +8,9 @@ protocol TableHost: AnyObject {
     func loadTable(_ tab: WorkTab)
     func saveChanges(_ tab: WorkTab)
     func exportTable(_ tab: WorkTab)
-    func copyText(_ text: String, notice: String)
-    func showError(_ message: String)
+    func copyText(_ text: String)
+    /// Rows written so far by this tab's running export.
+    func exportProgress(_ tab: WorkTab) -> Int?
     func isReadOnly(_ tab: WorkTab) -> Bool
     func isSaving(_ tab: WorkTab) -> Bool
     func isExporting(_ tab: WorkTab) -> Bool
@@ -58,6 +59,9 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
     private var inspectorWidth: NSLayoutConstraint!
     private var pendingHeight: NSLayoutConstraint!
     private let loadingOverlay = LoadingOverlay()
+    private let messageView = MessageView()
+    private var bodyBelowFilters: NSLayoutConstraint!
+    private var bodyBelowMessage: NSLayoutConstraint!
     private var overlayTimer: Timer?
     private var columnSignature = ""
     private var editor: GTextField?
@@ -184,12 +188,14 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
         status.heightAnchor.constraint(equalToConstant: Graphite.statusBarHeight).isActive = true
 
         // Explicit constraints: the grid body takes all space the bars leave.
-        for view in [toolbar, filters, body, pendingBar, status] as [NSView] {
+        for view in [toolbar, filters, messageView, body, pendingBar, status] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
+            // The inline message is inset 12 pt from the sides.
+            let inset: CGFloat = view === messageView ? 12 : 0
             NSLayoutConstraint.activate([
-                view.leadingAnchor.constraint(equalTo: leadingAnchor),
-                view.trailingAnchor.constraint(equalTo: trailingAnchor),
+                view.leadingAnchor.constraint(equalTo: leadingAnchor, constant: inset),
+                view.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset),
             ])
         }
         pendingHeight = pendingBar.heightAnchor.constraint(equalToConstant: 0)
@@ -197,7 +203,7 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
         NSLayoutConstraint.activate([
             toolbar.topAnchor.constraint(equalTo: topAnchor),
             filters.topAnchor.constraint(equalTo: toolbar.bottomAnchor),
-            body.topAnchor.constraint(equalTo: filters.bottomAnchor),
+            messageView.topAnchor.constraint(equalTo: filters.bottomAnchor, constant: 8),
             pendingBar.topAnchor.constraint(equalTo: body.bottomAnchor),
             status.topAnchor.constraint(equalTo: pendingBar.bottomAnchor),
             status.bottomAnchor.constraint(equalTo: bottomAnchor),
@@ -208,6 +214,15 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
         for stack in [filterStack, filterRows, header] {
             stack.setHuggingPriority(.required, for: .vertical)
         }
+        bodyBelowFilters = body.topAnchor.constraint(equalTo: filters.bottomAnchor)
+        bodyBelowMessage = body.topAnchor.constraint(equalTo: messageView.bottomAnchor, constant: 8)
+        bodyBelowFilters.isActive = true
+        messageView.onDismiss = { [weak self] in
+            self?.tab.tableState?.message = nil
+            self?.layoutMessage()
+        }
+        messageView.onOpen = { [weak self] url in self?.host?.revealExport(url, open: true) }
+        messageView.onReveal = { [weak self] url in self?.host?.revealExport(url, open: false) }
         let grow = body.heightAnchor.constraint(equalToConstant: 10_000)
         grow.priority = .defaultLow
         grow.isActive = true
@@ -232,7 +247,12 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
         copyButton.title = "Copy visible (\(state.copyableRows.count))"
         copyButton.isEnabled = page != nil && !state.loading
         let exporting = host?.isExporting(tab) ?? false
-        exportButton.title = exporting ? "Exporting…" : "Export all\(page?.total.map { " (\($0))" } ?? "")"
+        if exporting {
+            let done = host?.exportProgress(tab) ?? 0
+            exportButton.title = "Exporting \(done)\(page?.total.map { " / \($0)" } ?? "")…"
+        } else {
+            exportButton.title = "Export all\(page?.total.map { " (\($0))" } ?? "")"
+        }
         exportButton.isEnabled = page != nil && !state.loading && !exporting
         selectionButton.title = "\(state.selected.count) selected"
         selectionButton.isHidden = state.selected.isEmpty
@@ -253,6 +273,8 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
         let interactive = !state.loading && !(host?.isSaving(tab) ?? false)
         grid.isEnabled = interactive
         updateLoadingOverlay(visible: state.loading && page != nil)
+        messageView.show(state.message)
+        layoutMessage()
         inspector.show(tab: tab, host: host, editable: editable, interactive: interactive) { [weak self] in self?.stagedFromInspector() }
 
         let pendingCount = state.pending.count
@@ -434,7 +456,7 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
 
     func tableView(_ tableView: NSTableView, didClick tableColumn: NSTableColumn) {
         guard let page = state.page, let index = Int(tableColumn.identifier.rawValue) else { return }
-        guard state.pending.isEmpty else { host?.showError(pendingRefreshError); return }
+        guard state.pending.isEmpty else { showMessage(.error(pendingRefreshError)); return }
         let name = page.columns[index].name
         let current = state.effectiveOrder
         state.order = (name, current?.column == name ? !(current?.descending ?? false) : false)
@@ -535,23 +557,25 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
     // MARK: Actions
 
     private func refresh() {
-        guard state.pending.isEmpty else { host?.showError(pendingRefreshError); return }
+        guard state.pending.isEmpty else { showMessage(.error(pendingRefreshError)); return }
         host?.loadTable(tab)
     }
 
     private func copyVisible() {
         let rows = state.copyableRows
-        host?.copyText(state.csv(rows), notice: "Copied \(rows.count) visible \(rows.count == 1 ? "row" : "rows") as CSV.")
+        host?.copyText(state.csv(rows))
+        showMessage(.notice("Copied \(rows.count) visible \(rows.count == 1 ? "row" : "rows") as CSV."))
     }
 
     private func copySelected() {
         let rows = state.selected.filter { state.pending[$0]?.deleted != true }
         guard !rows.isEmpty else { return }
-        host?.copyText(state.csv(Array(rows)), notice: "Copied \(rows.count) selected \(rows.count == 1 ? "row" : "rows") as CSV.")
+        host?.copyText(state.csv(Array(rows)))
+        showMessage(.notice("Copied \(rows.count) selected \(rows.count == 1 ? "row" : "rows") as CSV."))
     }
 
     private func export() {
-        guard state.pending.isEmpty else { host?.showError(pendingExportError); return }
+        guard state.pending.isEmpty else { showMessage(.error(pendingExportError)); return }
         host?.exportTable(tab)
     }
 
@@ -602,6 +626,18 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
         }
     }
 
+    func showMessage(_ message: InlineMessage) {
+        state.message = message
+        messageView.show(message)
+        layoutMessage()
+    }
+
+    private func layoutMessage() {
+        let visible = !messageView.isHidden
+        bodyBelowFilters.isActive = !visible
+        bodyBelowMessage.isActive = visible
+    }
+
     private func stepLimit(_ amount: Int) {
         let current = Int(limitField.stringValue.trimmingCharacters(in: .whitespaces)) ?? state.limit
         let next = min(maxPreviewRows, max(1, current + amount))
@@ -630,7 +666,7 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
     }
 
     private func reloadIfClean() {
-        guard state.pending.isEmpty else { host?.showError(pendingRefreshError); reload(); return }
+        guard state.pending.isEmpty else { showMessage(.error(pendingRefreshError)); reload(); return }
         host?.loadTable(tab)
     }
 

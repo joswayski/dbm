@@ -584,48 +584,6 @@ final class TabStrip: PanelView {
     }
 }
 
-final class ToastView: PanelView {
-    private let message = label("", font: Graphite.ui(13), color: Graphite.success)
-    private let actions = hstack([], spacing: 6)
-    private var timer: Timer?
-
-    init() {
-        super.init(fill: Graphite.popover)
-        radius = 10
-        outline = Graphite.borderStrong
-        message.maximumNumberOfLines = 3
-        message.lineBreakMode = .byWordWrapping
-        message.preferredMaxLayoutWidth = 420
-        let close = GButton("", icon: .close, style: .icon, tooltip: "Dismiss") { [weak self] in self?.hide() }
-        pin(hstack([message, actions, close], spacing: 8), insets: NSEdgeInsets(top: 8, left: 12, bottom: 8, right: 6))
-        widthAnchor.constraint(lessThanOrEqualToConstant: 640).isActive = true
-        isHidden = true
-        setAccessibilityRole(.staticText)
-    }
-
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    func show(_ text: String, error: Bool, actions buttons: [(String, () -> Void)] = []) {
-        message.stringValue = text
-        message.textColor = error ? Graphite.danger : Graphite.success
-        outline = error ? Graphite.danger.withAlphaComponent(0.6) : Graphite.borderStrong
-        actions.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        for (title, action) in buttons {
-            actions.addArrangedSubview(GButton(title, style: .secondary, handler: action))
-        }
-        isHidden = false
-        NSAccessibility.post(element: self, notification: .announcementRequested,
-                             userInfo: [.announcement: text, .priority: NSAccessibilityPriorityLevel.high.rawValue])
-        timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: error ? 10 : (buttons.isEmpty ? 6 : 12), repeats: false) { [weak self] _ in self?.hide() }
-    }
-
-    func hide() {
-        timer?.invalidate()
-        isHidden = true
-    }
-}
-
 final class WelcomeView: FlippedView {
     private let title = label("", font: Graphite.ui(20, .semibold), color: Graphite.textStrong)
     private let message = label("", font: Graphite.ui(13), color: Graphite.muted)

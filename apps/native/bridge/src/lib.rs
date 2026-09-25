@@ -6,12 +6,13 @@
 //! pointers are UTF-8, NUL-terminated allocations owned by this library; each
 //! non-null response must be passed exactly once to [`dbm_bridge_response_free`].
 
+use std::collections::HashMap;
 #[cfg(test)]
 use std::ffi::CStr;
 use std::ffi::{CString, c_char};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::ptr;
-use std::sync::Mutex;
+use std::sync::{LazyLock, Mutex};
 
 use dbm_core::{
     cell_values::{editable_text, parse_cell_input},
@@ -34,6 +35,44 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 const MAX_REQUEST_BYTES: usize = 1_048_576;
+
+/// Rows written so far by each running export, keyed by destination path,
+/// so a host can show progress through the session-free helper call while
+/// the export holds its session.
+static EXPORT_PROGRESS: LazyLock<Mutex<HashMap<String, u64>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn set_export_progress(path: &str, rows: Option<u64>) {
+    if let Ok(mut progress) = EXPORT_PROGRESS.lock() {
+        match rows {
+            Some(rows) => progress.insert(path.to_owned(), rows),
+            None => progress.remove(path),
+        };
+    }
+}
+
+/// Runs the shared exporter while recording progress for `path`.
+async fn export_with_progress<F, Fut, E>(
+    path: &str,
+    columns: &[String],
+    request: &TablePageRequest,
+    mut load: F,
+) -> Result<Value, String>
+where
+    F: FnMut(TablePageRequest) -> Fut,
+    Fut: std::future::Future<Output = Result<dbm_core::models::TablePage, E>>,
+    E: std::fmt::Display,
+{
+    set_export_progress(path, Some(0));
+    // Each page request starts at the number of rows already written.
+    let result = export_csv(std::path::Path::new(path), columns, request, |page| {
+        set_export_progress(path, Some(u64::from(page.offset)));
+        load(page)
+    })
+    .await;
+    set_export_progress(path, None);
+    Ok(json!({ "rows": result? }))
+}
 
 #[derive(Deserialize)]
 #[serde(tag = "command", rename_all = "camelCase", deny_unknown_fields)]
@@ -83,6 +122,10 @@ enum Request {
     ExportCsv {
         request: TablePageRequest,
         columns: Vec<String>,
+        path: String,
+    },
+    /// Rows written so far by the export to `path`, or null when none runs.
+    ExportProgress {
         path: String,
     },
     // Editor and grid helpers shared with the other hosts. They touch no
@@ -277,14 +320,13 @@ async fn dispatch(state: &AppState, request: Request) -> Result<Value, String> {
             columns,
             path,
         } => {
-            let rows = export_csv(std::path::Path::new(&path), &columns, &request, |page| {
+            return export_with_progress(&path, &columns, &request, |page| {
                 state.with_session_retry(page.profile_id, move |session| {
                     let page = page.clone();
                     async move { session.table_page(&page).await }
                 })
             })
-            .await?;
-            Ok(json!({ "rows": rows }))
+            .await;
         }
         helper => return helper_value(helper),
     }
@@ -342,6 +384,11 @@ fn helper_value(request: Request) -> Result<Value, String> {
         Request::EditableText { value } => Ok(Value::String(editable_text(&value))),
         Request::Csv { columns, rows } => Ok(Value::String(csv_document(&columns, &rows))),
         Request::ParseConnectionUrl { url } => serde_json::to_value(parse_connection_url(&url)?),
+        Request::ExportProgress { path } => Ok(EXPORT_PROGRESS
+            .lock()
+            .ok()
+            .and_then(|progress| progress.get(&path).copied())
+            .map_or(Value::Null, Value::from)),
         Request::Completions { engine, prefix } => {
             serde_json::to_value(completions(engine, &prefix))
         }
@@ -398,7 +445,7 @@ fn dispatch_demo(store: &mut DemoStore, request: Request) -> Result<Value, Strin
             profile_id, limit, ..
         } => serde_json::to_value(store.history(profile_id, limit.unwrap_or(100) as usize)),
         Request::ApplyTableMutations { .. } => return Err(store.apply_mutations().unwrap_err()),
-        Request::ExportCsv { .. } => return Err("Demo fixture: exporting is disabled.".into()),
+        Request::ExportCsv { .. } => unreachable!("demo exports run on the session runtime"),
         helper => return helper_value(helper),
     }
     .map_err(message)
@@ -523,7 +570,18 @@ pub unsafe extern "C" fn dbm_bridge_session_call(
         let Inner { runtime, backend } = &mut *inner;
         let result = match backend {
             Backend::Live(state) => runtime.block_on(dispatch(state, request)),
-            Backend::Demo(store) => dispatch_demo(store, request),
+            Backend::Demo(store) => match request {
+                // Demo exports stream the fixture to the chosen file, as the
+                // other hosts' demo mode does.
+                Request::ExportCsv {
+                    request,
+                    columns,
+                    path,
+                } => runtime.block_on(export_with_progress(&path, &columns, &request, |page| {
+                    std::future::ready(Ok::<_, String>(demo::table_page(&page)))
+                })),
+                request => dispatch_demo(store, request),
+            },
         };
         match result {
             Ok(value) => response(json!({"ok": true, "value": value})),

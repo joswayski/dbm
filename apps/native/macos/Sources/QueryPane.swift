@@ -216,6 +216,9 @@ final class QueryPane: NSView, NSTextViewDelegate, NSSplitViewDelegate {
     private let truncatedChip = Chip("truncated", color: Graphite.modified)
     private let resultGrid = ResultGrid()
     private let resultCard = PanelView(fill: Graphite.bg)
+    private let errorView = MessageView()
+    private var metaBelowTop: NSLayoutConstraint!
+    private var metaBelowError: NSLayoutConstraint!
     private let placeholder = label("Results will appear here.", font: Graphite.ui(13), color: Graphite.muted)
     private(set) var embeddedPane: TablePane?
     private var shownResult: UUID?
@@ -338,8 +341,18 @@ final class QueryPane: NSView, NSTextViewDelegate, NSSplitViewDelegate {
         results.addSubview(meta)
         results.addSubview(resultCard)
         results.addSubview(placeholder)
+        results.addSubview(errorView)
+        metaBelowTop = meta.topAnchor.constraint(equalTo: results.topAnchor, constant: 8)
+        metaBelowError = meta.topAnchor.constraint(equalTo: errorView.bottomAnchor, constant: 8)
+        errorView.onDismiss = { [weak self] in
+            self?.tab.queryError = nil
+            self?.layoutError()
+        }
         NSLayoutConstraint.activate([
-            meta.topAnchor.constraint(equalTo: results.topAnchor, constant: 8),
+            errorView.topAnchor.constraint(equalTo: results.topAnchor, constant: 8),
+            errorView.leadingAnchor.constraint(equalTo: results.leadingAnchor, constant: 14),
+            errorView.trailingAnchor.constraint(equalTo: results.trailingAnchor, constant: -14),
+            metaBelowTop,
             meta.leadingAnchor.constraint(equalTo: results.leadingAnchor, constant: 14),
             meta.trailingAnchor.constraint(equalTo: results.trailingAnchor, constant: -14),
             meta.heightAnchor.constraint(equalToConstant: 22),
@@ -425,7 +438,15 @@ final class QueryPane: NSView, NSTextViewDelegate, NSSplitViewDelegate {
         }
     }
 
+    private func layoutError() {
+        let visible = !errorView.isHidden
+        metaBelowTop.isActive = !visible
+        metaBelowError.isActive = visible
+    }
+
     private func reloadResult() {
+        errorView.show(tab.queryError)
+        defer { layoutError() }
         guard let result = tab.result else {
             [resultMeta, editableChip, readOnlyChip, truncatedChip, resultCard].forEach { $0.isHidden = true }
             embeddedPane?.removeFromSuperview()
