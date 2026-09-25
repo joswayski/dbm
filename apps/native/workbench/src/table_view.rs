@@ -9,7 +9,7 @@ use dbm_core::models::{
     FilterCondition, FilterOperator, OrderSpec, QueryColumn, TablePage, TablePageRequest,
 };
 use dbm_core::sql_text::{csv_document, display_value, inline_diff};
-use eframe::egui::{self, Color32, Frame, Margin, RichText, Sense, Stroke, Vec2};
+use eframe::egui::{self, Color32, Frame, Margin, Rect, RichText, Sense, Stroke, Vec2};
 use egui_extras::{Column, TableBuilder};
 use serde_json::Value;
 use uuid::Uuid;
@@ -82,6 +82,8 @@ pub struct TableState {
     /// The request in flight, recorded as `loaded` when its page arrives.
     pub requested: Option<TablePageRequest>,
     pub loading: bool,
+    /// When the current load started, for the delayed "Refreshing…" overlay.
+    loading_since: Option<f64>,
     pub page_index: u32,
     pub limit: u32,
     limit_input: String,
@@ -108,6 +110,7 @@ impl Default for TableState {
             loaded: None,
             requested: None,
             loading: false,
+            loading_since: None,
             page_index: 0,
             limit: MAX_PREVIEW_ROWS,
             limit_input: MAX_PREVIEW_ROWS.to_string(),
@@ -366,7 +369,9 @@ pub fn show(ui: &mut egui::Ui, cx: &TableContext<'_>, state: &mut TableState) ->
     egui::CentralPanel::default()
         .frame(Frame::new().fill(theme::BG))
         .show_inside(ui, |ui| {
+            let area = ui.max_rect();
             ui.add_enabled_ui(interactive, |ui| grid(ui, cx, state, &page, &mut actions));
+            loading_overlay(ui, area, state);
         });
     commit_unfocused_drafts(ui, cx.tab_id, state);
     actions
@@ -623,12 +628,14 @@ fn filter_panel(
                 .desired_width(48.0)
                 .horizontal_align(egui::Align::Center),
         );
-        if response.lost_focus() {
+        let step = limit_stepper(ui);
+        if response.lost_focus() || step != 0 {
             let limit = state
                 .limit_input
                 .trim()
-                .parse::<u32>()
-                .map_or(state.limit, |n| n.clamp(1, MAX_PREVIEW_ROWS));
+                .parse::<i64>()
+                .map_or(i64::from(state.limit), |n| n + step)
+                .clamp(1, i64::from(MAX_PREVIEW_ROWS)) as u32;
             state.limit_input = limit.to_string();
             if limit != state.limit {
                 state.limit = limit;
@@ -920,6 +927,66 @@ fn hairline(ui: &egui::Ui) {
 
 /// Grid chrome shared by result and table grids: a header band across the
 /// full width, and column resize lines that only show on hover.
+/// Up/down arrows beside the preview limit, like the desktop stepper.
+fn limit_stepper(ui: &mut egui::Ui) -> i64 {
+    let mut step = 0;
+    ui.vertical(|ui| {
+        ui.spacing_mut().item_spacing.y = 0.0;
+        for (icon, amount, tip) in [
+            (Icon::ChevronUp, 1, "Increase preview limit"),
+            (Icon::ChevronDown, -1, "Decrease preview limit"),
+        ] {
+            let (rect, response) = ui.allocate_exact_size(Vec2::new(16.0, 12.0), Sense::click());
+            let color = if response.hovered() {
+                theme::TEXT
+            } else {
+                theme::FAINT
+            };
+            if response.hovered() {
+                ui.painter().rect_filled(rect, 2.0, theme::CONTROL_HOVER);
+            }
+            icons::paint(ui.painter(), rect.shrink2(Vec2::new(3.0, 1.0)), icon, color);
+            if response.on_hover_text(tip).clicked() {
+                step = amount;
+            }
+        }
+    });
+    step
+}
+
+/// Dims the grid and shows a "Refreshing…" pill once a reload of an already
+/// visible page has taken longer than 120 ms, as the desktop app does.
+fn loading_overlay(ui: &mut egui::Ui, area: Rect, state: &mut TableState) {
+    if !state.loading {
+        state.loading_since = None;
+        return;
+    }
+    let now = ui.input(|i| i.time);
+    let since = *state.loading_since.get_or_insert(now);
+    if now - since < 0.12 {
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_secs_f64(0.12 - (now - since)));
+        return;
+    }
+    let painter = ui.painter_at(area);
+    painter.rect_filled(area, 0.0, Color32::from_black_alpha(90));
+    let galley =
+        painter.layout_no_wrap("Refreshing…".into(), theme::ui_font(12.0), theme::SECONDARY);
+    let pill = Rect::from_center_size(area.center(), galley.size() + Vec2::new(24.0, 12.0));
+    painter.rect(
+        pill,
+        pill.height() / 2.0,
+        theme::POPOVER,
+        Stroke::new(1.0, theme::BORDER_STRONG),
+        egui::StrokeKind::Inside,
+    );
+    painter.galley(
+        pill.center() - galley.size() / 2.0,
+        galley,
+        theme::SECONDARY,
+    );
+}
+
 fn grid_scope(ui: &mut egui::Ui) {
     ui.spacing_mut().item_spacing = Vec2::ZERO;
     ui.visuals_mut().widgets.noninteractive.bg_stroke = Stroke::NONE;

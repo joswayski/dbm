@@ -57,6 +57,8 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
     private let inspector = InspectorView()
     private var inspectorWidth: NSLayoutConstraint!
     private var pendingHeight: NSLayoutConstraint!
+    private let loadingOverlay = LoadingOverlay()
+    private var overlayTimer: Timer?
     private var columnSignature = ""
     private var editor: GTextField?
     private var editingCell: (row: Int, column: Int)?
@@ -108,6 +110,7 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
         let filters = PanelView(fill: Graphite.chrome, edges: [.bottom])
         limitField.widthAnchor.constraint(equalToConstant: 56).isActive = true
         limitField.onCommit = { [weak self] text in self?.applyLimit(text) }
+        let limitStepper = LimitStepper { [weak self] amount in self?.stepLimit(amount) }
         sortColumn.onSelect = { [weak self] _ in self?.sortChanged() }
         sortDirection.onSelect = { [weak self] _ in self?.sortChanged() }
         let addFilter = GButton("Add filter", icon: .plus, style: .link) { [weak self] in self?.addFilter() }
@@ -116,7 +119,7 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
             label("Filters", font: Graphite.ui(13, .semibold), color: Graphite.textStrong),
             label("All filters must match", font: Graphite.ui(12), color: Graphite.faint),
             addFilter, spacer(),
-            label("Preview limit", font: Graphite.ui(12), color: Graphite.muted), limitField,
+            label("Preview limit", font: Graphite.ui(12), color: Graphite.muted), limitField, limitStepper,
             label("Sort by", font: Graphite.ui(12), color: Graphite.muted), sortColumn,
             directionLabel, sortDirection, clearButton, applyButton,
         ], spacing: 8)
@@ -142,6 +145,7 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
         body.addSubview(inspector)
         body.addSubview(emptyLabel)
         body.addSubview(retryButton)
+        body.addSubview(loadingOverlay)
         inspector.onClose = { [weak self] in self?.toggleInspector() }
         inspectorWidth = inspector.widthAnchor.constraint(equalToConstant: Graphite.inspectorWidth)
         NSLayoutConstraint.activate([
@@ -157,6 +161,10 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
             emptyLabel.centerYAnchor.constraint(equalTo: gridScrollView.centerYAnchor),
             retryButton.centerXAnchor.constraint(equalTo: gridScrollView.centerXAnchor),
             retryButton.centerYAnchor.constraint(equalTo: gridScrollView.centerYAnchor),
+            loadingOverlay.leadingAnchor.constraint(equalTo: gridScrollView.leadingAnchor),
+            loadingOverlay.trailingAnchor.constraint(equalTo: gridScrollView.trailingAnchor),
+            loadingOverlay.topAnchor.constraint(equalTo: gridScrollView.topAnchor),
+            loadingOverlay.bottomAnchor.constraint(equalTo: gridScrollView.bottomAnchor),
         ])
 
         let dot = IconView(.check, size: 10)
@@ -244,6 +252,7 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
         gridScrollView.isHidden = page == nil
         let interactive = !state.loading && !(host?.isSaving(tab) ?? false)
         grid.isEnabled = interactive
+        updateLoadingOverlay(visible: state.loading && page != nil)
         inspector.show(tab: tab, host: host, editable: editable, interactive: interactive) { [weak self] in self?.stagedFromInspector() }
 
         let pendingCount = state.pending.count
@@ -576,6 +585,30 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
         reloadIfClean()
     }
 
+    /// Like the desktop app, only dim a visible page when a reload takes
+    /// longer than 120 ms, so quick refreshes don't flash.
+    private func updateLoadingOverlay(visible: Bool) {
+        guard visible else {
+            overlayTimer?.invalidate()
+            overlayTimer = nil
+            loadingOverlay.isHidden = true
+            return
+        }
+        guard loadingOverlay.isHidden, overlayTimer == nil else { return }
+        overlayTimer = Timer.scheduledTimer(withTimeInterval: 0.12, repeats: false) { [weak self] _ in
+            guard let self else { return }
+            self.overlayTimer = nil
+            self.loadingOverlay.isHidden = !(self.state.loading && self.state.page != nil)
+        }
+    }
+
+    private func stepLimit(_ amount: Int) {
+        let current = Int(limitField.stringValue.trimmingCharacters(in: .whitespaces)) ?? state.limit
+        let next = min(maxPreviewRows, max(1, current + amount))
+        limitField.stringValue = String(next)
+        applyLimit(String(next))
+    }
+
     private func applyLimit(_ text: String) {
         let limit = min(maxPreviewRows, max(1, Int(text.trimmingCharacters(in: .whitespaces)) ?? state.limit))
         guard limit != state.limit else { limitField.stringValue = String(limit); return }
@@ -763,4 +796,83 @@ final class InspectorView: PanelView {
         state.toggleDelete([row])
         onStaged?()
     }
+}
+
+/// Up/down arrows beside the preview limit, like the desktop stepper.
+final class LimitStepper: NSView {
+    private let onStep: (Int) -> Void
+    private var hoverHalf: Int?
+
+    init(onStep: @escaping (Int) -> Void) {
+        self.onStep = onStep
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        widthAnchor.constraint(equalToConstant: 16).isActive = true
+        heightAnchor.constraint(equalToConstant: 24).isActive = true
+        toolTip = "Step the preview limit"
+        let up = IconView(.chevronUp, size: 10, color: Graphite.faint)
+        let down = IconView(.chevronDown, size: 10, color: Graphite.faint)
+        for (icon, offset) in [(up, CGFloat(-5)), (down, CGFloat(5))] {
+            addSubview(icon)
+            icon.centerXAnchor.constraint(equalTo: centerXAnchor).isActive = true
+            icon.centerYAnchor.constraint(equalTo: centerYAnchor, constant: offset).isActive = true
+        }
+        setAccessibilityElement(true)
+        setAccessibilityRole(.incrementor)
+        setAccessibilityLabel("Preview limit stepper")
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override var isFlipped: Bool { true }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow], owner: self))
+    }
+
+    private func half(_ event: NSEvent) -> Int {
+        convert(event.locationInWindow, from: nil).y < bounds.midY ? 1 : -1
+    }
+
+    override func mouseMoved(with event: NSEvent) { hoverHalf = half(event); needsDisplay = true }
+    override func mouseExited(with event: NSEvent) { hoverHalf = nil; needsDisplay = true }
+    override func mouseDown(with event: NSEvent) { onStep(half(event)) }
+    override func accessibilityPerformIncrement() -> Bool { onStep(1); return true }
+    override func accessibilityPerformDecrement() -> Bool { onStep(-1); return true }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard let hoverHalf else { return }
+        let rect = NSRect(x: 0, y: hoverHalf == 1 ? 0 : bounds.midY, width: bounds.width, height: bounds.height / 2)
+        Graphite.controlHover.setFill()
+        NSBezierPath(roundedRect: rect.insetBy(dx: 1, dy: 1), xRadius: 2, yRadius: 2).fill()
+    }
+}
+
+/// Dims the grid with a "Refreshing…" pill while a visible page reloads.
+final class LoadingOverlay: NSView {
+    init() {
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        isHidden = true
+        let pill = PanelView(fill: Graphite.popover)
+        pill.radius = 13
+        pill.outline = Graphite.borderStrong
+        let text = label("Refreshing…", font: Graphite.ui(12), color: Graphite.secondary)
+        pill.pin(text, insets: NSEdgeInsets(top: 6, left: 12, bottom: 6, right: 12))
+        addSubview(pill)
+        pill.centerXAnchor.constraint(equalTo: centerXAnchor).isActive = true
+        pill.centerYAnchor.constraint(equalTo: centerYAnchor).isActive = true
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor(red: 22 / 255, green: 22 / 255, blue: 24 / 255, alpha: 0.35).setFill()
+        bounds.fill()
+    }
+
+    // Like `pointer-events: none`: the grid underneath keeps the cursor.
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
