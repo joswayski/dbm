@@ -2736,9 +2736,9 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::backend::DemoBackend;
     use crate::table_view::pending_row;
     use crate::table_view::tests::page;
+    use dbm_core::demo::DemoStore;
 
     fn app() -> Workbench {
         let mut app = Workbench::with_context(egui::Context::default(), true);
@@ -2892,7 +2892,7 @@ mod tests {
 
     #[test]
     fn literal_null_text_and_tls_profile_settings_survive_edits() {
-        let mut profile = DemoBackend::new().profiles.remove(0);
+        let mut profile = DemoStore::new().profiles().remove(0);
         profile.ca_cert_path = Some("/tmp/test-ca.pem".into());
         let input = ProfileForm::from_profile(&profile).input();
         assert_eq!(input.tls_mode, TlsMode::Required);

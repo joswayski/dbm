@@ -1,6 +1,7 @@
 //! Database behavior and local persistence shared by desktop hosts. No UI runtime.
 pub mod cell_values;
 pub mod connection_url;
+pub mod demo;
 pub mod error;
 pub mod export;
 pub mod keyring_store;

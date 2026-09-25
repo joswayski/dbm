@@ -1463,7 +1463,7 @@ pub mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::backend::demo_page;
+    use dbm_core::demo::table_page as demo_page;
 
     pub fn page() -> TablePage {
         demo_page(&TablePageRequest {

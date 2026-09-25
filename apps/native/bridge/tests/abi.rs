@@ -5,8 +5,8 @@ use std::ptr;
 use std::sync::Mutex;
 
 use dbm_native_bridge::{
-    dbm_bridge_response_free, dbm_bridge_session_call, dbm_bridge_session_create,
-    dbm_bridge_session_free,
+    dbm_bridge_demo_session_create, dbm_bridge_response_free, dbm_bridge_session_call,
+    dbm_bridge_session_create, dbm_bridge_session_free,
 };
 use serde_json::{Value, json};
 
@@ -172,4 +172,38 @@ fn shared_editor_helpers_use_utf16_offsets() {
 
     unsafe { dbm_bridge_session_free(session) };
     std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn demo_sessions_answer_from_the_fixture_and_refuse_writes() {
+    let session = dbm_bridge_demo_session_create();
+    assert!(!session.is_null());
+    let profiles = call(session, &json!({"command": "listProfiles"}));
+    let id = profiles[0]["profile"]["id"].as_str().unwrap().to_owned();
+    let workspace = call(session, &json!({"command": "connect", "profile_id": id}));
+    assert_eq!(workspace["profile"]["name"], "Acme Analytics");
+    let page = call(
+        session,
+        &json!({"command": "loadTablePage", "request": {"profileId": id, "schema": "public", "table": "customers", "offset": 0, "limit": 5, "filters": [], "orderBy": null}}),
+    );
+    assert_eq!(page["rows"].as_array().unwrap().len(), 5);
+    call(
+        session,
+        &json!({"command": "query", "request": {"profileId": id, "sql": "SELECT 1"}}),
+    );
+    let history = call(
+        session,
+        &json!({"command": "listQueryHistory", "profile_id": id, "database": "analytics"}),
+    );
+    assert_eq!(history[0]["sql"], "SELECT 1");
+    let save = br#"{"command":"applyTableMutations","batch":{"profileId":"00000000-0000-0000-0000-000000000001","schema":"public","table":"customers","mutations":[]}}"#;
+    let reply = unsafe { take(dbm_bridge_session_call(session, save.as_ptr(), save.len())) };
+    assert_eq!(reply["ok"], false);
+    assert!(
+        reply["error"]
+            .as_str()
+            .unwrap()
+            .contains("saving is disabled")
+    );
+    unsafe { dbm_bridge_session_free(session) };
 }

@@ -10,6 +10,9 @@ typedef struct DbmBridgeSession DbmBridgeSession;
  * session until free, and must not free it concurrently with a call. On create
  * failure, error_out receives an owned UTF-8 diagnostic when non-null. */
 DbmBridgeSession *dbm_bridge_session_create(char **error_out);
+/* An isolated in-memory fixture for --demo: no profiles, credentials,
+ * network, or disk. Null only if the runtime cannot start. */
+DbmBridgeSession *dbm_bridge_demo_session_create(void);
 char *dbm_bridge_session_call(DbmBridgeSession *session,
                               const uint8_t *request, size_t length);
 void dbm_bridge_session_free(DbmBridgeSession *session);

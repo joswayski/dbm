@@ -16,11 +16,13 @@ use std::sync::Mutex;
 use dbm_core::{
     cell_values::{editable_text, parse_cell_input},
     connection_url::parse_connection_url,
+    demo::{self, DemoStore, profile_from_input},
     export::export_csv,
     models::{
         DatabaseEngine, MutationBatch, QueryRequest, SaveProfileInput, SchemaNode, TableColumn,
         TablePageRequest, WorkspaceInfo,
     },
+    session::DbSession,
     sql_text::{
         byte_to_utf16, csv_document, execution_target, highlight, requires_confirmation,
         resolve_full_table_select, utf16_to_byte,
@@ -42,6 +44,10 @@ enum Request {
     },
     DeleteProfile {
         profile_id: Uuid,
+    },
+    /// Connects with the form's settings (or the saved password) and closes.
+    TestProfile {
+        input: SaveProfileInput,
     },
     Connect {
         profile_id: Uuid,
@@ -116,9 +122,14 @@ enum Request {
     },
 }
 
+enum Backend {
+    Live(AppState),
+    Demo(DemoStore),
+}
+
 struct Inner {
     runtime: tokio::runtime::Runtime,
-    state: AppState,
+    backend: Backend,
 }
 
 /// Opaque session type. Its contents are private to Rust.
@@ -148,6 +159,23 @@ async fn dispatch(state: &AppState, request: Request) -> Result<Value, String> {
             }
             state.disconnect(profile.id).await;
             serde_json::to_value(profile)
+        }
+        Request::TestProfile { input } => {
+            let profile = profile_from_input(&input).map_err(message)?;
+            let password = match input.password.filter(|value| !value.is_empty()) {
+                Some(password) => Some(password),
+                None => input
+                    .id
+                    .map(|id| state.credentials.get_password(id))
+                    .transpose()
+                    .map_err(message)?
+                    .flatten(),
+            };
+            let session = DbSession::connect(profile, password)
+                .await
+                .map_err(message)?;
+            session.close().await;
+            Ok(Value::Null)
         }
         Request::DeleteProfile { profile_id } => {
             state.disconnect(profile_id).await;
@@ -245,6 +273,14 @@ async fn dispatch(state: &AppState, request: Request) -> Result<Value, String> {
             .await?;
             Ok(json!({ "rows": rows }))
         }
+        helper => return helper_value(helper),
+    }
+    .map_err(message)
+}
+
+/// Editor and grid helpers that touch no database, for live and demo sessions.
+fn helper_value(request: Request) -> Result<Value, String> {
+    match request {
         Request::ExecutionTarget {
             engine,
             text,
@@ -293,6 +329,52 @@ async fn dispatch(state: &AppState, request: Request) -> Result<Value, String> {
         Request::EditableText { value } => Ok(Value::String(editable_text(&value))),
         Request::Csv { columns, rows } => Ok(Value::String(csv_document(&columns, &rows))),
         Request::ParseConnectionUrl { url } => serde_json::to_value(parse_connection_url(&url)?),
+        _ => return Err("unsupported native request".into()),
+    }
+    .map_err(message)
+}
+
+/// Answers from the in-memory fixture. Exports and saves are refused.
+fn dispatch_demo(store: &mut DemoStore, request: Request) -> Result<Value, String> {
+    match request {
+        Request::ListProfiles {} => serde_json::to_value(store.profile_summaries()),
+        Request::SaveProfile { input } => {
+            serde_json::to_value(store.save_profile(&input).map_err(message)?)
+        }
+        Request::DeleteProfile { profile_id } => {
+            store.delete_profile(profile_id);
+            Ok(Value::Null)
+        }
+        Request::TestProfile { input } => {
+            profile_from_input(&input).map_err(message)?;
+            Ok(Value::Null)
+        }
+        Request::Connect { profile_id } => {
+            serde_json::to_value(store.workspace(profile_id, None).map_err(message)?)
+        }
+        Request::ConnectDatabase {
+            profile_id,
+            database,
+        } => serde_json::to_value(
+            store
+                .workspace(profile_id, Some(&database))
+                .map_err(message)?,
+        ),
+        Request::Disconnect { .. } => Ok(Value::Null),
+        Request::ListDatabases { profile_id } => {
+            serde_json::to_value(store.databases(profile_id).map_err(message)?)
+        }
+        Request::LoadSchemaTree { profile_id } => {
+            serde_json::to_value(store.schema_tree(profile_id))
+        }
+        Request::LoadTablePage { request } => serde_json::to_value(demo::table_page(&request)),
+        Request::Query { request } => serde_json::to_value(store.run_query(&request)),
+        Request::ListQueryHistory {
+            profile_id, limit, ..
+        } => serde_json::to_value(store.history(profile_id, limit.unwrap_or(100) as usize)),
+        Request::ApplyTableMutations { .. } => return Err(store.apply_mutations().unwrap_err()),
+        Request::ExportCsv { .. } => return Err("Demo fixture: exporting is disabled.".into()),
+        helper => return helper_value(helper),
     }
     .map_err(message)
 }
@@ -335,9 +417,9 @@ pub unsafe extern "C" fn dbm_bridge_session_create(
             .enable_all()
             .build()
             .map_err(message)?;
-        let state = AppState::new().map_err(message)?;
+        let backend = Backend::Live(AppState::new().map_err(message)?);
         Ok::<_, String>(Box::new(DbmBridgeSession {
-            inner: Mutex::new(Inner { runtime, state }),
+            inner: Mutex::new(Inner { runtime, backend }),
         }))
     }));
     match result {
@@ -355,6 +437,29 @@ pub unsafe extern "C" fn dbm_bridge_session_create(
             ptr::null_mut()
         }
     }
+}
+
+/// Creates a session backed by the in-memory demo fixture. It never reads
+/// local profiles or credentials, touches the network, or writes to disk.
+/// Free it with `dbm_bridge_session_free`. Returns null only if the runtime
+/// cannot start.
+#[unsafe(no_mangle)]
+pub extern "C" fn dbm_bridge_demo_session_create() -> *mut DbmBridgeSession {
+    catch_unwind(|| {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .ok()?;
+        Some(Box::into_raw(Box::new(DbmBridgeSession {
+            inner: Mutex::new(Inner {
+                runtime,
+                backend: Backend::Demo(DemoStore::new()),
+            }),
+        })))
+    })
+    .ok()
+    .flatten()
+    .unwrap_or(ptr::null_mut())
 }
 
 /// Executes one JSON request. `request` need not be NUL terminated; `length`
@@ -387,10 +492,14 @@ pub unsafe extern "C" fn dbm_bridge_session_call(
         };
         // SAFETY: Null was rejected and the caller keeps the session alive for this call.
         let session = unsafe { &*session };
-        let Ok(inner) = session.inner.lock() else {
+        let Ok(mut inner) = session.inner.lock() else {
             return error_response("native bridge session is unavailable");
         };
-        let result = inner.runtime.block_on(dispatch(&inner.state, request));
+        let Inner { runtime, backend } = &mut *inner;
+        let result = match backend {
+            Backend::Live(state) => runtime.block_on(dispatch(state, request)),
+            Backend::Demo(store) => dispatch_demo(store, request),
+        };
         match result {
             Ok(value) => response(json!({"ok": true, "value": value})),
             Err(error) => error_response(error),
