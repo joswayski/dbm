@@ -307,8 +307,17 @@ final class ResultGrid: NSObject, NSTableViewDataSource, NSTableViewDelegate {
                                 width: defaultColumnWidth(model), rightAligned: numeric[index])
         }
         table.reloadData()
-        // After layout, spread the columns across the visible width.
-        DispatchQueue.main.async { [weak self] in self?.table.sizeToFit() }
+        // After layout, spread spare width across the columns, like the
+        // desktop's auto-width result table.
+        DispatchQueue.main.async { [weak self] in self?.fillWidth() }
+    }
+
+    private func fillWidth() {
+        guard let available = table.enclosingScrollView?.contentView.bounds.width, !table.tableColumns.isEmpty else { return }
+        let total = table.tableColumns.reduce(0) { $0 + $1.width + table.intercellSpacing.width }
+        guard total < available - 1 else { return }
+        let extra = (available - total) / CGFloat(table.tableColumns.count)
+        for column in table.tableColumns { column.width += extra }
     }
 
     func numberOfRows(in tableView: NSTableView) -> Int { rows.count }

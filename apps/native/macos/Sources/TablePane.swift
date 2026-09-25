@@ -248,7 +248,8 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
         ])
         // Stack views stretch at the default hugging priority, and the scroll
         // view has no intrinsic height, so pin the filter panel to its content.
-        for stack in [filterStack, filterRows, header] {
+        // Not the header row: hugging it vertically squeezes its controls.
+        for stack in [filterStack, filterRows] {
             stack.setHuggingPriority(.required, for: .vertical)
         }
         bodyBelowFilters = body.topAnchor.constraint(equalTo: filters.bottomAnchor)
