@@ -439,26 +439,45 @@ final class TopBar: PanelView {
 final class TabButton: RowControl {
     let tab: WorkTab
     var color = Graphite.accent
-    private let closeButton: GButton
     var renameField: GTextField?
 
-    init(tab: WorkTab, onClose: @escaping () -> Void) {
+    init(tab: WorkTab, active: Bool, onClose: @escaping () -> Void, onRename: (() -> Void)?, onCollapse: (() -> Void)?) {
         self.tab = tab
-        closeButton = GButton("", icon: .close, style: .icon, tooltip: "Close \(tab.title)", handler: onClose)
         super.init(frame: .zero)
-        closeButton.minHeight = 22
-        addSubview(closeButton)
+        selected = active
+        var buttons: [NSView] = []
+        if !tab.collapsed, let onRename {
+            buttons.append(TabButton.small(.pencil, "Rename \(tab.title)", onRename))
+        }
+        if !tab.collapsed, active, let onCollapse {
+            buttons.append(TabButton.small(.collapse, "Collapse \(tab.title)", onCollapse))
+        }
+        buttons.append(TabButton.small(.close, "Close \(tab.title)", onClose))
+        let actions = hstack(buttons, spacing: 0)
+        addSubview(actions)
+        let width = tab.collapsed ? 64 : min(230, max(96, titleWidth + 42 + CGFloat(buttons.count) * 22))
         NSLayoutConstraint.activate([
-            closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
-            closeButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            actions.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -3),
+            actions.centerYAnchor.constraint(equalTo: centerYAnchor),
             heightAnchor.constraint(equalToConstant: 32),
-            widthAnchor.constraint(equalToConstant: min(230, max(96, titleWidth + 66))),
+            widthAnchor.constraint(equalToConstant: width),
         ])
+        actionsWidth = CGFloat(buttons.count) * 22
         setAccessibilityRole(.radioButton)
-        setAccessibilityLabel(tab.title)
+        setAccessibilityLabel(tab.collapsed ? "Expand \(tab.title)" : tab.title)
+        toolTip = tab.collapsed ? "Expand \(tab.title)" : nil
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    private var actionsWidth: CGFloat = 22
+
+    private static func small(_ icon: Icon, _ tooltip: String, _ action: @escaping () -> Void) -> GButton {
+        let button = GButton("", icon: icon, style: .icon, tooltip: tooltip, handler: action)
+        button.minHeight = 22
+        button.widthAnchor.constraint(equalToConstant: 22).isActive = true
+        return button
+    }
 
     private var titleWidth: CGFloat {
         (tab.title as NSString).size(withAttributes: [.font: Graphite.ui(12.5, .medium)]).width
@@ -485,15 +504,23 @@ final class TabButton: RowControl {
             NSColor(white: 1, alpha: 0.04).setFill()
             shape.fill()
         }
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byTruncatingTail
+        if tab.collapsed {
+            Icon.expand.draw(in: NSRect(x: 18, y: 5, width: 12, height: 12), color: hovering ? Graphite.text : Graphite.faint)
+            paragraph.alignment = .center
+            NSAttributedString(string: tab.title, attributes: [
+                .font: Graphite.ui(9.5, .medium), .foregroundColor: Graphite.faint, .paragraphStyle: paragraph,
+            ]).draw(with: NSRect(x: 4, y: 18, width: bounds.width - 24, height: 12), options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
+            return
+        }
         let tint = color.blended(withFraction: 0.25, of: Graphite.muted) ?? color
         (tab.kind == .table ? Icon.table : Icon.code).draw(in: NSRect(x: 12, y: 9.5, width: 13, height: 13), color: tint)
         guard renameField == nil else { return }
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.lineBreakMode = .byTruncatingTail
         NSAttributedString(string: tab.title, attributes: [
             .font: Graphite.ui(12.5, selected ? .medium : .regular),
             .foregroundColor: selected ? Graphite.textStrong : Graphite.muted, .paragraphStyle: paragraph,
-        ]).draw(with: NSRect(x: 32, y: 8.5, width: bounds.width - 62, height: 17), options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
+        ]).draw(with: NSRect(x: 32, y: 8.5, width: bounds.width - 38 - actionsWidth, height: 17), options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
     }
 }
 
@@ -519,8 +546,12 @@ final class TabStrip: PanelView {
     func reload() {
         row.arrangedSubviews.forEach { $0.removeFromSuperview() }
         for tab in app.tabs {
-            let button = TabButton(tab: tab) { [weak app] in app?.closeTab(tab) }
-            button.selected = app.activeTab === tab
+            var button: TabButton!
+            button = TabButton(
+                tab: tab, active: app.activeTab === tab,
+                onClose: { [weak app] in app?.closeTab(tab) },
+                onRename: tab.kind == .query ? { [weak self] in if let button { self?.beginRename(button) } } : nil,
+                onCollapse: { [weak app] in app?.collapseTab(tab) })
             button.color = app.profile(tab.profileID)?.color ?? Graphite.accent
             button.onClick = { [weak app] in app?.selectTab(tab) }
             button.onMiddleClick = { [weak app] in app?.closeTab(tab) }
@@ -555,6 +586,7 @@ final class TabStrip: PanelView {
 
 final class ToastView: PanelView {
     private let message = label("", font: Graphite.ui(13), color: Graphite.success)
+    private let actions = hstack([], spacing: 6)
     private var timer: Timer?
 
     init() {
@@ -565,23 +597,27 @@ final class ToastView: PanelView {
         message.lineBreakMode = .byWordWrapping
         message.preferredMaxLayoutWidth = 420
         let close = GButton("", icon: .close, style: .icon, tooltip: "Dismiss") { [weak self] in self?.hide() }
-        pin(hstack([message, close], spacing: 8), insets: NSEdgeInsets(top: 8, left: 12, bottom: 8, right: 6))
-        widthAnchor.constraint(lessThanOrEqualToConstant: 480).isActive = true
+        pin(hstack([message, actions, close], spacing: 8), insets: NSEdgeInsets(top: 8, left: 12, bottom: 8, right: 6))
+        widthAnchor.constraint(lessThanOrEqualToConstant: 640).isActive = true
         isHidden = true
         setAccessibilityRole(.staticText)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    func show(_ text: String, error: Bool) {
+    func show(_ text: String, error: Bool, actions buttons: [(String, () -> Void)] = []) {
         message.stringValue = text
         message.textColor = error ? Graphite.danger : Graphite.success
         outline = error ? Graphite.danger.withAlphaComponent(0.6) : Graphite.borderStrong
+        actions.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        for (title, action) in buttons {
+            actions.addArrangedSubview(GButton(title, style: .secondary, handler: action))
+        }
         isHidden = false
         NSAccessibility.post(element: self, notification: .announcementRequested,
                              userInfo: [.announcement: text, .priority: NSAccessibilityPriorityLevel.high.rawValue])
         timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: error ? 10 : 6, repeats: false) { [weak self] _ in self?.hide() }
+        timer = Timer.scheduledTimer(withTimeInterval: error ? 10 : (buttons.isEmpty ? 6 : 12), repeats: false) { [weak self] _ in self?.hide() }
     }
 
     func hide() {
@@ -591,28 +627,50 @@ final class ToastView: PanelView {
 }
 
 final class WelcomeView: FlippedView {
+    private let title = label("", font: Graphite.ui(20, .semibold), color: Graphite.textStrong)
     private let message = label("", font: Graphite.ui(13), color: Graphite.muted)
-    private let newButton: GButton
 
-    init(onNew: @escaping () -> Void) {
-        newButton = GButton("New connection", style: .primary, handler: onNew)
-        super.init(frame: .zero)
+    override init(frame: NSRect) {
+        super.init(frame: frame)
         translatesAutoresizingMaskIntoConstraints = false
-        let stack = vstack([label("DBM", font: Graphite.ui(22, .semibold), color: Graphite.textStrong), message, newButton],
-                           spacing: 8, alignment: .centerX)
-        stack.setCustomSpacing(14, after: message)
+        let mark = PanelView(fill: NSColor(hex: 0x27272a))
+        mark.radius = 16
+        mark.outline = NSColor(white: 1, alpha: 0.07)
+        mark.widthAnchor.constraint(equalToConstant: 64).isActive = true
+        mark.heightAnchor.constraint(equalToConstant: 64).isActive = true
+        let icon = IconView(.database, size: 28, color: Graphite.accentText)
+        mark.addSubview(icon)
+        NSLayoutConstraint.activate([
+            icon.centerXAnchor.constraint(equalTo: mark.centerXAnchor),
+            icon.centerYAnchor.constraint(equalTo: mark.centerYAnchor),
+        ])
+        message.alignment = .center
+        message.maximumNumberOfLines = 3
+        message.lineBreakMode = .byWordWrapping
+        message.preferredMaxLayoutWidth = 440
+        title.alignment = .center
+        let stack = vstack([mark, title, message], spacing: 8, alignment: .centerX)
+        stack.setCustomSpacing(22, after: mark)
         addSubview(stack)
         NSLayoutConstraint.activate([
             stack.centerXAnchor.constraint(equalTo: centerXAnchor),
-            stack.centerYAnchor.constraint(equalTo: centerYAnchor, constant: -40),
+            stack.topAnchor.constraint(equalTo: topAnchor, constant: 130),
+            message.widthAnchor.constraint(lessThanOrEqualToConstant: 440),
         ])
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    func show(hasProfiles: Bool) {
-        message.stringValue = hasProfiles
-            ? "Select a saved connection to connect and open a query." : "Create a connection to get started."
-        newButton.isHidden = hasProfiles
+    func show(profile: Profile?, connected: Bool, hasProfiles: Bool) {
+        title.stringValue = profile?.name ?? "No connection selected"
+        if profile != nil {
+            message.stringValue = connected
+                ? "Choose a table from the sidebar or open a new query with the plus button above."
+                : "This connection is selected but not connected. Select it again to connect."
+        } else {
+            message.stringValue = hasProfiles
+                ? "Select a saved connection from the sidebar to browse its data."
+                : "Create a connection from the sidebar to get started."
+        }
     }
 }

@@ -24,8 +24,8 @@ use dbm_core::{
     },
     session::DbSession,
     sql_text::{
-        byte_to_utf16, csv_document, describe_schema_refresh, execution_target, highlight,
-        inline_diff, requires_confirmation, resolve_full_table_select, utf16_to_byte,
+        byte_to_utf16, completions, csv_document, describe_schema_refresh, execution_target,
+        highlight, inline_diff, requires_confirmation, resolve_full_table_select, utf16_to_byte,
     },
     state::AppState,
 };
@@ -123,6 +123,10 @@ enum Request {
     InlineDiff {
         before: String,
         after: String,
+    },
+    Completions {
+        engine: DatabaseEngine,
+        prefix: String,
     },
     DescribeSchemaRefresh {
         previous: Vec<SchemaNode>,
@@ -338,6 +342,9 @@ fn helper_value(request: Request) -> Result<Value, String> {
         Request::EditableText { value } => Ok(Value::String(editable_text(&value))),
         Request::Csv { columns, rows } => Ok(Value::String(csv_document(&columns, &rows))),
         Request::ParseConnectionUrl { url } => serde_json::to_value(parse_connection_url(&url)?),
+        Request::Completions { engine, prefix } => {
+            serde_json::to_value(completions(engine, &prefix))
+        }
         Request::InlineDiff { before, after } => serde_json::to_value(inline_diff(&before, &after)),
         Request::DescribeSchemaRefresh {
             previous,

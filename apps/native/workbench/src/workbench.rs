@@ -11,8 +11,9 @@ use dbm_core::models::{
     WorkspaceInfo,
 };
 use dbm_core::sql_text::{
-    ExecutionKind, TokenKind, describe_schema_refresh, execution_target, filter_schema_nodes,
-    highlight, requires_confirmation, resolve_full_table_select, safe_file_name,
+    ExecutionKind, TokenKind, completions, describe_schema_refresh, execution_target,
+    filter_schema_nodes, highlight, requires_confirmation, resolve_full_table_select,
+    safe_file_name,
 };
 use eframe::egui::{
     self, Color32, CornerRadius, Frame, Margin, RichText, Sense, Stroke, TextFormat, Vec2,
@@ -272,6 +273,15 @@ struct ConfirmQuery {
     refresh: bool,
 }
 
+/// Keyword completion open in a query editor.
+struct Completion {
+    tab: u64,
+    /// Byte offset where the completed word starts.
+    start: usize,
+    items: Vec<String>,
+    selected: usize,
+}
+
 struct Toast {
     message: String,
     error: bool,
@@ -304,6 +314,7 @@ pub struct Workbench {
     confirm_export: Option<u64>,
     renaming: Option<(u64, String)>,
     sidebar_collapsed: bool,
+    completion: Option<Completion>,
     now: f64,
 }
 
@@ -344,6 +355,7 @@ impl Workbench {
             confirm_export: None,
             renaming: None,
             sidebar_collapsed: false,
+            completion: None,
             now: 0.0,
         };
         app.send(Command::LoadProfiles, "Loading connections", None);
@@ -1490,7 +1502,7 @@ impl Workbench {
                     rect.center() - Vec2::new(8.0, 6.0),
                     Vec2::splat(12.0),
                 ),
-                Icon::ChevronRight,
+                Icon::Expand,
                 theme::FAINT,
             );
             let mut job =
@@ -1596,11 +1608,23 @@ impl Workbench {
                             self.close_tab(tab.id);
                         }
                     }
+                    if tab.kind == TabKind::Query
+                        && self.renaming.is_none()
+                        && icon_btn(
+                            ui,
+                            true,
+                            Icon::Pencil,
+                            None,
+                            &format!("Rename {}", tab.title),
+                        )
+                    {
+                        self.renaming = Some((tab.id, tab.title.clone()));
+                    }
                     if active
                         && icon_btn(
                             ui,
                             true,
-                            Icon::ChevronLeft,
+                            Icon::Collapse,
                             None,
                             &format!("Collapse {}", tab.title),
                         )
@@ -1832,27 +1856,55 @@ impl Workbench {
     }
 
     fn welcome(&mut self, ui: &mut egui::Ui) {
-        ui.centered_and_justified(|ui| {
-            ui.vertical_centered(|ui| {
-                ui.add_space(ui.available_height() / 3.0);
-                ui.label(
-                    RichText::new("DBM")
-                        .size(22.0)
-                        .strong()
-                        .color(theme::TEXT_STRONG),
-                );
-                ui.add_space(6.0);
-                let message = if self.profiles.is_empty() {
-                    "Create a connection to get started."
-                } else {
-                    "Select a saved connection to connect and open a query."
-                };
-                ui.label(RichText::new(message).color(theme::MUTED));
-                ui.add_space(12.0);
-                if self.profiles.is_empty() && ui.add(primary_button("New connection")).clicked() {
-                    self.profile_form = Some(ProfileForm::fresh());
-                }
-            });
+        let profile = self.active_profile.and_then(|id| self.profile(id).cloned());
+        let connected = profile
+            .as_ref()
+            .is_some_and(|p| self.workspaces.contains_key(&p.id));
+        let title = profile
+            .as_ref()
+            .map_or("No connection selected", |p| p.name.as_str())
+            .to_owned();
+        let message = match (&profile, connected) {
+            (Some(_), true) => {
+                "Choose a table from the sidebar or open a new query with the plus button above."
+            }
+            (Some(_), false) => {
+                "This connection is selected but not connected. Select it again to connect."
+            }
+            (None, _) if self.profiles.is_empty() => {
+                "Create a connection from the sidebar to get started."
+            }
+            (None, _) => "Select a saved connection from the sidebar to browse its data.",
+        };
+        ui.vertical_centered(|ui| {
+            ui.add_space(ui.available_height() * 0.18);
+            let (rect, _) = ui.allocate_exact_size(Vec2::splat(64.0), Sense::hover());
+            ui.painter().rect_filled(
+                rect,
+                CornerRadius::same(16),
+                Color32::from_rgb(0x27, 0x27, 0x2a),
+            );
+            ui.painter().rect_stroke(
+                rect,
+                CornerRadius::same(16),
+                Stroke::new(1.0, Color32::from_white_alpha(18)),
+                egui::StrokeKind::Inside,
+            );
+            icons::paint(
+                ui.painter(),
+                egui::Rect::from_center_size(rect.center(), Vec2::splat(28.0)),
+                Icon::Database,
+                theme::ACCENT_TEXT,
+            );
+            ui.add_space(22.0);
+            ui.label(
+                RichText::new(title)
+                    .size(20.0)
+                    .strong()
+                    .color(theme::TEXT_STRONG),
+            );
+            ui.add_space(8.0);
+            ui.add(egui::Label::new(RichText::new(message).size(13.0).color(theme::MUTED)).wrap());
         });
     }
 
@@ -2032,7 +2084,46 @@ impl Workbench {
         let focused = ui.memory(|m| m.has_focus(editor_id));
         let run_pressed =
             focused && ui.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Enter));
+        let mut completion = self
+            .completion
+            .take()
+            .filter(|c| c.tab == tab_id && focused);
         let tab = self.tabs.iter_mut().find(|t| t.id == tab_id)?;
+        // Completion keys are handled before the editor sees them.
+        let mut accept = None;
+        if let Some(open) = &mut completion {
+            ui.input_mut(|i| {
+                let none = egui::Modifiers::NONE;
+                if i.consume_key(none, egui::Key::ArrowDown) {
+                    open.selected = (open.selected + 1) % open.items.len();
+                }
+                if i.consume_key(none, egui::Key::ArrowUp) {
+                    open.selected = (open.selected + open.items.len() - 1) % open.items.len();
+                }
+                if i.consume_key(none, egui::Key::Enter) || i.consume_key(none, egui::Key::Tab) {
+                    accept = Some(open.selected);
+                }
+                if i.consume_key(none, egui::Key::Escape) {
+                    open.items.clear();
+                }
+            });
+        }
+        if let (Some(index), Some(open)) = (accept, &completion) {
+            let word = open.items[index].clone();
+            let end = tab.selection.1.min(tab.sql.len());
+            tab.sql.replace_range(open.start..end, &word);
+            let cursor = open.start + word.len();
+            tab.selection = (cursor, cursor);
+            if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), editor_id) {
+                let ccursor = egui::text::CCursor::new(tab.sql[..cursor].chars().count());
+                state
+                    .cursor
+                    .set_char_range(Some(egui::text::CCursorRange::one(ccursor)));
+                state.store(ui.ctx(), editor_id);
+            }
+            completion = None;
+        }
+        completion = completion.filter(|c| !c.items.is_empty());
         // The statement Command/Ctrl+Enter would run, as a char range.
         let active = {
             let (from, to) = tab.selection;
@@ -2110,6 +2201,7 @@ impl Workbench {
                 .inner
             })
             .inner;
+        let previous_selection = tab.selection;
         if let Some(range) = output.cursor_range {
             let byte = |index: usize| {
                 tab.sql
@@ -2121,6 +2213,89 @@ impl Workbench {
         } else if tab.selection.0.max(tab.selection.1) > tab.sql.len() {
             tab.selection = (tab.sql.len(), tab.sql.len());
         }
+        // Open or refine keyword completion after typing an identifier.
+        let (from, to) = tab.selection;
+        if output.response.changed() && from == to {
+            let start = tab.sql[..to]
+                .rfind(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+                .map_or(0, |i| i + 1);
+            let prefix = &tab.sql[start..to];
+            let typed_letter = prefix
+                .chars()
+                .last()
+                .is_some_and(|c| c.is_ascii_alphabetic());
+            let items = if prefix.len() >= 2 && typed_letter {
+                completions(engine, prefix)
+            } else {
+                Vec::new()
+            };
+            completion = (!items.is_empty()).then_some(Completion {
+                tab: tab_id,
+                start,
+                items,
+                selected: 0,
+            });
+        } else if tab.selection != previous_selection && !output.response.changed() {
+            completion = None;
+        }
+        if let Some(open) = &completion {
+            let ccursor = egui::text::CCursor::new(tab.sql[..to].chars().count());
+            let anchor = output
+                .galley
+                .pos_from_cursor(ccursor)
+                .translate(output.galley_pos.to_vec2());
+            let mut picked = None;
+            egui::Area::new(editor_id.with("completion"))
+                .order(egui::Order::Foreground)
+                .fixed_pos(anchor.left_bottom() + Vec2::new(0.0, 2.0))
+                .show(ui.ctx(), |ui| {
+                    Frame::new()
+                        .fill(theme::POPOVER)
+                        .stroke(Stroke::new(1.0, theme::BORDER_STRONG))
+                        .corner_radius(CornerRadius::same(6))
+                        .inner_margin(Margin::same(4))
+                        .show(ui, |ui| {
+                            ui.set_min_width(160.0);
+                            for (index, item) in open.items.iter().take(12).enumerate() {
+                                let selected = index == open.selected;
+                                let text =
+                                    RichText::new(item).font(mono(12.5)).color(if selected {
+                                        Color32::WHITE
+                                    } else {
+                                        theme::TEXT
+                                    });
+                                let button = egui::Button::new(text)
+                                    .fill(if selected {
+                                        theme::ACCENT_STRONG
+                                    } else {
+                                        Color32::TRANSPARENT
+                                    })
+                                    .stroke(Stroke::NONE)
+                                    .min_size(Vec2::new(ui.available_width(), 22.0));
+                                if ui.add(button).clicked() {
+                                    picked = Some(index);
+                                }
+                            }
+                        });
+                });
+            if let Some(index) = picked {
+                let word = open.items[index].clone();
+                tab.sql.replace_range(open.start..to, &word);
+                let cursor = open.start + word.len();
+                tab.selection = (cursor, cursor);
+                if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), editor_id) {
+                    let ccursor = egui::text::CCursor::new(tab.sql[..cursor].chars().count());
+                    state
+                        .cursor
+                        .set_char_range(Some(egui::text::CCursorRange::one(ccursor)));
+                    state.store(ui.ctx(), editor_id);
+                }
+                ui.memory_mut(|m| m.request_focus(editor_id));
+                completion = None;
+            }
+        }
+        self.completion = completion;
+        let tab = self.tabs.iter().find(|t| t.id == tab_id)?;
         if run_pressed {
             let (from, to) = tab.selection;
             return execution_target(engine, &tab.sql, from, to).map(|t| t.sql);

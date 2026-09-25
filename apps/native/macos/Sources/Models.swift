@@ -202,6 +202,8 @@ final class TableState {
     var selected = IndexSet()
     var pending: [Int: PendingRow] = [:]
     var inspectorOpen = true
+    /// Column indexes collapsed to a narrow strip.
+    var collapsedColumns = Set<Int>()
 
     var dirty: Bool { !pending.isEmpty }
 
@@ -301,6 +303,8 @@ final class WorkTab {
     /// A `SELECT * FROM table` result shown in the editable table viewer.
     var embedded: (schema: String, table: String)?
     var result: [String: Any]? { didSet { resultID = UUID() } }
+    /// Shrunk to a narrow pill in the tab strip until selected again.
+    var collapsed = false
     private(set) var resultID = UUID()
     var tableState: TableState?
 
@@ -342,6 +346,11 @@ enum Helpers {
             let from = int(token["from"]), to = int(token["to"])
             return (NSRange(location: from, length: to - from), string(token["kind"]))
         }
+    }
+
+    static func completions(engine: Engine, prefix: String) -> [String] {
+        guard case .success(let value) = Bridge.helper(["command": "completions", "engine": engine.rawValue, "prefix": prefix]) else { return [] }
+        return value as? [String] ?? []
     }
 
     static func requiresConfirmation(engine: Engine, text: String) -> Bool {

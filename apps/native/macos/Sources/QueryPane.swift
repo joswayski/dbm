@@ -7,24 +7,6 @@ protocol QueryHost: TableHost {
     func isRunning(_ tab: WorkTab) -> String?
 }
 
-private let sqlKeywords = [
-    "ADD", "ALL", "ALTER", "AND", "ANY", "AS", "ASC", "BEGIN", "BETWEEN", "BY", "CASE", "CAST", "CHECK", "COLUMN",
-    "COMMIT", "CONSTRAINT", "CREATE", "CROSS", "DATABASE", "DEFAULT", "DELETE", "DESC", "DISTINCT", "DROP", "ELSE",
-    "END", "EXISTS", "EXPLAIN", "FALSE", "FETCH", "FOREIGN", "FROM", "FULL", "FUNCTION", "GRANT", "GROUP", "HAVING",
-    "ILIKE", "IN", "INDEX", "INNER", "INSERT", "INTERVAL", "INTO", "IS", "JOIN", "KEY", "LEFT", "LIKE", "LIMIT", "NOT",
-    "NULL", "OFFSET", "ON", "OR", "ORDER", "OUTER", "OVER", "PARTITION", "PRIMARY", "REFERENCES", "RETURNING",
-    "REVOKE", "RIGHT", "ROLLBACK", "SCHEMA", "SELECT", "SET", "SHOW", "TABLE", "THEN", "TRUE", "TRUNCATE", "UNION",
-    "UNIQUE", "UPDATE", "USING", "VALUES", "VIEW", "WHEN", "WHERE", "WINDOW", "WITH",
-]
-
-private let redisCommands = [
-    "APPEND", "DBSIZE", "DECR", "DECRBY", "DEL", "EXISTS", "EXPIRE", "GET", "GETDEL", "GETRANGE", "HDEL", "HEXISTS",
-    "HGET", "HGETALL", "HINCRBY", "HKEYS", "HLEN", "HMGET", "HSET", "HVALS", "INCR", "INCRBY", "INFO", "KEYS", "LINDEX",
-    "LLEN", "LPOP", "LPUSH", "LRANGE", "LREM", "LSET", "MGET", "MSET", "PERSIST", "PEXPIRE", "PING", "PTTL", "RENAME",
-    "RPOP", "RPUSH", "SADD", "SCAN", "SCARD", "SET", "SETEX", "SISMEMBER", "SMEMBERS", "SREM", "STRLEN", "TTL", "TYPE",
-    "UNLINK", "XADD", "XLEN", "XRANGE", "ZADD", "ZCARD", "ZRANGE", "ZRANGEBYSCORE", "ZREM", "ZSCORE",
-]
-
 /// SQL/Redis editor: shared-core highlighting, the statement Command+Enter
 /// would run outlined, and keyword completion as you type.
 final class SQLTextView: NSTextView {
@@ -47,7 +29,9 @@ final class SQLTextView: NSTextView {
         super.keyDown(with: event)
         if let characters = event.characters, characters.count == 1, characters.first!.isLetter, flags.isDisjoint(with: [.command, .control]) {
             let range = rangeForUserCompletion
-            if range.length >= 2, !completing {
+            let prefix = range.location == NSNotFound ? "" : (string as NSString).substring(with: range)
+            // Only open the list when something matches, so typing never beeps.
+            if range.length >= 2, !completing, !Helpers.completions(engine: engine, prefix: prefix).isEmpty {
                 completing = true
                 complete(nil)
                 completing = false
@@ -56,13 +40,8 @@ final class SQLTextView: NSTextView {
     }
 
     override func completions(forPartialWordRange charRange: NSRange, indexOfSelectedItem index: UnsafeMutablePointer<Int>) -> [String]? {
-        let prefix = (string as NSString).substring(with: charRange)
-        let upper = prefix.uppercased()
-        let words = engine == .redis ? redisCommands : sqlKeywords
-        let matches = words.filter { $0.hasPrefix(upper) && $0 != upper }
         index.pointee = -1
-        let lower = prefix == prefix.lowercased()
-        return matches.map { lower ? $0.lowercased() : $0 }
+        return Helpers.completions(engine: engine, prefix: (string as NSString).substring(with: charRange))
     }
 
     func rehighlight() {

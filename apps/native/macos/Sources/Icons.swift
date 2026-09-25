@@ -101,6 +101,13 @@ enum Icon {
         case .trash:
             line(p(3, 4.5), p(13, 4.5)); line(p(6.5, 4.5), p(6.5, 3), p(9.5, 3), p(9.5, 4.5))
             line(p(4.5, 4.5), p(5.2, 13), p(10.8, 13), p(11.5, 4.5))
+        case .pencil:
+            line(p(3, 13), p(3.6, 10.2), p(10.8, 3), p(13, 5.2), p(5.8, 12.4), p(3, 13))
+            line(p(9.3, 4.5), p(11.5, 6.7))
+        case .expand:
+            line(p(3, 8), p(13, 8)); line(p(10, 5), p(13, 8), p(10, 11)); line(p(3, 4), p(3, 12))
+        case .collapse:
+            line(p(3, 8), p(13, 8)); line(p(6, 5), p(3, 8), p(6, 11)); line(p(13, 4), p(13, 12))
         case .undo:
             line(p(5.5, 3.5), p(3, 6), p(5.5, 8.5))
             path.move(to: p(3, 6))

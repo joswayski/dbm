@@ -24,6 +24,9 @@ pub enum Icon {
     Download,
     Inspector,
     Sidebar,
+    Pencil,
+    Expand,
+    Collapse,
     Check,
     Alert,
     Code,
@@ -140,6 +143,27 @@ pub fn paint(painter: &egui::Painter, rect: Rect, icon: Icon, color: Color32) {
             line(p(8.0, 2.5), p(8.0, 10.0));
             path(vec![p(4.5, 7.0), p(8.0, 10.5), p(11.5, 7.0)]);
             line(p(3.0, 13.0), p(13.0, 13.0));
+        }
+        Icon::Pencil => {
+            path(vec![
+                p(3.0, 13.0),
+                p(3.6, 10.2),
+                p(10.8, 3.0),
+                p(13.0, 5.2),
+                p(5.8, 12.4),
+                p(3.0, 13.0),
+            ]);
+            line(p(9.3, 4.5), p(11.5, 6.7));
+        }
+        Icon::Expand => {
+            line(p(3.0, 8.0), p(13.0, 8.0));
+            path(vec![p(10.0, 5.0), p(13.0, 8.0), p(10.0, 11.0)]);
+            line(p(3.0, 4.0), p(3.0, 12.0));
+        }
+        Icon::Collapse => {
+            line(p(3.0, 8.0), p(13.0, 8.0));
+            path(vec![p(6.0, 5.0), p(3.0, 8.0), p(6.0, 11.0)]);
+            line(p(13.0, 4.0), p(13.0, 12.0));
         }
         Icon::Sidebar => {
             painter.rect_stroke(

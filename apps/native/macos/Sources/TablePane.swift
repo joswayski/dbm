@@ -4,6 +4,7 @@ let pendingRefreshError = "Save or discard pending row changes before refreshing
 let pendingExportError = "Save or discard pending row changes before exporting."
 
 protocol TableHost: AnyObject {
+    func revealExport(_ url: URL, open: Bool)
     func loadTable(_ tab: WorkTab)
     func saveChanges(_ tab: WorkTab)
     func exportTable(_ tab: WorkTab)
@@ -131,6 +132,7 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
         grid.onDelete = { [weak self] in self?.deleteSelection() }
         grid.onEscape = { [weak self] in self?.grid.deselectAll(nil) }
         grid.onCopy = { [weak self] in self?.copySelected() }
+        (grid.headerView as? GridHeaderView)?.onToggleColumn = { [weak self] column in self?.toggleColumn(column) }
         let menu = NSMenu()
         menu.delegate = self
         grid.menu = menu
@@ -352,7 +354,15 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
         }
         for (index, column) in grid.tableColumns.enumerated() {
             let name = page.columns.indices.contains(index) ? page.columns[index].name : ""
-            (column.headerCell as? GridHeaderCell)?.sort = order?.column == name ? order?.descending : nil
+            let header = column.headerCell as? GridHeaderCell
+            header?.sort = order?.column == name ? order?.descending : nil
+            let collapsed = state.collapsedColumns.contains(index)
+            if header?.collapsed != collapsed {
+                header?.collapsed = collapsed
+                column.width = collapsed ? 76 : page.columns.indices.contains(index) ? defaultColumnWidth(page.columns[index]) : 200
+                column.resizingMask = collapsed ? [] : .userResizingMask
+            }
+            column.headerToolTip = collapsed ? "Expand \(name)" : "Sort by \(name)"
         }
         grid.headerView?.needsDisplay = true
     }
@@ -363,8 +373,26 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
 
     func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
         let view = GridRowView()
-        if let pending = state.pending[row] { view.mark = pending.deleted ? .deleted : .modified }
+        if let pending = state.pending[row], let page = state.page {
+            view.mark = pending.deleted ? .deleted : .modified
+            view.toolTip = changePreview(pending, columns: page.columns)
+        }
         return view
+    }
+
+    /// The staged change on a row, before → after, as the desktop app's hover preview.
+    private func changePreview(_ pending: PendingRow, columns: [Column]) -> String {
+        if pending.deleted { return "Pending delete\nThis row will be deleted when changes are saved." }
+        let lines = columns.indices.compactMap { index -> String? in
+            guard jsonKey(pending.changes[index]) != jsonKey(pending.original[index]) else { return nil }
+            return "\(columns[index].name): \(displayValue(pending.original[index])) → \(displayValue(pending.changes[index]))"
+        }
+        return (["Pending edit"] + lines).joined(separator: "\n")
+    }
+
+    private func toggleColumn(_ column: Int) {
+        if state.collapsedColumns.contains(column) { state.collapsedColumns.remove(column) } else { state.collapsedColumns.insert(column) }
+        reloadGridColumns()
     }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
@@ -455,6 +483,14 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
         let clicked = grid.clickedRow
         if clicked >= 0, !state.selected.contains(clicked) {
             grid.selectRowIndexes(IndexSet(integer: clicked), byExtendingSelection: false)
+        }
+        if clicked >= 0, let pending = state.pending[clicked] {
+            menu.addItem(ClosureMenuItem(pending.deleted ? "Undo delete" : "Discard edit") { [weak self] in
+                self?.state.pending[clicked] = nil
+                self?.grid.reloadData()
+                self?.reload()
+            })
+            menu.addItem(.separator())
         }
         fillSelectionMenu(menu)
     }

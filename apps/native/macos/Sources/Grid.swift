@@ -6,6 +6,8 @@ final class GridHeaderCell: NSTableHeaderCell {
     var dataType = ""
     var sort: Bool?
     var rightAligned = false
+    var collapsed = false
+    var showCollapse = false
 
     override func draw(withFrame cellFrame: NSRect, in controlView: NSView) {
         Graphite.gridHeader.setFill()
@@ -15,6 +17,23 @@ final class GridHeaderCell: NSTableHeaderCell {
         // The header view also draws its filler past the last column with a
         // copy of this cell; that area stays blank.
         guard !stringValue.isEmpty else { return }
+        if collapsed {
+            Icon.expand.draw(in: NSRect(x: cellFrame.midX - 6, y: cellFrame.minY + 5, width: 12, height: 12), color: Graphite.muted)
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.alignment = .center
+            paragraph.lineBreakMode = .byTruncatingTail
+            NSAttributedString(string: stringValue, attributes: [
+                .font: Graphite.ui(9.5, .medium), .foregroundColor: Graphite.faint, .paragraphStyle: paragraph,
+            ]).draw(with: NSRect(x: cellFrame.minX + 4, y: cellFrame.minY + 19, width: cellFrame.width - 8, height: 12),
+                    options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
+            return
+        }
+        if showCollapse {
+            let button = NSRect(x: cellFrame.maxX - 26, y: cellFrame.midY - 10, width: 20, height: 20)
+            Graphite.controlHover.setFill()
+            NSBezierPath(roundedRect: button, xRadius: 5, yRadius: 5).fill()
+            Icon.collapse.draw(in: button.insetBy(dx: 4, dy: 4), color: Graphite.secondary)
+        }
         var x = cellFrame.minX + 10
         let midY = cellFrame.midY
         if primaryKey {
@@ -45,9 +64,48 @@ final class GridHeaderCell: NSTableHeaderCell {
 }
 
 final class GridHeaderView: NSTableHeaderView {
+    /// Set for table grids: hovering a header shows a collapse button.
+    var onToggleColumn: ((Int) -> Void)?
+    private var hoveredColumn = -1
+    private var tracking: NSTrackingArea?
+
     override var isFlipped: Bool { true }
 
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let tracking { removeTrackingArea(tracking) }
+        let area = NSTrackingArea(rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect], owner: self, userInfo: nil)
+        addTrackingArea(area)
+        tracking = area
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        let column = self.column(at: convert(event.locationInWindow, from: nil))
+        if column != hoveredColumn { hoveredColumn = column; needsDisplay = true }
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        hoveredColumn = -1
+        needsDisplay = true
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        let column = self.column(at: point)
+        if let onToggleColumn, column >= 0, let tableView {
+            let cell = tableView.tableColumns[column].headerCell as? GridHeaderCell
+            if cell?.collapsed == true || point.x > headerRect(ofColumn: column).maxX - 26 {
+                onToggleColumn(column)
+                return
+            }
+        }
+        super.mouseDown(with: event)
+    }
+
     override func draw(_ dirtyRect: NSRect) {
+        for (index, column) in (tableView?.tableColumns ?? []).enumerated() {
+            (column.headerCell as? GridHeaderCell)?.showCollapse = onToggleColumn != nil && index == hoveredColumn
+        }
         Graphite.gridHeader.setFill()
         bounds.fill()
         super.draw(dirtyRect)

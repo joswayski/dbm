@@ -973,7 +973,7 @@ fn header_cell(
         icons::paint(
             ui.painter(),
             egui::Rect::from_center_size(rect.center() - Vec2::new(0.0, 6.0), Vec2::splat(12.0)),
-            Icon::ChevronRight,
+            Icon::Expand,
             theme::MUTED,
         );
         let mut job =

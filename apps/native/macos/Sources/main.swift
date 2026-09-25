@@ -66,7 +66,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, Qu
         sidebar = SidebarView(app: self)
         topBar = TopBar(demo: demo)
         tabStrip = TabStrip(app: self)
-        welcome = WelcomeView { [weak self] in self?.newProfile() }
+        welcome = WelcomeView()
         content.translatesAutoresizingMaskIntoConstraints = false
         let main = FlippedView()
         main.translatesAutoresizingMaskIntoConstraints = false
@@ -161,7 +161,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, Qu
         } ?? welcome!
         for view in content.subviews where view !== current { view.removeFromSuperview() }
         if current.superview !== content { content.pin(current) }
-        welcome.show(hasProfiles: !profiles.isEmpty)
+        welcome.show(profile: activeProfileID.flatMap(profile),
+                     connected: activeProfileID.map { workspaces[$0] != nil } ?? false, hasProfiles: !profiles.isEmpty)
         reloadPane(activeTab)
     }
 
@@ -427,6 +428,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, Qu
     }
 
     func selectTab(_ tab: WorkTab) {
+        tab.collapsed = false
         activeTab = tab
         activeProfileID = tab.profileID
         refresh()
@@ -446,6 +448,19 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, Qu
             // The tab to the right, else the one to the left.
             activeTab = index < tabs.count ? tabs[index] : tabs.last
             if let activeTab { activeProfileID = activeTab.profileID }
+        }
+        refresh()
+    }
+
+    /// Shrinks a tab and, if it was active, selects its neighbor, as the
+    /// desktop app does.
+    func collapseTab(_ tab: WorkTab) {
+        guard let index = tabs.firstIndex(where: { $0 === tab }) else { return }
+        tab.collapsed = true
+        if activeTab === tab {
+            let next = index + 1 < tabs.count ? tabs[index + 1] : index > 0 ? tabs[index - 1] : nil
+            if let next { selectTab(next); return }
+            activeTab = nil
         }
         refresh()
     }
@@ -618,13 +633,20 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, Qu
                 switch result {
                 case .success(let value):
                     let rows = int(dictionary(value)["rows"])
-                    self.showNotice("Exported \(rows) filtered \(rows == 1 ? "row" : "rows") to \(url.lastPathComponent).")
+                    self.toast.show("Exported \(rows) filtered \(rows == 1 ? "row" : "rows") to \(url.lastPathComponent).", error: false, actions: [
+                        ("Open", { [weak self] in self?.revealExport(url, open: true) }),
+                        ("Show in Finder", { [weak self] in self?.revealExport(url, open: false) }),
+                    ])
                 case .failure(let error):
                     self.showError(error.localizedDescription)
                 }
                 self.reloadPane(tab)
             }
         }
+    }
+
+    func revealExport(_ url: URL, open: Bool) {
+        if open { NSWorkspace.shared.open(url) } else { NSWorkspace.shared.activateFileViewerSelecting([url]) }
     }
 
     func copyText(_ text: String, notice: String) {

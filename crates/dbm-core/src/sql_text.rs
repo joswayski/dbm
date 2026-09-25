@@ -524,6 +524,240 @@ const SQL_KEYWORDS: &[&str] = &[
     "with",
 ];
 
+/// Redis commands the editor completes, as in the desktop app's Redis dialect.
+const REDIS_COMMANDS: &[&str] = &[
+    "acl",
+    "append",
+    "asking",
+    "auth",
+    "bgsave",
+    "bitcount",
+    "bitop",
+    "bitpos",
+    "blmove",
+    "blmpop",
+    "blpop",
+    "brpop",
+    "brpoplpush",
+    "bzmpop",
+    "bzpopmax",
+    "bzpopmin",
+    "client",
+    "cluster",
+    "command",
+    "config",
+    "copy",
+    "dbsize",
+    "decr",
+    "decrby",
+    "del",
+    "discard",
+    "dump",
+    "echo",
+    "eval",
+    "evalsha",
+    "exec",
+    "exists",
+    "expire",
+    "expireat",
+    "expiretime",
+    "flushall",
+    "flushdb",
+    "geoadd",
+    "geodist",
+    "geohash",
+    "geopos",
+    "georadius",
+    "georadiusbymember",
+    "geosearch",
+    "get",
+    "getdel",
+    "getex",
+    "getrange",
+    "getset",
+    "hdel",
+    "hello",
+    "hexists",
+    "hget",
+    "hgetall",
+    "hincrby",
+    "hincrbyfloat",
+    "hkeys",
+    "hlen",
+    "hmget",
+    "hmset",
+    "hrandfield",
+    "hscan",
+    "hset",
+    "hsetnx",
+    "hstrlen",
+    "hvals",
+    "incr",
+    "incrby",
+    "incrbyfloat",
+    "info",
+    "keys",
+    "lastsave",
+    "lcs",
+    "lindex",
+    "linsert",
+    "llen",
+    "lmove",
+    "lmpop",
+    "lpop",
+    "lpos",
+    "lpush",
+    "lpushx",
+    "lrange",
+    "lrem",
+    "lset",
+    "ltrim",
+    "memory",
+    "mget",
+    "migrate",
+    "module",
+    "move",
+    "mset",
+    "msetnx",
+    "multi",
+    "object",
+    "persist",
+    "pexpire",
+    "pexpireat",
+    "pfadd",
+    "pfcount",
+    "pfmerge",
+    "ping",
+    "psetex",
+    "psubscribe",
+    "pttl",
+    "publish",
+    "pubsub",
+    "punsubscribe",
+    "randomkey",
+    "readonly",
+    "readwrite",
+    "rename",
+    "renamenx",
+    "replicaof",
+    "restore",
+    "role",
+    "rpop",
+    "rpoplpush",
+    "rpush",
+    "rpushx",
+    "sadd",
+    "save",
+    "scan",
+    "scard",
+    "sdiff",
+    "sdiffstore",
+    "select",
+    "set",
+    "setex",
+    "setnx",
+    "setrange",
+    "sinter",
+    "sinterstore",
+    "sismember",
+    "slowlog",
+    "smembers",
+    "smismember",
+    "smove",
+    "sort",
+    "spop",
+    "srandmember",
+    "srem",
+    "sscan",
+    "strlen",
+    "substr",
+    "sunion",
+    "sunionstore",
+    "swapdb",
+    "time",
+    "touch",
+    "ttl",
+    "type",
+    "unlink",
+    "unsubscribe",
+    "unwatch",
+    "wait",
+    "watch",
+    "xack",
+    "xadd",
+    "xautoclaim",
+    "xclaim",
+    "xdel",
+    "xgroup",
+    "xinfo",
+    "xlen",
+    "xpending",
+    "xrange",
+    "xread",
+    "xreadgroup",
+    "xrevrange",
+    "xtrim",
+    "zadd",
+    "zcard",
+    "zcount",
+    "zdiff",
+    "zdiffstore",
+    "zincrby",
+    "zinter",
+    "zintercard",
+    "zinterstore",
+    "zlexcount",
+    "zmpop",
+    "zmscore",
+    "zpopmax",
+    "zpopmin",
+    "zrandmember",
+    "zrange",
+    "zrangebylex",
+    "zrangebyscore",
+    "zrangestore",
+    "zrank",
+    "zrem",
+    "zremrangebylex",
+    "zremrangebyrank",
+    "zremrangebyscore",
+    "zrevrange",
+    "zrevrangebylex",
+    "zrevrangebyscore",
+    "zrevrank",
+    "zscan",
+    "zscore",
+    "zunion",
+    "zunionstore",
+];
+
+/// Keyword or command completions for the identifier prefix before the
+/// cursor, in the prefix's case (lowercase stays lowercase). The prefix
+/// itself is excluded.
+pub fn completions(engine: DatabaseEngine, prefix: &str) -> Vec<String> {
+    if prefix.is_empty() {
+        return Vec::new();
+    }
+    let lower = prefix.to_ascii_lowercase();
+    let words = if engine == DatabaseEngine::Redis {
+        REDIS_COMMANDS
+    } else {
+        SQL_KEYWORDS
+    };
+    let keep_lower = prefix.chars().all(|c| !c.is_ascii_uppercase());
+    words
+        .iter()
+        .filter(|word| word.starts_with(&lower) && **word != lower)
+        .map(|word| {
+            if keep_lower {
+                (*word).to_owned()
+            } else {
+                word.to_ascii_uppercase()
+            }
+        })
+        .collect()
+}
+
 /// Syntax tokens for editor highlighting. SQL gets keywords, literals,
 /// comments, and quoted identifiers; Redis highlights the command word of each
 /// line and quoted arguments. Unlisted text keeps the default color.
@@ -1096,5 +1330,14 @@ mod tests {
             ("", "", "")
         );
         assert_eq!(same.prefix, "é");
+    }
+
+    #[test]
+    fn completions_follow_the_prefix_case() {
+        assert_eq!(completions(PG, "sel"), vec!["select"]);
+        assert_eq!(completions(PG, "SEL"), vec!["SELECT"]);
+        assert!(completions(PG, "select").is_empty());
+        assert!(completions(DatabaseEngine::Redis, "hge").contains(&"hget".to_owned()));
+        assert!(completions(PG, "").is_empty());
     }
 }
