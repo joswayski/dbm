@@ -498,19 +498,23 @@ impl Workbench {
             Payload::Mutation(result) => {
                 self.confirm_save = None;
                 let Some(tab) = target else { return };
+                // As in the desktop app: clear staged rows and reload, so rows
+                // another writer changed show their current values.
                 if let Some(state) = self.tables.get_mut(&tab) {
-                    // Rows whose primary key conflicted stay staged for review.
-                    state
-                        .pending
-                        .retain(|_, row| result.conflicts.contains(&row.primary_key));
+                    state.pending.clear();
+                    state.drafts.clear();
                 }
+                self.load_table(tab);
                 if result.conflicts.is_empty() {
-                    self.show_notice(format!("{} change(s) saved.", result.applied));
-                    self.load_table(tab);
+                    let noun = if result.applied == 1 {
+                        "change"
+                    } else {
+                        "changes"
+                    };
+                    self.show_notice(format!("{} {noun} saved.", result.applied));
                 } else {
                     self.show_error(format!(
-                        "Saved {} change(s). {} row(s) changed on the server since they were loaded and were not saved; refresh to review them.",
-                        result.applied,
+                        "{} row conflict(s); the table was refreshed.",
                         result.conflicts.len()
                     ));
                 }
@@ -2179,7 +2183,7 @@ impl Workbench {
                 TableAction::Save => self.confirm_save = Some(tab_id),
                 TableAction::Copy(text, which) => {
                     ui.ctx().copy_text(text);
-                    self.show_notice(format!("Copied the {which} rows as CSV."));
+                    self.show_notice(format!("Copied {which} as CSV."));
                 }
                 TableAction::Export => {
                     let total = self

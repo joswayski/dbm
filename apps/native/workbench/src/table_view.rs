@@ -292,7 +292,8 @@ pub enum TableAction {
     Reload,
     Save,
     Export,
-    Copy(String, &'static str),
+    /// CSV text and a description such as "3 visible rows".
+    Copy(String, String),
     Error(&'static str),
 }
 
@@ -490,10 +491,8 @@ fn toolbar(
                 Some(&format!("Copy visible ({})", copyable.len())),
                 "Copies only the current preview page",
             ) {
-                actions.push(TableAction::Copy(
-                    state.csv(copyable.into_iter()),
-                    "visible",
-                ));
+                let label = rows_label(copyable.len(), "visible");
+                actions.push(TableAction::Copy(state.csv(copyable.into_iter()), label));
             }
             let refresh = if state.loading {
                 "Refreshing…"
@@ -522,10 +521,13 @@ fn selection_menu(
     actions: &mut Vec<TableAction>,
 ) {
     if ui.button("Copy selected as CSV").clicked() {
-        actions.push(TableAction::Copy(
-            state.csv(selected.iter().copied()),
-            "selected",
-        ));
+        let rows: Vec<usize> = selected
+            .iter()
+            .copied()
+            .filter(|r| !state.pending.get(r).is_some_and(|p| p.deleted))
+            .collect();
+        let label = rows_label(rows.len(), "selected");
+        actions.push(TableAction::Copy(state.csv(rows.into_iter()), label));
         ui.close();
     }
     let Some(page) = state.page.as_ref() else {
@@ -557,6 +559,13 @@ fn selection_menu(
         state.anchor = None;
         ui.close();
     }
+}
+
+fn rows_label(count: usize, which: &str) -> String {
+    format!(
+        "{count} {which} {}",
+        if count == 1 { "row" } else { "rows" }
+    )
 }
 
 fn enabled_icon_button(
