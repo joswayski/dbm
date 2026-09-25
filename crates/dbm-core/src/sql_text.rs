@@ -415,6 +415,213 @@ fn collect_tables(
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TokenKind {
+    Keyword,
+    String,
+    Number,
+    Comment,
+    QuotedIdentifier,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Token {
+    pub from: usize,
+    pub to: usize,
+    pub kind: TokenKind,
+}
+
+const SQL_KEYWORDS: &[&str] = &[
+    "add",
+    "all",
+    "alter",
+    "and",
+    "any",
+    "as",
+    "asc",
+    "begin",
+    "between",
+    "by",
+    "case",
+    "cast",
+    "check",
+    "column",
+    "commit",
+    "constraint",
+    "create",
+    "cross",
+    "database",
+    "default",
+    "delete",
+    "desc",
+    "distinct",
+    "do",
+    "drop",
+    "else",
+    "end",
+    "exists",
+    "explain",
+    "false",
+    "fetch",
+    "for",
+    "foreign",
+    "from",
+    "full",
+    "function",
+    "grant",
+    "group",
+    "having",
+    "if",
+    "ilike",
+    "in",
+    "index",
+    "inner",
+    "insert",
+    "interval",
+    "into",
+    "is",
+    "join",
+    "key",
+    "left",
+    "like",
+    "limit",
+    "not",
+    "null",
+    "offset",
+    "on",
+    "or",
+    "order",
+    "outer",
+    "over",
+    "partition",
+    "primary",
+    "references",
+    "returning",
+    "revoke",
+    "right",
+    "rollback",
+    "schema",
+    "select",
+    "set",
+    "show",
+    "table",
+    "then",
+    "to",
+    "true",
+    "truncate",
+    "union",
+    "unique",
+    "update",
+    "use",
+    "using",
+    "values",
+    "view",
+    "when",
+    "where",
+    "window",
+    "with",
+];
+
+/// Syntax tokens for editor highlighting. SQL gets keywords, literals,
+/// comments, and quoted identifiers; Redis highlights the command word of each
+/// line and quoted arguments. Unlisted text keeps the default color.
+pub fn highlight(engine: DatabaseEngine, text: &str) -> Vec<Token> {
+    let bytes = text.as_bytes();
+    let mut tokens = Vec::new();
+    let mut index = 0;
+    let mut line_start = true;
+    while index < bytes.len() {
+        let character = bytes[index];
+        let next = bytes.get(index + 1).copied();
+        let start = index;
+        let push = |tokens: &mut Vec<Token>, to: usize, kind| {
+            tokens.push(Token {
+                from: start,
+                to,
+                kind,
+            });
+        };
+        if character == b'\n' {
+            line_start = true;
+            index += 1;
+            continue;
+        }
+        if character.is_ascii_whitespace() {
+            index += 1;
+            continue;
+        }
+        let redis = engine == DatabaseEngine::Redis;
+        if !redis && character == b'-' && next == Some(b'-') {
+            index = text[index..]
+                .find('\n')
+                .map_or(text.len(), |end| index + end);
+            push(&mut tokens, index, TokenKind::Comment);
+        } else if !redis && character == b'/' && next == Some(b'*') {
+            index = text[index + 2..]
+                .find("*/")
+                .map_or(text.len(), |end| index + end + 4);
+            push(&mut tokens, index, TokenKind::Comment);
+        } else if !redis && character == b'$' && dollar_quote_delimiter(text, index).is_some() {
+            let delimiter = dollar_quote_delimiter(text, index).unwrap_or("$$");
+            let body = index + delimiter.len();
+            index = text[body..]
+                .find(delimiter)
+                .map_or(text.len(), |end| body + end + delimiter.len());
+            push(&mut tokens, index, TokenKind::String);
+        } else if matches!(character, b'\'' | b'"' | b'`') {
+            index += 1;
+            while index < bytes.len() {
+                if bytes[index] == b'\\' && redis {
+                    index += 2;
+                    continue;
+                }
+                if bytes[index] == character {
+                    if bytes.get(index + 1) == Some(&character) && !redis {
+                        index += 2;
+                        continue;
+                    }
+                    index += 1;
+                    break;
+                }
+                index += 1;
+            }
+            index = index.min(bytes.len());
+            let kind = if character == b'\'' || redis {
+                TokenKind::String
+            } else {
+                TokenKind::QuotedIdentifier
+            };
+            push(&mut tokens, index, kind);
+        } else if character.is_ascii_alphabetic() || character == b'_' {
+            while index < bytes.len()
+                && (bytes[index].is_ascii_alphanumeric() || matches!(bytes[index], b'_' | b'$'))
+            {
+                index += 1;
+            }
+            let word = text[start..index].to_ascii_lowercase();
+            let keyword = if redis {
+                line_start
+            } else {
+                SQL_KEYWORDS.binary_search(&word.as_str()).is_ok()
+            };
+            if keyword {
+                push(&mut tokens, index, TokenKind::Keyword);
+            }
+        } else if character.is_ascii_digit() && !redis {
+            while index < bytes.len() && (bytes[index].is_ascii_digit() || bytes[index] == b'.') {
+                index += 1;
+            }
+            push(&mut tokens, index, TokenKind::Number);
+        } else {
+            index += text[index..].chars().next().map_or(1, char::len_utf8);
+        }
+        line_start = false;
+    }
+    tokens
+}
+
 /// Grid and CSV text for a value: `NULL`, raw strings, JSON for everything else.
 pub fn display_value(value: &Value) -> String {
     match value {
@@ -632,5 +839,48 @@ mod tests {
             "id,note\n1,plain\n2,\"a, \"\"b\"\"\nc\"\nNULL,\"{\"\"k\"\":[1]}\""
         );
         assert_eq!(safe_file_name("public/a:b"), "public_a_b");
+    }
+
+    #[test]
+    fn highlights_sql_and_redis_tokens() {
+        assert!(SQL_KEYWORDS.windows(2).all(|pair| pair[0] < pair[1]));
+        let sql = "SELECT 'a''b', \"Id\" -- note\nFROM t WHERE n > 1.5 /* c */ AND $$x$$";
+        let kinds: Vec<_> = highlight(PG, sql)
+            .into_iter()
+            .map(|t| (&sql[t.from..t.to], t.kind))
+            .collect();
+        assert_eq!(
+            kinds,
+            vec![
+                ("SELECT", TokenKind::Keyword),
+                ("'a''b'", TokenKind::String),
+                ("\"Id\"", TokenKind::QuotedIdentifier),
+                ("-- note", TokenKind::Comment),
+                ("FROM", TokenKind::Keyword),
+                ("WHERE", TokenKind::Keyword),
+                ("1.5", TokenKind::Number),
+                ("/* c */", TokenKind::Comment),
+                ("AND", TokenKind::Keyword),
+                ("$$x$$", TokenKind::String),
+            ]
+        );
+        let redis = "SET greeting \"hi\"\nget greeting";
+        let kinds: Vec<_> = highlight(DatabaseEngine::Redis, redis)
+            .into_iter()
+            .map(|t| (&redis[t.from..t.to], t.kind))
+            .collect();
+        assert_eq!(
+            kinds,
+            vec![
+                ("SET", TokenKind::Keyword),
+                ("\"hi\"", TokenKind::String),
+                ("get", TokenKind::Keyword),
+            ]
+        );
+        // Unterminated literals end at the text without panicking.
+        assert_eq!(
+            highlight(PG, "SELECT 'é").last().unwrap().to,
+            "SELECT 'é".len()
+        );
     }
 }
