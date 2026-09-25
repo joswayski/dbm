@@ -801,10 +801,18 @@ final class InspectorView: PanelView {
         // `.row-inspector-actions`: one full-width secondary button.
         deleteButton.minHeight = 30
         footer.pin(deleteButton, insets: NSEdgeInsets(top: 13, left: 14, bottom: 12, right: 14))
-        let column = vstack([header, scroll, footer], spacing: 0)
+        // Takes the height while the fields are hidden, so the empty
+        // inspector never shrinks the grid body to its header.
+        let filler = NSView()
+        filler.translatesAutoresizingMaskIntoConstraints = false
+        filler.setContentHuggingPriority(.init(2), for: .vertical)
+        filler.setContentCompressionResistancePriority(.init(1), for: .vertical)
+        let column = vstack([header, scroll, filler, footer], spacing: 0)
         column.distribution = .fill
-        [header, scroll, footer].forEach { $0.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true }
+        [header, scroll, filler, footer].forEach { $0.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true }
         scroll.setContentHuggingPriority(.init(1), for: .vertical)
+        scroll.setContentCompressionResistancePriority(.init(1), for: .vertical)
+        column.setHuggingPriority(.init(1), for: .vertical)
         pin(column, insets: NSEdgeInsets(top: 0, left: 1, bottom: 0, right: 0))
         addSubview(empty)
         NSLayoutConstraint.activate([

@@ -532,11 +532,16 @@ final class TabStrip: PanelView {
         self.app = app
         super.init(fill: Graphite.chrome, edges: [.bottom])
         row.alignment = .bottom
+        // Many tabs clip at the edge instead of widening the window.
+        row.setClippingResistancePriority(.defaultLow, for: .horizontal)
+        clipsToBounds = true
         addSubview(row)
+        let trailing = row.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -6)
+        trailing.priority = .defaultHigh
         NSLayoutConstraint.activate([
             row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
             row.bottomAnchor.constraint(equalTo: bottomAnchor),
-            row.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -6),
+            trailing,
             heightAnchor.constraint(equalToConstant: 36),
         ])
     }

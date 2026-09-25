@@ -306,8 +306,9 @@ final class ResultGrid: NSObject, NSTableViewDataSource, NSTableViewDelegate {
             table.addGridColumn(id: String(index), title: model.name, dataType: "", primaryKey: false,
                                 width: defaultColumnWidth(model), rightAligned: numeric[index])
         }
-        table.sizeToFit()
         table.reloadData()
+        // After layout, spread the columns across the visible width.
+        DispatchQueue.main.async { [weak self] in self?.table.sizeToFit() }
     }
 
     func numberOfRows(in tableView: NSTableView) -> Int { rows.count }

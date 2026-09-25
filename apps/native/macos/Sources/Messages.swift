@@ -154,7 +154,9 @@ final class MessageView: PanelView {
             body.isSelectable = true
             body.translatesAutoresizingMaskIntoConstraints = false
             body.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-            body.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            body.setContentHuggingPriority(.init(1), for: .horizontal)
+            body.setContentHuggingPriority(.required, for: .vertical)
+            body.setContentCompressionResistancePriority(.required, for: .vertical)
             // Errors keep a matching gutter on the left so the text centers.
             let gutter = NSView()
             gutter.translatesAutoresizingMaskIntoConstraints = false
@@ -163,6 +165,11 @@ final class MessageView: PanelView {
             row.setCustomSpacing(8, after: body)
         }
         row.alignment = .centerY
+        // Fill the width so centered errors center, and hug the content
+        // height so the strip never absorbs spare window height.
+        row.distribution = .fill
+        row.setHuggingPriority(.required, for: .vertical)
+        setContentHuggingPriority(.required, for: .vertical)
         pin(row, insets: banner
             ? NSEdgeInsets(top: 6, left: 14, bottom: 7, right: 14)
             : NSEdgeInsets(top: 6, left: 12, bottom: 6, right: 12))
