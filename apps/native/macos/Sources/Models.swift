@@ -26,6 +26,15 @@ func displayValue(_ value: Any) -> String {
     if let number = value as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() {
         return number.boolValue ? "true" : "false"
     }
+    if let number = value as? NSNumber {
+        // JSONSerialization writes doubles with 17 significant digits
+        // (17169.849999999999); print the shortest form, like JavaScript.
+        let type = String(cString: number.objCType)
+        guard type == "d" || type == "f" else { return number.stringValue }
+        let double = number.doubleValue
+        if double.isFinite, double == double.rounded(), abs(double) < 1e15 { return String(Int64(double)) }
+        return "\(double)"
+    }
     return jsonKey(value)
 }
 

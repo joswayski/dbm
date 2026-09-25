@@ -388,7 +388,7 @@ final class SidebarView: PanelView {
 }
 
 /// `.sidebar-resize-handle`: an invisible grip whose 2 pt accent line shows on
-/// hover, while dragging and when focused; arrow keys resize by 10 pt.
+/// hover and while dragging; after a click, arrow keys resize by 10 pt.
 final class ResizeHandle: NSView {
     private let onDrag: (CGFloat) -> Void
     private let onReset: () -> Void
@@ -409,12 +409,10 @@ final class ResizeHandle: NSView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    // Clicking the grip gives it the arrow keys; it stays out of the key view
+    // loop so the window never opens with it focused.
     override var acceptsFirstResponder: Bool { true }
-    override var canBecomeKeyView: Bool { true }
-    override func becomeFirstResponder() -> Bool { needsDisplay = true; return true }
-    override func resignFirstResponder() -> Bool { needsDisplay = true; return true }
-    override func drawFocusRingMask() {}
-    override var focusRingMaskBounds: NSRect { .zero }
+    override var canBecomeKeyView: Bool { false }
 
     override func resetCursorRects() { addCursorRect(bounds, cursor: .resizeLeftRight) }
     override func mouseEntered(with event: NSEvent) { hovering = true }
@@ -422,6 +420,7 @@ final class ResizeHandle: NSView {
     override func mouseDown(with event: NSEvent) {
         last = event.locationInWindow.x
         dragging = true
+        window?.makeFirstResponder(self)
         if event.clickCount == 2 { onReset() }
     }
     override func mouseDragged(with event: NSEvent) {
@@ -438,7 +437,7 @@ final class ResizeHandle: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        guard hovering || dragging || window?.firstResponder === self else { return }
+        guard hovering || dragging else { return }
         Graphite.accent.setFill()
         NSRect(x: bounds.midX - 1, y: 0, width: 2, height: bounds.height).fill()
     }
