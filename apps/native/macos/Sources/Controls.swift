@@ -16,6 +16,8 @@ final class GButton: NSButton {
     var minHeight: CGFloat = 28 { didSet { invalidate() } }
     /// Draws the icon after the title, e.g. a menu chevron.
     var iconTrailing = false { didSet { needsDisplay = true } }
+    /// Overrides the label color, e.g. `.secondary-button.danger-text`.
+    var tint: NSColor? { didSet { needsDisplay = true } }
     private var hovering = false
     private var tracking: NSTrackingArea?
 
@@ -57,6 +59,7 @@ final class GButton: NSButton {
 
     private var foreground: NSColor {
         guard isEnabled else { return style == .primary ? NSColor(white: 1, alpha: 0.55) : Graphite.faint }
+        if let tint { return tint }
         switch style {
         case .primary, .dangerFilled: return .white
         case .danger: return Graphite.danger
@@ -207,6 +210,11 @@ final class GTextFieldCell: NSTextFieldCell {
     var focused = false
     /// Leading room, widened for a search icon.
     var leftInset: CGFloat = 8
+    /// Bezel colors for states such as the inspector's changed field.
+    var fillOverride: NSColor?
+    var strokeOverride: NSColor?
+    /// No bezel at all, like the inspector's read-only fields.
+    var plain = false
 
     override func titleRect(forBounds rect: NSRect) -> NSRect {
         let inset = NSRect(x: rect.minX + leftInset, y: rect.minY, width: max(0, rect.width - leftInset - 8), height: rect.height)
@@ -217,7 +225,10 @@ final class GTextFieldCell: NSTextFieldCell {
     override func drawingRect(forBounds rect: NSRect) -> NSRect { titleRect(forBounds: rect) }
 
     override func draw(withFrame cellFrame: NSRect, in controlView: NSView) {
-        drawFieldBezel(cellFrame, focused: focused, enabled: isEnabled)
+        if !plain {
+            drawFieldBezel(cellFrame, focused: focused, enabled: isEnabled,
+                           fill: focused && fillOverride != nil ? Graphite.editSurface : fillOverride, stroke: strokeOverride)
+        }
         drawInterior(withFrame: cellFrame, in: controlView)
     }
 
@@ -263,12 +274,11 @@ final class GSecureTextFieldCell: NSSecureTextFieldCell {
     }
 }
 
-func drawFieldBezel(_ frame: NSRect, focused: Bool, enabled: Bool) {
-    let fill = Graphite.control
+func drawFieldBezel(_ frame: NSRect, focused: Bool, enabled: Bool, fill: NSColor? = nil, stroke: NSColor? = nil) {
     let path = NSBezierPath(roundedRect: frame.insetBy(dx: 0.5, dy: 0.5), xRadius: 6, yRadius: 6)
-    (enabled ? fill : Graphite.chrome).setFill()
+    (enabled ? fill ?? Graphite.control : Graphite.chrome).setFill()
     path.fill()
-    (focused ? Graphite.accent : Graphite.borderStrong).setStroke()
+    (focused ? Graphite.accent : stroke ?? Graphite.borderStrong).setStroke()
     path.lineWidth = 1
     path.stroke()
     if focused {

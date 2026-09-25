@@ -43,11 +43,16 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
                                                tooltip: "Row inspector") { [weak self] in self?.toggleInspector() }
 
     private let filterRows = vstack([], spacing: 6)
-    private let limitField = GTextField("200", mono: false)
+    private let limitField = GTextField("200", mono: true)
     private let sortColumn = GPopUp(width: 180)
     private let sortDirection = GPopUp(items: ["Ascending", "Descending"], width: 120)
     private let directionLabel = label("Direction", font: Graphite.ui(12), color: Graphite.muted)
     private lazy var clearButton = GButton("Clear", style: .secondary) { [weak self] in self?.clearFilters() }
+    private lazy var resetColumnsButton = GButton("Reset columns", style: .link, tooltip: "Restore every column's default width") { [weak self] in
+        self?.resetColumns()
+    }
+    /// Set while widths change in code, so only drags count as resizing.
+    private var adjustingColumns = false
     private lazy var applyButton = GButton("Apply filters", style: .primary) { [weak self] in self?.applyFilters() }
     private var filterSignature = ""
 
@@ -112,21 +117,46 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
         toolbar.heightAnchor.constraint(equalToConstant: Graphite.toolbarHeight).isActive = true
 
         let filters = PanelView(fill: Graphite.chrome, edges: [.bottom])
-        limitField.widthAnchor.constraint(equalToConstant: 56).isActive = true
         limitField.onCommit = { [weak self] text in self?.applyLimit(text) }
         let limitStepper = LimitStepper { [weak self] amount in self?.stepLimit(amount) }
+        // `.limit-input-wrap`: an 84 pt field with the stepper inside it.
+        let limitBox = PanelView(fill: Graphite.control)
+        limitBox.radius = 6
+        limitBox.outline = Graphite.borderStrong
+        (limitField.cell as? GTextFieldCell)?.plain = true
+        limitBox.addSubview(limitField)
+        limitBox.addSubview(limitStepper)
+        NSLayoutConstraint.activate([
+            limitBox.widthAnchor.constraint(equalToConstant: 84),
+            limitBox.heightAnchor.constraint(equalToConstant: 28),
+            limitField.leadingAnchor.constraint(equalTo: limitBox.leadingAnchor),
+            limitField.centerYAnchor.constraint(equalTo: limitBox.centerYAnchor),
+            limitField.trailingAnchor.constraint(equalTo: limitStepper.leadingAnchor),
+            limitStepper.trailingAnchor.constraint(equalTo: limitBox.trailingAnchor, constant: -1),
+            limitStepper.topAnchor.constraint(equalTo: limitBox.topAnchor, constant: 1),
+            limitStepper.bottomAnchor.constraint(equalTo: limitBox.bottomAnchor, constant: -1),
+        ])
         sortColumn.onSelect = { [weak self] _ in self?.sortChanged() }
         sortDirection.onSelect = { [weak self] _ in self?.sortChanged() }
         let addFilter = GButton("Add filter", icon: .plus, style: .link) { [weak self] in self?.addFilter() }
+        let join = label("All filters must match", font: Graphite.ui(12), color: Graphite.faint)
         let header = hstack([
             IconView(.filter, size: 13, color: Graphite.faint),
-            label("Filters", font: Graphite.ui(13, .semibold), color: Graphite.textStrong),
-            label("All filters must match", font: Graphite.ui(12), color: Graphite.faint),
-            addFilter, spacer(),
-            label("Preview limit", font: Graphite.ui(12), color: Graphite.muted), limitField, limitStepper,
+            label("Filters", font: Graphite.ui(12, .semibold), color: Graphite.secondary),
+            join, addFilter, spacer(),
+            label("Preview limit", font: Graphite.ui(12), color: Graphite.muted), limitBox,
             label("Sort by", font: Graphite.ui(12), color: Graphite.muted), sortColumn,
-            directionLabel, sortDirection, clearButton, applyButton,
-        ], spacing: 8)
+            directionLabel, sortDirection, resetColumnsButton, clearButton, applyButton,
+        ], spacing: 6)
+        // 12 pt between control groups, as in `.table-query-controls`.
+        for view in [limitBox, sortColumn, sortDirection, resetColumnsButton] as [NSView] {
+            header.setCustomSpacing(12, after: view)
+        }
+        header.setCustomSpacing(8, after: header.views[0])
+        header.setCustomSpacing(8, after: header.views[1])
+        header.setCustomSpacing(8, after: join)
+        // When space runs out the join hint goes first, like a wrapped row.
+        header.setVisibilityPriority(.detachOnlyIfNecessary, for: join)
         let filterStack = vstack([header, filterRows], spacing: 8)
         header.widthAnchor.constraint(equalTo: filterStack.widthAnchor).isActive = true
         filterRows.widthAnchor.constraint(equalTo: filterStack.widthAnchor).isActive = true
@@ -332,6 +362,7 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
         sortDirection.selectItem(at: effective?.descending == true ? 1 : 0)
         sortDirection.isHidden = effective == nil
         directionLabel.isHidden = effective == nil
+        resetColumnsButton.isHidden = !state.columnsResized && state.collapsedColumns.isEmpty
         clearButton.isHidden = !(!state.applied.isEmpty || state.filters.count > 1
             || state.filters.contains { !filterNeedsValue($0.operatorName) || !$0.value.trimmingCharacters(in: .whitespaces).isEmpty })
 
@@ -382,6 +413,8 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
         let signature = page.columns.map { "\($0.name):\($0.dataType)" }.joined(separator: ",")
         if signature != columnSignature {
             columnSignature = signature
+            adjustingColumns = true
+            defer { adjustingColumns = false }
             grid.tableColumns.forEach(grid.removeTableColumn)
             for (index, column) in page.columns.enumerated() {
                 grid.addGridColumn(id: String(index), title: column.name, dataType: column.dataType,
@@ -396,7 +429,9 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
             let collapsed = state.collapsedColumns.contains(index)
             if header?.collapsed != collapsed {
                 header?.collapsed = collapsed
+                adjustingColumns = true
                 column.width = collapsed ? 76 : page.columns.indices.contains(index) ? defaultColumnWidth(page.columns[index]) : 200
+                adjustingColumns = false
                 column.resizingMask = collapsed ? [] : .userResizingMask
             }
             column.headerToolTip = collapsed ? "Expand \(name)" : "Sort by \(name)"
@@ -430,6 +465,27 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
     private func toggleColumn(_ column: Int) {
         if state.collapsedColumns.contains(column) { state.collapsedColumns.remove(column) } else { state.collapsedColumns.insert(column) }
         reloadGridColumns()
+        reloadFilters()
+    }
+
+    private func resetColumns() {
+        guard let page = state.page else { return }
+        state.collapsedColumns.removeAll()
+        state.columnsResized = false
+        reloadGridColumns()
+        adjustingColumns = true
+        for (index, column) in grid.tableColumns.enumerated() where page.columns.indices.contains(index) {
+            column.width = defaultColumnWidth(page.columns[index])
+        }
+        adjustingColumns = false
+        reloadFilters()
+    }
+
+    func tableViewColumnDidResize(_ notification: Notification) {
+        guard !adjustingColumns, !state.columnsResized, let column = notification.userInfo?["NSTableColumn"] as? NSTableColumn,
+              let index = Int(column.identifier.rawValue), !state.collapsedColumns.contains(index) else { return }
+        state.columnsResized = true
+        reloadFilters()
     }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
@@ -708,12 +764,12 @@ final class ClosureMenuItem: NSMenuItem {
 final class InspectorView: PanelView {
     var onClose: (() -> Void)?
     private let titleRow = NSStackView()
-    private let keySummary = label("", font: Graphite.mono(11), color: Graphite.muted)
+    private let keySummary = label("", font: Graphite.mono(12), color: Graphite.muted)
     private let badge = Chip("", color: Graphite.modified)
-    private let fields = vstack([], spacing: 10)
+    private let fields = vstack([], spacing: 12)
     private lazy var scroll = verticalScroll(fieldsContainer)
     private let fieldsContainer = FlippedView()
-    private let empty = label("", font: Graphite.ui(13), color: Graphite.muted)
+    private let empty = label("", font: Graphite.ui(12.5), color: Graphite.faint)
     private let footer = PanelView(fill: nil, edges: [.top])
     private lazy var deleteButton = GButton("Delete row", icon: .trash, style: .secondary) { [weak self] in self?.toggleDelete() }
     private var editors: [GTextField] = []
@@ -728,13 +784,15 @@ final class InspectorView: PanelView {
         let close = GButton("", icon: .close, style: .icon, tooltip: "Hide row inspector") { [weak self] in self?.onClose?() }
         let title = label("Row", font: Graphite.ui(13, .semibold), color: Graphite.textStrong)
         let header = PanelView(fill: nil, edges: [.bottom])
-        header.pin(hstack([title, keySummary, badge, spacer(), close], spacing: 8), insets: NSEdgeInsets(top: 0, left: 12, bottom: 1, right: 8))
+        header.pin(hstack([title, keySummary, badge, spacer(), close], spacing: 8), insets: NSEdgeInsets(top: 0, left: 14, bottom: 1, right: 8))
         header.heightAnchor.constraint(equalToConstant: 40).isActive = true
-        fieldsContainer.pin(fields, insets: NSEdgeInsets(top: 12, left: 12, bottom: 12, right: 12))
+        fieldsContainer.pin(fields, insets: NSEdgeInsets(top: 14, left: 14, bottom: 14, right: 14))
         empty.alignment = .center
         empty.maximumNumberOfLines = 3
         empty.lineBreakMode = .byWordWrapping
-        footer.pin(hstack([deleteButton, spacer()]), insets: NSEdgeInsets(top: 11, left: 12, bottom: 10, right: 12))
+        // `.row-inspector-actions`: one full-width secondary button.
+        deleteButton.minHeight = 30
+        footer.pin(deleteButton, insets: NSEdgeInsets(top: 13, left: 14, bottom: 12, right: 14))
         let column = vstack([header, scroll, footer], spacing: 0)
         column.distribution = .fill
         [header, scroll, footer].forEach { $0.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true }
@@ -742,7 +800,7 @@ final class InspectorView: PanelView {
         pin(column, insets: NSEdgeInsets(top: 0, left: 1, bottom: 0, right: 0))
         addSubview(empty)
         NSLayoutConstraint.activate([
-            empty.topAnchor.constraint(equalTo: topAnchor, constant: 64),
+            empty.topAnchor.constraint(equalTo: topAnchor, constant: 40 + 28),
             empty.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 20),
             empty.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -20),
         ])
@@ -777,7 +835,7 @@ final class InspectorView: PanelView {
         }.joined(separator: ", ")
         deleteButton.title = deleted ? "Restore row" : "Delete row"
         deleteButton.icon = deleted ? .undo : .trash
-        deleteButton.style = deleted ? .secondary : .danger
+        deleteButton.tint = deleted ? nil : Graphite.danger
         deleteButton.isEnabled = interactive
 
         let values = state.values(row)
@@ -790,15 +848,23 @@ final class InspectorView: PanelView {
             notes = []
             for (index, column) in page.columns.enumerated() {
                 let isKey = page.primaryKey.contains(column.name)
-                let name = label(column.name, font: Graphite.ui(12, .semibold), color: Graphite.textStrong)
-                let type = label(column.dataType, font: Graphite.mono(11), color: Graphite.faint)
-                let note = label("", font: Graphite.ui(11), color: Graphite.modified)
+                // `.inspector-field`: mono name and type, a note, a 30 pt input.
+                let name = label(column.name, font: Graphite.mono(11.5), color: Graphite.secondary)
+                let type = label(column.dataType, font: Graphite.mono(11), color: NSColor(hex: 0x6f6f76))
+                let note = label("", font: Graphite.ui(11), color: Graphite.faint)
                 note.alignment = .right
                 let header = hstack([name, type, spacer(), note], spacing: 6)
-                let field = GTextField("", mono: true)
-                field.isEditable = editable && !isKey && !deleted
+                let field = GTextField("", mono: true, height: 30)
+                let readOnly = !editable || isKey || deleted
+                field.isEditable = !readOnly
+                field.isSelectable = true
+                if let cell = field.cell as? GTextFieldCell {
+                    cell.leftInset = 10
+                    cell.plain = readOnly
+                }
+                if readOnly { field.textColor = Graphite.muted }
                 field.onCommit = { [weak self] text in self?.commit(row: row, column: index, text: text) }
-                let group = vstack([header, field], spacing: 4)
+                let group = vstack([header, field], spacing: 5)
                 header.widthAnchor.constraint(equalTo: group.widthAnchor).isActive = true
                 field.widthAnchor.constraint(equalTo: group.widthAnchor).isActive = true
                 fields.addArrangedSubview(group)
@@ -813,6 +879,12 @@ final class InspectorView: PanelView {
             let current = values[index]
             let changed = !deleted && jsonKey(current) != jsonKey(original)
             notes[index].stringValue = page.primaryKey.contains(column.name) ? "Primary key" : changed ? "was \(displayValue(original))" : ""
+            notes[index].textColor = changed ? Graphite.modified : Graphite.faint
+            if let cell = field.cell as? GTextFieldCell, !cell.plain {
+                cell.fillOverride = changed ? Graphite.modifiedSoft : NSColor(hex: 0x232326)
+                cell.strokeOverride = changed ? NSColor(hex: 0xf0b14c, alpha: 0.45) : Graphite.borderStrong
+                field.needsDisplay = true
+            }
             if field.currentEditor() == nil {
                 field.stringValue = Helpers.editableText(current)
                 field.setPlaceholder(current is NSNull ? "NULL" : "")
@@ -843,12 +915,12 @@ final class LimitStepper: NSView {
         self.onStep = onStep
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
-        widthAnchor.constraint(equalToConstant: 16).isActive = true
-        heightAnchor.constraint(equalToConstant: 24).isActive = true
+        // Sits inside the limit field; its height comes from the field.
+        widthAnchor.constraint(equalToConstant: 22).isActive = true
         toolTip = "Step the preview limit"
-        let up = IconView(.chevronUp, size: 10, color: Graphite.faint)
-        let down = IconView(.chevronDown, size: 10, color: Graphite.faint)
-        for (icon, offset) in [(up, CGFloat(-5)), (down, CGFloat(5))] {
+        let up = IconView(.chevronUp, size: 10, color: Graphite.muted)
+        let down = IconView(.chevronDown, size: 10, color: Graphite.muted)
+        for (icon, offset) in [(up, CGFloat(-6)), (down, CGFloat(6))] {
             addSubview(icon)
             icon.centerXAnchor.constraint(equalTo: centerXAnchor).isActive = true
             icon.centerYAnchor.constraint(equalTo: centerYAnchor, constant: offset).isActive = true
@@ -879,10 +951,12 @@ final class LimitStepper: NSView {
     override func accessibilityPerformDecrement() -> Bool { onStep(-1); return true }
 
     override func draw(_ dirtyRect: NSRect) {
+        Graphite.borderStrong.setFill()
+        NSRect(x: 0, y: 0, width: 1, height: bounds.height).fill()
         guard let hoverHalf else { return }
-        let rect = NSRect(x: 0, y: hoverHalf == 1 ? 0 : bounds.midY, width: bounds.width, height: bounds.height / 2)
+        let rect = NSRect(x: 1, y: hoverHalf == 1 ? 0 : bounds.midY, width: bounds.width - 1, height: bounds.height / 2)
         Graphite.controlHover.setFill()
-        NSBezierPath(roundedRect: rect.insetBy(dx: 1, dy: 1), xRadius: 2, yRadius: 2).fill()
+        rect.fill()
     }
 }
 

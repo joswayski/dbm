@@ -382,8 +382,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, Qu
                     let kind = self.profile(id)?.engine == .redis ? "Keyspace" : "Schema"
                     let reply = Bridge.helper(["command": "describeSchemaRefresh", "previous": previous.map(\.raw),
                                                "next": next.map(\.raw), "kind": kind])
-                    if case .success(let summary) = reply {
-                        let summary = dictionary(summary)
+                    if case .success(let value) = reply {
+                        let summary = dictionary(value)
                         self.toast.show(string(summary["message"]), success: bool(summary["changed"]))
                     }
                 }

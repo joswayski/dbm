@@ -204,6 +204,8 @@ final class TableState {
     var inspectorOpen = true
     /// Column indexes collapsed to a narrow strip.
     var collapsedColumns = Set<Int>()
+    /// A column was dragged away from its default width.
+    var columnsResized = false
     /// Inline error, notice, or export result above the grid.
     var message: InlineMessage?
 

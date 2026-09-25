@@ -17,6 +17,9 @@ final class GridHeaderCell: NSTableHeaderCell {
         // The header view also draws its filler past the last column with a
         // copy of this cell; that area stays blank.
         guard !stringValue.isEmpty else { return }
+        // `.data-grid th { border-right: 1px solid #242427 }`
+        NSColor(hex: 0x242427).setFill()
+        NSRect(x: cellFrame.maxX - 1, y: cellFrame.minY, width: 1, height: cellFrame.height).fill()
         if collapsed {
             Icon.expand.draw(in: NSRect(x: cellFrame.midX - 6, y: cellFrame.minY + 5, width: 12, height: 12), color: Graphite.muted)
             let paragraph = NSMutableParagraphStyle()
@@ -41,9 +44,9 @@ final class GridHeaderCell: NSTableHeaderCell {
             x += 16
         }
         let name = NSAttributedString(string: stringValue, attributes: [
-            .font: Graphite.ui(12.5, .semibold), .foregroundColor: Graphite.textStrong,
+            .font: Graphite.ui(12, .medium), .foregroundColor: sort == nil ? Graphite.text : Graphite.textStrong,
         ])
-        let type = NSAttributedString(string: dataType, attributes: [.font: Graphite.mono(11), .foregroundColor: Graphite.faint])
+        let type = NSAttributedString(string: dataType, attributes: [.font: Graphite.mono(11), .foregroundColor: NSColor(hex: 0x6f6f76)])
         let sortWidth: CGFloat = sort == nil ? 0 : 16
         let available = cellFrame.maxX - x - 8 - sortWidth
         let nameWidth = min(name.size().width, available)
