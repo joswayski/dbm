@@ -1,7 +1,8 @@
 # Native development clients
 
 DBM is migrating toward browser-free clients on **macOS, Windows, and Linux**.
-**These are development clients, not feature/UI-parity replacements yet.**
+**These are development clients. They reach feature and UI parity with the
+React app (see the checklist), but have not been release-validated.**
 The downloadable, auto-updating application still uses Tauri on all platforms.
 No CPU or memory improvement has been measured yet.
 
@@ -71,37 +72,46 @@ reported as canceled.
 Editor and grid rules live in `crates/dbm-core` so every host behaves the same
 as the React app: `sql_text` (statement under cursor or selection, destructive
 query confirmation, `SELECT *` table resolution, SQL/Redis highlighting tokens,
-schema filtering, CSV encoding), `cell_values` (typed cell parsing; an empty
-field is NULL for nullable columns), `connection_url` (URL import), and
-`export` (streaming full-table CSV). The egui client calls them directly; the
-AppKit client reaches them through bridge commands (`executionTarget`,
-`requiresConfirmation`, `resolveFullTableSelect`, `highlight`, `parseCell`,
-`editableText`, `csv`, `parseConnectionUrl`, `exportCsv`), which take UTF-16
-offsets as `NSString` does.
+keyword/command completion, schema filtering, schema-refresh wording, inline
+change diffs, CSV encoding), `cell_values` (typed cell parsing; an empty field
+is NULL for nullable columns), `connection_url` (URL import), `export`
+(streaming full-table CSV), and `demo` (the `--demo` fixture). The egui client
+calls them directly; the AppKit client reaches them through bridge commands.
+Editor helpers run through `dbm_bridge_helper_call`, which needs no session and
+takes UTF-16 offsets as `NSString` does, so highlighting and export progress
+never wait behind a running query.
 
 ## Parity checklist
 
 Feature and visual parity is the migration acceptance criterion, not optional
-follow-up polish. Status against the React application:
+follow-up polish. Status against the React application. "Done" on egui means
+exercised by hand on Linux against disposable PostgreSQL and Redis servers and
+compared with React screenshots. On AppKit it means implemented and captured
+in the macOS CI snapshots (`--demo --snapshot-dir`); nobody has driven the
+AppKit build interactively on a Mac yet.
 
 | Area | egui (Windows/Linux) | AppKit (macOS) |
 | --- | --- | --- |
-| Graphite layout: sidebar, top bar, connection-colored tab strip, toolbars, cards | Matches the dark React layout; compared by screenshot on Linux | Partial: tab dropdown, system fonts |
-| Profiles: engine picker, URL import, colors, TLS/CA, read-only, test before save | Done | Partial: text-field alert (engine, TLS, color typed as text); no URL import or test |
-| Sidebar: connection subtitles, database picker, filterable recursive schema/keyspace tree | Done | Partial: profile list and schema outline; no subtitles or filter |
-| Query: statement under cursor or selection, Redis line mode, Cmd/Ctrl+Enter | Done | Partial: runs the selection or the whole editor |
-| Query: SQL/Redis highlighting and active-statement outline, line numbers | Done | Not yet |
-| Query: completion | Not yet (CodeMirror keyword completion) | Not yet |
-| Query: confirmation before destructive statements | Done | Not yet |
-| Query: per-profile+database history, refresh, `SELECT *` opens editable viewer | Done | Partial: history in a picker dialog, refresh |
-| Table: all filter operators, multiple filters, sort, preview limit, paging | Done | Partial: one filter, 9 of 13 operators, header sort, paging |
-| Table: CSV copy (visible page, selection) and full filtered export | Done | Not yet in the UI; `csv`/`exportCsv` bridge commands exist |
-| Table: multi-row selection, inline and inspector edits, typed/NULL parsing | Done | Partial: single-row inline edits; no inspector |
-| Table: staged deletes, pending bar, confirm, conflict reload | Done | Partial |
-| Redis: typed key views and edits (strings, hashes, lists, sets, sorted sets), key index | Done through the shared table view | Partial |
-| Column collapse, persisted sidebar width, tab rename/collapse | Tab rename only | Not yet |
-| Keyboard: Delete stages deletion, Escape clears/reverts, Enter commits edits | Done | Partial: standard table editing keys |
+| Graphite layout: sidebar, top bar, connection-colored tab strip, toolbars, cards, Geist fonts | Done | Done |
+| Welcome screen, sidebar collapse and resize (persisted) | Done | Done |
+| Profiles: engine picker, URL import, colors, TLS/CA, read-only, test before save | Done | Done |
+| Sidebar: connection subtitles, database picker, filterable schema/keyspace tree, refresh summary toast | Done | Done |
+| Query: statement under cursor or selection, Redis line mode, Cmd/Ctrl+Enter | Done | Done |
+| Query: SQL/Redis highlighting, active-statement outline, line numbers | Done | Done |
+| Query: keyword and Redis command completion | Done (shared keyword list, not CodeMirror's full schema-aware completion) | Done (same list) |
+| Query: confirmation before destructive statements | Done | Done |
+| Query: per-profile+database history, refresh, `SELECT *` opens the editable viewer | Done | Done |
+| Table: all filter operators, multiple filters, sort, preview limit with stepper, paging | Done | Done |
+| Table: CSV copy (visible page, selection) and full filtered export with progress and Open / Show in folder | Done | Done |
+| Table: multi-row selection, inline and inspector edits, typed/NULL parsing | Done | Done |
+| Table: staged deletes, hover change preview, pending bar, conflict reload | Done | Done |
+| Table: column resize, collapse, Reset columns; delayed Refreshing overlay | Done | Done |
+| Messages: app error strip, inline query/table errors and notices, export result, toast | Done | Done |
+| Redis: typed key views and edits (strings, hashes, lists, sets, sorted sets), key index | Done through the shared table view | Done through the shared table view |
+| Tabs: rename, collapse, close guards for staged edits | Done | Done |
+| Keyboard: Delete stages deletion, Escape clears/reverts, Enter commits edits | Done | Done |
 | Accessibility | AccessKit enabled; screen readers not yet validated | Native AppKit controls; not yet validated |
+| Update control ("Check for updates") | Out of scope until release cutover | Out of scope until release cutover |
 | Light theme | Not in the React app either | — |
 
 Also required before replacing Tauri, on every host:

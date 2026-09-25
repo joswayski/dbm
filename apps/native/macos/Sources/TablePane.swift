@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 
 let pendingRefreshError = "Save or discard pending row changes before refreshing."
 let pendingExportError = "Save or discard pending row changes before exporting."
@@ -64,6 +65,7 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
     private var inspectorWidth: NSLayoutConstraint!
     private var pendingHeight: NSLayoutConstraint!
     private let loadingOverlay = LoadingOverlay()
+    private let skeleton = GridSkeleton()
     private let messageView = MessageView()
     private var bodyBelowFilters: NSLayoutConstraint!
     private var bodyBelowMessage: NSLayoutConstraint!
@@ -180,6 +182,7 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
         body.addSubview(emptyLabel)
         body.addSubview(retryButton)
         body.addSubview(loadingOverlay)
+        body.addSubview(skeleton)
         inspector.onClose = { [weak self] in self?.toggleInspector() }
         inspectorWidth = inspector.widthAnchor.constraint(equalToConstant: Graphite.inspectorWidth)
         NSLayoutConstraint.activate([
@@ -195,6 +198,10 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
             emptyLabel.centerYAnchor.constraint(equalTo: gridScrollView.centerYAnchor),
             retryButton.centerXAnchor.constraint(equalTo: gridScrollView.centerXAnchor),
             retryButton.centerYAnchor.constraint(equalTo: gridScrollView.centerYAnchor),
+            skeleton.leadingAnchor.constraint(equalTo: gridScrollView.leadingAnchor),
+            skeleton.trailingAnchor.constraint(equalTo: gridScrollView.trailingAnchor),
+            skeleton.topAnchor.constraint(equalTo: gridScrollView.topAnchor),
+            skeleton.heightAnchor.constraint(equalToConstant: Graphite.headerHeight + 5 * Graphite.rowHeight),
             loadingOverlay.leadingAnchor.constraint(equalTo: gridScrollView.leadingAnchor),
             loadingOverlay.trailingAnchor.constraint(equalTo: gridScrollView.trailingAnchor),
             loadingOverlay.topAnchor.constraint(equalTo: gridScrollView.topAnchor),
@@ -303,6 +310,7 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
         let interactive = !state.loading && !(host?.isSaving(tab) ?? false)
         grid.isEnabled = interactive
         updateLoadingOverlay(visible: state.loading && page != nil)
+        skeleton.isHidden = !(state.loading && page == nil)
         messageView.show(state.message)
         layoutMessage()
         inspector.show(tab: tab, host: host, editable: editable, interactive: interactive) { [weak self] in self?.stagedFromInspector() }
@@ -985,4 +993,43 @@ final class LoadingOverlay: NSView {
 
     // Like `pointer-events: none`: the grid underneath keeps the cursor.
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
+/// `.initial-grid-skeleton`: a header band and five rows that pulse while
+/// the first page loads.
+final class GridSkeleton: NSView {
+    init() {
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        wantsLayer = true
+        isHidden = true
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard window != nil, layer?.animation(forKey: "pulse") == nil else { return }
+        let pulse = CABasicAnimation(keyPath: "opacity")
+        pulse.fromValue = 0.8
+        pulse.toValue = 0.45
+        pulse.duration = 0.75
+        pulse.autoreverses = true
+        pulse.repeatCount = .infinity
+        layer?.add(pulse, forKey: "pulse")
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override var isFlipped: Bool { true }
+
+    override func draw(_ dirtyRect: NSRect) {
+        Graphite.gridHeader.setFill()
+        NSRect(x: 0, y: 0, width: bounds.width, height: Graphite.headerHeight).fill()
+        NSColor(white: 1, alpha: 0.03).setFill()
+        NSRect(x: 0, y: Graphite.headerHeight, width: bounds.width, height: bounds.height - Graphite.headerHeight).fill()
+        Graphite.hairline.setFill()
+        for row in 0...5 {
+            let y = Graphite.headerHeight + CGFloat(row) * Graphite.rowHeight - 1
+            NSRect(x: 0, y: y, width: bounds.width, height: 1).fill()
+        }
+    }
 }

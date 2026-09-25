@@ -350,10 +350,12 @@ pub fn show(ui: &mut egui::Ui, cx: &TableContext<'_>, state: &mut TableState) ->
         egui::CentralPanel::default()
             .frame(Frame::new().fill(theme::BG))
             .show_inside(ui, |ui| {
+                if state.loading {
+                    loading_skeleton(ui);
+                    return;
+                }
                 ui.centered_and_justified(|ui| {
-                    if state.loading {
-                        ui.spinner();
-                    } else if ui.button("Couldn't load rows · Retry").clicked() {
+                    if ui.button("Couldn't load rows · Retry").clicked() {
                         actions.push(TableAction::Reload);
                     }
                 });
@@ -1068,6 +1070,48 @@ fn message_panel(ui: &mut egui::Ui, id: egui::Id, state: &mut TableState) {
         (messages::Response::Open, Some(path)) => crate::workbench::open_path(&path, false),
         (messages::Response::Reveal, Some(path)) => crate::workbench::open_path(&path, true),
         _ => {}
+    }
+}
+
+/// `.initial-grid-skeleton`: a header band and five rows with a moving
+/// highlight while the first page loads.
+fn loading_skeleton(ui: &mut egui::Ui) {
+    let top = ui.max_rect().min;
+    let width = ui.max_rect().width();
+    let time = ui.input(|i| i.time);
+    ui.ctx().request_repaint();
+    let (response_rect, _) = ui.allocate_exact_size(
+        Vec2::new(width, theme::HEADER_HEIGHT + 5.0 * theme::ROW_HEIGHT),
+        Sense::hover(),
+    );
+    let painter = ui.painter_at(response_rect);
+    let band = |y: f32, height: f32, base: Color32| {
+        let rect = Rect::from_min_size(egui::pos2(top.x, y), Vec2::new(width, height));
+        painter.rect_filled(rect, 0.0, base);
+        // A soft highlight sweeping left to right every 1.5 s.
+        let phase = (time % 1.5 / 1.5) as f32;
+        let center = rect.left() + (phase * 2.2 - 0.6) * width;
+        let glow = Rect::from_center_size(
+            egui::pos2(center, rect.center().y),
+            Vec2::new(width * 0.5, height),
+        )
+        .intersect(rect);
+        if glow.is_positive() {
+            painter.rect_filled(glow, 0.0, Color32::from_white_alpha(5));
+        }
+        painter.hline(
+            rect.x_range(),
+            rect.bottom() - 0.5,
+            Stroke::new(1.0, theme::HAIRLINE),
+        );
+    };
+    band(top.y, theme::HEADER_HEIGHT, theme::GRID_HEADER);
+    for row in 0..5 {
+        band(
+            top.y + theme::HEADER_HEIGHT + row as f32 * theme::ROW_HEIGHT,
+            theme::ROW_HEIGHT,
+            Color32::from_white_alpha(4),
+        );
     }
 }
 
