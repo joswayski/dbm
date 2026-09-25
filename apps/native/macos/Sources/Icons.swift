@@ -5,7 +5,7 @@ enum Icon {
     case plus, more, database, refresh, table, key, view, folder
     case chevronRight, chevronDown, chevronUp, chevronLeft
     case play, close, copy, download, inspector, check, alert, code, sortUp, sortDown, search, trash, undo, sidebar
-    case pencil, expand, collapse, filter
+    case pencil, expand, collapse, filter, sort, arrowUp, arrowDown
 
     /// Draws into the current context, in a flipped 16×16 space scaled to `rect`.
     func draw(in rect: NSRect, color: NSColor) {
@@ -99,6 +99,11 @@ enum Icon {
         case .sortUp: fillPolygon(p(8, 5), p(11.5, 10.5), p(4.5, 10.5))
         case .sortDown: fillPolygon(p(4.5, 5.5), p(11.5, 5.5), p(8, 11))
         case .search: path.appendOval(in: r(3, 3, 7.5, 7.5)); line(p(9.3, 9.3), p(13, 13))
+        case .sort:
+            line(p(4.67, 2.67), p(4.67, 13.33)); line(p(2.67, 11.33), p(4.67, 13.33), p(6.67, 11.33))
+            line(p(11.33, 13.33), p(11.33, 2.67)); line(p(9.33, 4.67), p(11.33, 2.67), p(13.33, 4.67))
+        case .arrowUp: line(p(8, 12.67), p(8, 3.33)); line(p(4, 7.33), p(8, 3.33), p(12, 7.33))
+        case .arrowDown: line(p(8, 3.33), p(8, 12.67)); line(p(4, 8.67), p(8, 12.67), p(12, 8.67))
         case .filter: line(p(2, 3.3), p(14, 3.3), p(9.3, 8.7), p(9.3, 12.7), p(6.7, 11.3), p(6.7, 8.7), p(2, 3.3))
         case .trash:
             line(p(3, 4.5), p(13, 4.5)); line(p(6.5, 4.5), p(6.5, 3), p(9.5, 3), p(9.5, 4.5))

@@ -64,7 +64,8 @@ final class GButton: NSButton {
         case .primary, .dangerFilled: return .white
         case .danger: return Graphite.danger
         case .link: return Graphite.accentText
-        case .toolbar, .icon: return hovering || isOn ? Graphite.textStrong : Graphite.secondary
+        // `.icon-toggle.on` is accent text on an accent wash.
+        case .toolbar, .icon: return isOn ? Graphite.accentText : hovering ? Graphite.textStrong : Graphite.secondary
         case .secondary: return Graphite.text
         }
     }
@@ -74,7 +75,7 @@ final class GButton: NSButton {
         let text = title.isEmpty ? 0 : (title as NSString).size(withAttributes: textAttributes).width
         let gap: CGFloat = icon != nil && !title.isEmpty ? 6 : 0
         let hint = shortcut.map { ($0 as NSString).size(withAttributes: [.font: Graphite.ui(11, .medium)]).width + 18 } ?? 0
-        let padding: CGFloat = style == .icon ? 7 : (style == .link ? 2 : 12)
+        let padding: CGFloat = style == .icon ? 7 : (style == .link ? 6 : 12)
         return NSSize(width: ceil(iconWidth + gap + text + hint + padding * 2), height: minHeight)
     }
 
@@ -96,7 +97,9 @@ final class GButton: NSButton {
         let pressed = isHighlighted && isEnabled
         switch style {
         case .primary:
-            (isEnabled ? (pressed ? Graphite.accent : Graphite.accentStrong) : Graphite.accentStrong.withAlphaComponent(0.5)).setFill()
+            let fill = !isEnabled ? Graphite.accentStrong.withAlphaComponent(0.5)
+                : pressed ? Graphite.accent : hovering ? NSColor(hex: 0x4585d6) : Graphite.accentStrong
+            fill.setFill()
             shape.fill()
         case .dangerFilled:
             NSColor(hex: 0xb43c36, alpha: isEnabled ? 1 : 0.5).setFill()
@@ -107,18 +110,28 @@ final class GButton: NSButton {
             Graphite.borderStrong.setStroke()
             shape.lineWidth = 1
             shape.stroke()
-        case .toolbar, .icon, .danger:
+        case .danger:
+            // `.danger-button`: danger wash with a soft danger outline.
+            NSColor(hex: 0xff6b61, alpha: hovering && isEnabled ? 0.16 : 0.09).setFill()
+            shape.fill()
+            NSColor(hex: 0xff6b61, alpha: 0.3).setStroke()
+            shape.lineWidth = 1
+            shape.stroke()
+        case .toolbar, .icon:
             if isOn {
                 Graphite.accentSoft.setFill(); shape.fill()
-                Graphite.accent.withAlphaComponent(0.6).setStroke(); shape.stroke()
             } else if (hovering || pressed) && isEnabled {
                 (pressed ? Graphite.controlActive : Graphite.controlHover).setFill(); shape.fill()
             }
         case .link:
-            break
+            // `.text-button:hover { background: var(--accent-soft) }`
+            if hovering && isEnabled {
+                Graphite.accentSoft.setFill()
+                NSBezierPath(roundedRect: rect, xRadius: 5, yRadius: 5).fill()
+            }
         }
         let color = foreground
-        let padding: CGFloat = style == .icon ? 7 : (style == .link ? 2 : 12)
+        let padding: CGFloat = style == .icon ? 7 : (style == .link ? 6 : 12)
         let text = title as NSString
         let textSize = title.isEmpty ? .zero : text.size(withAttributes: textAttributes)
         let hintWidth = shortcut.map { ($0 as NSString).size(withAttributes: [.font: Graphite.ui(11, .medium)]).width + 18 } ?? 0
@@ -215,6 +228,8 @@ final class GTextFieldCell: NSTextFieldCell {
     var strokeOverride: NSColor?
     /// No bezel at all, like the inspector's read-only fields.
     var plain = false
+    /// The grid's in-cell editor: square, edit-surface fill, inner accent line.
+    var gridEditor = false
 
     override func titleRect(forBounds rect: NSRect) -> NSRect {
         let inset = NSRect(x: rect.minX + leftInset, y: rect.minY, width: max(0, rect.width - leftInset - 8), height: rect.height)
@@ -225,7 +240,14 @@ final class GTextFieldCell: NSTextFieldCell {
     override func drawingRect(forBounds rect: NSRect) -> NSRect { titleRect(forBounds: rect) }
 
     override func draw(withFrame cellFrame: NSRect, in controlView: NSView) {
-        if !plain {
+        if gridEditor {
+            Graphite.editSurface.setFill()
+            cellFrame.fill()
+            let line = NSBezierPath(rect: cellFrame.insetBy(dx: 0.75, dy: 0.75))
+            line.lineWidth = 1.5
+            Graphite.accent.setStroke()
+            line.stroke()
+        } else if !plain {
             drawFieldBezel(cellFrame, focused: focused, enabled: isEnabled,
                            fill: focused && fillOverride != nil ? Graphite.editSurface : fillOverride, stroke: strokeOverride)
         }
@@ -296,6 +318,11 @@ final class FieldBehavior: NSObject, NSTextFieldDelegate {
     var onCommit: ((String) -> Void)?
     var onChange: ((String) -> Void)?
     var onCancel: (() -> Void)?
+    /// Handles Return in place of ending editing.
+    var onReturn: (() -> Void)?
+    /// Escape runs `onCancel` but leaves the text and focus alone, like the
+    /// desktop's filter inputs.
+    var keepsFocusOnCancel = false
     var original = ""
     private var canceling = false
 
@@ -317,7 +344,15 @@ final class FieldBehavior: NSObject, NSTextFieldDelegate {
     }
 
     func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+        if selector == #selector(NSResponder.insertNewline(_:)), let onReturn {
+            onReturn()
+            return true
+        }
         guard selector == #selector(NSResponder.cancelOperation(_:)), let field = control as? NSTextField else { return false }
+        if keepsFocusOnCancel {
+            onCancel?()
+            return true
+        }
         canceling = true
         field.stringValue = original
         field.window?.makeFirstResponder(nil)
@@ -386,6 +421,7 @@ final class GTextField: NSTextField {
 final class GSecureField: NSSecureTextField {
     let behavior = FieldBehavior()
     var onCommit: ((String) -> Void)? { get { behavior.onCommit } set { behavior.onCommit = newValue } }
+    var onChange: ((String) -> Void)? { get { behavior.onChange } set { behavior.onChange = newValue } }
 
     override class var cellClass: AnyClass? {
         get { GSecureTextFieldCell.self }

@@ -180,7 +180,15 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, Qu
             return pane
         } ?? welcome!
         for view in content.subviews where view !== current { view.removeFromSuperview() }
-        if current.superview !== content { content.pin(current) }
+        if current.superview !== content {
+            content.pin(current)
+            // `tab-pane-in`: a 120 ms settle from 85% opacity.
+            current.alphaValue = 0.85
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.12
+                current.animator().alphaValue = 1
+            }
+        }
         welcome.show(profile: activeProfileID.flatMap(profile),
                      connected: activeProfileID.map { workspaces[$0] != nil } ?? false, hasProfiles: !profiles.isEmpty)
         reloadPane(activeTab)
@@ -725,6 +733,24 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, Qu
         for (title, action, key) in [("Cut", "cut:", "x"), ("Copy", "copy:", "c"), ("Paste", "paste:", "v"), ("Select All", "selectAll:", "a")] {
             editMenu.addItem(withTitle: title, action: Selector((action)), keyEquivalent: key)
         }
+        editMenu.addItem(.separator())
+        // The editor's find bar, as CodeMirror's search keymap.
+        let findItem = editMenu.addItem(withTitle: "Find", action: nil, keyEquivalent: "")
+        let findMenu = NSMenu(title: "Find")
+        let finds: [(String, NSTextFinder.Action, String, NSEvent.ModifierFlags)] = [
+            ("Find…", NSTextFinder.Action.showFindInterface, "f", NSEvent.ModifierFlags.command),
+            ("Find and Replace…", NSTextFinder.Action.showReplaceInterface, "f", [.command, .option]),
+            ("Find Next", NSTextFinder.Action.nextMatch, "g", .command),
+            ("Find Previous", NSTextFinder.Action.previousMatch, "g", [.command, .shift]),
+            ("Use Selection for Find", NSTextFinder.Action.setSearchString, "e", .command),
+        ]
+        for (title, tag, key, modifiers) in finds {
+            let item = findMenu.addItem(withTitle: title, action: #selector(NSTextView.performFindPanelAction(_:)), keyEquivalent: key)
+            item.keyEquivalentModifierMask = modifiers
+            item.tag = tag.rawValue
+        }
+        findItem.submenu = findMenu
+        editMenu.addItem(withTitle: "Toggle Comment", action: #selector(SQLTextView.toggleComment(_:)), keyEquivalent: "/")
         editMenu.addItem(.separator())
         editMenu.addItem(withTitle: "Complete", action: #selector(NSTextView.complete(_:)), keyEquivalent: "\u{1b}").keyEquivalentModifierMask = [.option]
         editItem.submenu = editMenu

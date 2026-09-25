@@ -418,3 +418,14 @@ func largeValueSize(_ value: Any?) -> String? {
     guard bytes > 64 * 1024 else { return nil }
     return bytes >= 1024 * 1024 ? String(format: "%.1f MiB", Double(bytes) / 1_048_576) : "\(bytes / 1024) KiB"
 }
+
+private let countFormatter: NumberFormatter = {
+    let formatter = NumberFormatter()
+    formatter.numberStyle = .decimal
+    return formatter
+}()
+
+/// A count with grouping separators, like the desktop's `toLocaleString()`.
+func formatCount(_ value: Int) -> String {
+    countFormatter.string(from: NSNumber(value: value)) ?? String(value)
+}

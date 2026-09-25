@@ -139,7 +139,7 @@ final class MessageView: PanelView {
         let row: NSStackView
         if let export = message.export {
             let noun = export.rows == 1 ? "row" : "rows"
-            let prefix = label("Exported \(export.rows) filtered \(noun) to ", font: Graphite.ui(12.5), color: noticeText)
+            let prefix = label("Exported \(formatCount(export.rows)) filtered \(noun) to ", font: Graphite.ui(12.5), color: noticeText)
             let link = FileLink(export.url.lastPathComponent)
             link.onClick = { [weak self] in self?.onOpen?(export.url) }
             let reveal = GButton("Show in folder", icon: .folder, style: .secondary) { [weak self] in self?.onReveal?(export.url) }
