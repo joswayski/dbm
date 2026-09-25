@@ -11,8 +11,8 @@ use dbm_core::models::{
     WorkspaceInfo,
 };
 use dbm_core::sql_text::{
-    ExecutionKind, TokenKind, execution_target, filter_schema_nodes, highlight,
-    requires_confirmation, resolve_full_table_select, safe_file_name,
+    ExecutionKind, TokenKind, describe_schema_refresh, execution_target, filter_schema_nodes,
+    highlight, requires_confirmation, resolve_full_table_select, safe_file_name,
 };
 use eframe::egui::{
     self, Color32, CornerRadius, Frame, Margin, RichText, Sense, Stroke, TextFormat, Vec2,
@@ -28,6 +28,7 @@ use crate::table_view::{
 use crate::theme::{self, chip, eyebrow, mono, primary_button, section_label, ui_font};
 
 const MAX_QUERY_ROWS: u32 = 10_000;
+const SIDEBAR_COLLAPSED_KEY: &str = "dbm.sidebarCollapsed";
 const LARGE_EXPORT_WARNING_ROWS: u64 = 100_000;
 const ERROR_SECONDS: f64 = 10.0;
 const NOTICE_SECONDS: f64 = 6.0;
@@ -81,6 +82,8 @@ struct Tab {
     last_executed: Option<String>,
     /// A `SELECT * FROM table` result shown in the editable table viewer.
     embedded: Option<(String, String)>,
+    /// Shrunk to a narrow pill in the tab strip until selected again.
+    collapsed: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -273,6 +276,8 @@ struct Toast {
     message: String,
     error: bool,
     shown_at: f64,
+    /// An exported file the notice can open or reveal.
+    file: Option<std::path::PathBuf>,
 }
 
 pub struct Workbench {
@@ -295,16 +300,21 @@ pub struct Workbench {
     toast: Option<Toast>,
     profile_form: Option<ProfileForm>,
     confirm_delete: Option<Uuid>,
-    confirm_save: Option<u64>,
     confirm_query: Option<ConfirmQuery>,
     confirm_export: Option<u64>,
     renaming: Option<(u64, String)>,
+    sidebar_collapsed: bool,
     now: f64,
 }
 
 impl Workbench {
     pub fn new(cc: &eframe::CreationContext<'_>, demo: bool) -> Self {
-        Self::with_context(cc.egui_ctx.clone(), demo)
+        let mut app = Self::with_context(cc.egui_ctx.clone(), demo);
+        app.sidebar_collapsed = cc
+            .storage
+            .and_then(|storage| storage.get_string(SIDEBAR_COLLAPSED_KEY))
+            .is_some_and(|value| value == "true");
+        app
     }
 
     fn with_context(context: egui::Context, demo: bool) -> Self {
@@ -330,10 +340,10 @@ impl Workbench {
             toast: None,
             profile_form: None,
             confirm_delete: None,
-            confirm_save: None,
             confirm_query: None,
             confirm_export: None,
             renaming: None,
+            sidebar_collapsed: false,
             now: 0.0,
         };
         app.send(Command::LoadProfiles, "Loading connections", None);
@@ -423,7 +433,7 @@ impl Workbench {
                 }
             }
             RequestKind::Query => self.queue_history(meta.tab),
-            RequestKind::Mutation => self.confirm_save = None,
+            RequestKind::Mutation => {}
             RequestKind::Export | RequestKind::Other => {}
         }
         self.show_error(error);
@@ -434,6 +444,7 @@ impl Workbench {
             message: message.into(),
             error: true,
             shown_at: self.now,
+            file: None,
         });
     }
 
@@ -442,6 +453,7 @@ impl Workbench {
             message: message.into(),
             error: false,
             shown_at: self.now,
+            file: None,
         });
     }
 
@@ -481,7 +493,17 @@ impl Workbench {
             Payload::Disconnected(id) => self.close_profile(id),
             Payload::Schema(id, tree) => {
                 if self.workspaces.contains_key(&id) {
-                    self.schemas.insert(id, tree);
+                    let previous = self.schemas.insert(id, tree).unwrap_or_default();
+                    if meta.label == "Refreshing schema" {
+                        let kind = if self.engine(id) == DatabaseEngine::Redis {
+                            "Keyspace"
+                        } else {
+                            "Schema"
+                        };
+                        let (_, message) =
+                            describe_schema_refresh(&previous, &self.schemas[&id], kind);
+                        self.show_notice(message);
+                    }
                 }
             }
             Payload::Query(result) => self.query_finished(target, result),
@@ -496,7 +518,6 @@ impl Workbench {
                 }
             }
             Payload::Mutation(result) => {
-                self.confirm_save = None;
                 let Some(tab) = target else { return };
                 // As in the desktop app: clear staged rows and reload, so rows
                 // another writer changed show their current values.
@@ -520,7 +541,15 @@ impl Workbench {
                 }
             }
             Payload::Exported(Some((path, rows))) => {
-                self.show_notice(format!("Exported {rows} row(s) to {}.", path.display()));
+                let name = path.file_name().map_or_else(
+                    || path.display().to_string(),
+                    |n| n.to_string_lossy().into_owned(),
+                );
+                let noun = if rows == 1 { "row" } else { "rows" };
+                self.show_notice(format!("Exported {rows} filtered {noun} to {name}."));
+                if let Some(toast) = &mut self.toast {
+                    toast.file = Some(path);
+                }
             }
             Payload::Exported(None) => self.show_notice("Export canceled."),
         }
@@ -680,6 +709,7 @@ impl Workbench {
             sql,
             last_executed: None,
             embedded: None,
+            collapsed: false,
         });
         self.active_tab = Some(id);
         self.active_profile = Some(profile);
@@ -711,6 +741,7 @@ impl Workbench {
             selection: (0, 0),
             last_executed: None,
             embedded: None,
+            collapsed: false,
         });
         self.tables.insert(id, TableState::default());
         self.active_tab = Some(id);
@@ -720,6 +751,34 @@ impl Workbench {
 
     fn tab_dirty(&self, tab: u64) -> bool {
         self.tables.get(&tab).is_some_and(TableState::dirty)
+    }
+
+    fn select_tab(&mut self, tab_id: u64) {
+        if let Some(tab) = self.tabs.iter_mut().find(|t| t.id == tab_id) {
+            tab.collapsed = false;
+            self.active_tab = Some(tab_id);
+            self.active_profile = Some(tab.profile_id);
+        }
+    }
+
+    /// Shrinks a tab and, if it was active, selects its neighbor, as the
+    /// desktop app does.
+    fn collapse_tab(&mut self, tab_id: u64) {
+        let Some(index) = self.tabs.iter().position(|t| t.id == tab_id) else {
+            return;
+        };
+        self.tabs[index].collapsed = true;
+        if self.active_tab == Some(tab_id) {
+            let next = self
+                .tabs
+                .get(index + 1)
+                .or_else(|| index.checked_sub(1).and_then(|i| self.tabs.get(i)))
+                .map(|t| t.id);
+            match next {
+                Some(next) => self.select_tab(next),
+                None => self.active_tab = None,
+            }
+        }
     }
 
     fn close_tab(&mut self, tab_id: u64) {
@@ -919,6 +978,26 @@ impl Workbench {
         })
     }
 
+    /// Saves staged rows directly, as the desktop app's Save changes does.
+    fn save_changes(&mut self, tab_id: u64) {
+        if self.busy(RequestKind::Mutation, Some(tab_id)) {
+            return;
+        }
+        if let Some(batch) = self
+            .mutation_batch(tab_id)
+            .filter(|b| !b.mutations.is_empty())
+        {
+            let profile = batch.profile_id;
+            self.dispatch(
+                Command::Mutate(batch),
+                "Saving changes",
+                Some(tab_id),
+                Some(profile),
+                RequestKind::Mutation,
+            );
+        }
+    }
+
     fn start_export(&mut self, tab_id: u64) {
         let Some((profile, schema, table)) = self.table_target(tab_id) else {
             return;
@@ -953,6 +1032,10 @@ impl Workbench {
 }
 
 impl eframe::App for Workbench {
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        storage.set_string(SIDEBAR_COLLAPSED_KEY, self.sidebar_collapsed.to_string());
+    }
+
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.now = ctx.input(|input| input.time);
         self.drain();
@@ -985,6 +1068,25 @@ impl eframe::App for Workbench {
 
 impl Workbench {
     fn sidebar(&mut self, ctx: &egui::Context) {
+        if self.sidebar_collapsed {
+            egui::SidePanel::left("sidebar-collapsed")
+                .exact_width(48.0)
+                .resizable(false)
+                .frame(
+                    Frame::new()
+                        .fill(theme::SIDEBAR)
+                        .inner_margin(Margin::symmetric(8, 12))
+                        .stroke(Stroke::new(1.0, theme::BORDER)),
+                )
+                .show(ctx, |ui| {
+                    ui.vertical_centered(|ui| {
+                        if icons::button(ui, Icon::Sidebar, None, "Expand sidebar").clicked() {
+                            self.sidebar_collapsed = false;
+                        }
+                    });
+                });
+            return;
+        }
         egui::SidePanel::left("sidebar")
             .resizable(true)
             .default_width(260.0)
@@ -1012,6 +1114,11 @@ impl Workbench {
                             .size(14.0)
                             .color(theme::TEXT_STRONG),
                     );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if icons::button(ui, Icon::Sidebar, None, "Collapse sidebar").clicked() {
+                            self.sidebar_collapsed = true;
+                        }
+                    });
                 });
                 ui.add_space(10.0);
                 egui::TopBottomPanel::bottom("sidebar-footer")
@@ -1201,10 +1308,10 @@ impl Workbench {
             ui.horizontal(|ui| {
                 ui.label(section_label(if redis { "Keyspace" } else { "Schema" }));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let refreshing = self
-                        .pending_requests
-                        .values()
-                        .any(|m| m.profile == Some(id) && m.label == "Loading schema");
+                    let refreshing = self.pending_requests.values().any(|m| {
+                        m.profile == Some(id)
+                            && (m.label == "Loading schema" || m.label == "Refreshing schema")
+                    });
                     let label = if refreshing {
                         "Refreshing…"
                     } else {
@@ -1217,7 +1324,7 @@ impl Workbench {
                         Some(label),
                         "Reload the schema tree",
                     ) {
-                        self.send(Command::Schema(id), "Loading schema", Some(id));
+                        self.send(Command::Schema(id), "Refreshing schema", Some(id));
                     }
                 });
             });
@@ -1362,6 +1469,63 @@ impl Workbench {
     fn tab_button(&mut self, ui: &mut egui::Ui, tab: &Tab) {
         let active = self.active_tab == Some(tab.id);
         let color = self.profile_color(tab.profile_id);
+        if tab.collapsed {
+            let (rect, response) = ui.allocate_exact_size(Vec2::new(64.0, 31.0), Sense::click());
+            let response = response.on_hover_text(format!("Expand {}", tab.title));
+            if response.hovered() {
+                ui.painter().rect_filled(
+                    rect,
+                    CornerRadius {
+                        nw: 7,
+                        ne: 7,
+                        sw: 0,
+                        se: 0,
+                    },
+                    Color32::from_white_alpha(10),
+                );
+            }
+            icons::paint(
+                ui.painter(),
+                egui::Rect::from_center_size(
+                    rect.center() - Vec2::new(8.0, 6.0),
+                    Vec2::splat(12.0),
+                ),
+                Icon::ChevronRight,
+                theme::FAINT,
+            );
+            let mut job =
+                LayoutJob::simple_singleline(tab.title.clone(), ui_font(9.5), theme::FAINT);
+            job.wrap = egui::text::TextWrapping::truncate_at_width(44.0);
+            let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
+            ui.painter().galley(
+                egui::pos2(rect.left() + 5.0, rect.center().y + 2.0),
+                galley,
+                theme::FAINT,
+            );
+            let close = egui::Rect::from_center_size(
+                rect.right_center() - Vec2::new(10.0, 0.0),
+                Vec2::splat(16.0),
+            );
+            let close_response = ui
+                .interact(close, response.id.with("close"), Sense::click())
+                .on_hover_text(format!("Close {}", tab.title));
+            icons::paint(
+                ui.painter(),
+                close.shrink(3.0),
+                Icon::Close,
+                if close_response.hovered() {
+                    theme::TEXT
+                } else {
+                    theme::FAINT
+                },
+            );
+            if close_response.clicked() {
+                self.close_tab(tab.id);
+            } else if response.clicked() {
+                self.select_tab(tab.id);
+            }
+            return;
+        }
         let frame = Frame::new()
             .fill(if active {
                 theme::BG
@@ -1423,8 +1587,7 @@ impl Workbench {
                             .sense(Sense::click()),
                         );
                         if title.clicked() {
-                            self.active_tab = Some(tab.id);
-                            self.active_profile = Some(tab.profile_id);
+                            self.select_tab(tab.id);
                         }
                         if title.double_clicked() && tab.kind == TabKind::Query {
                             self.renaming = Some((tab.id, tab.title.clone()));
@@ -1432,6 +1595,17 @@ impl Workbench {
                         if title.middle_clicked() {
                             self.close_tab(tab.id);
                         }
+                    }
+                    if active
+                        && icon_btn(
+                            ui,
+                            true,
+                            Icon::ChevronLeft,
+                            None,
+                            &format!("Collapse {}", tab.title),
+                        )
+                    {
+                        self.collapse_tab(tab.id);
                     }
                     if icon_btn(ui, true, Icon::Close, None, &format!("Close {}", tab.title)) {
                         self.close_tab(tab.id);
@@ -1498,6 +1672,14 @@ impl Workbench {
                             } else {
                                 theme::SUCCESS
                             }));
+                            if let Some(file) = &toast.file {
+                                if ui.button("Open").clicked() {
+                                    open_path(file, false);
+                                }
+                                if ui.button("Show in folder").clicked() {
+                                    open_path(file, true);
+                                }
+                            }
                             if icon_btn(ui, true, Icon::Close, None, "Dismiss") {
                                 dismiss = true;
                             }
@@ -1508,6 +1690,40 @@ impl Workbench {
             self.toast = None;
         }
     }
+}
+
+/// Opens an exported file with its default app, or reveals it in the file
+/// manager (Windows selects it; Linux opens its folder).
+fn open_path(path: &std::path::Path, reveal: bool) {
+    #[cfg(target_os = "windows")]
+    let result = if reveal {
+        std::process::Command::new("explorer")
+            .arg(format!("/select,{}", path.display()))
+            .spawn()
+    } else {
+        std::process::Command::new("cmd")
+            .args(["/C", "start", ""])
+            .arg(path)
+            .spawn()
+    };
+    #[cfg(target_os = "macos")]
+    let result = if reveal {
+        std::process::Command::new("open")
+            .arg("-R")
+            .arg(path)
+            .spawn()
+    } else {
+        std::process::Command::new("open").arg(path).spawn()
+    };
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    let result = std::process::Command::new("xdg-open")
+        .arg(if reveal {
+            path.parent().unwrap_or(path)
+        } else {
+            path
+        })
+        .spawn();
+    drop(result);
 }
 
 fn schema_branch(
@@ -2180,7 +2396,7 @@ impl Workbench {
         for action in actions {
             match action {
                 TableAction::Reload => self.load_table(tab_id),
-                TableAction::Save => self.confirm_save = Some(tab_id),
+                TableAction::Save => self.save_changes(tab_id),
                 TableAction::Copy(text, which) => {
                     ui.ctx().copy_text(text);
                     self.show_notice(format!("Copied {which} as CSV."));
@@ -2297,53 +2513,6 @@ impl Workbench {
                     self.send(Command::DeleteProfile(id), "Deleting connection", None)
                 }
                 Some(false) => self.confirm_delete = None,
-                _ => {}
-            }
-        }
-        if let Some(tab_id) = self.confirm_save {
-            let count = self.tables.get(&tab_id).map_or(0, |s| s.pending.len());
-            let deleted = self
-                .tables
-                .get(&tab_id)
-                .map_or(0, |s| s.pending.values().filter(|p| p.deleted).count());
-            let busy = self.busy(RequestKind::Mutation, Some(tab_id));
-            let choice = modal(ctx, "Apply staged changes", 420.0, |ui| {
-                dialog_title(ui, None, "Apply staged changes?");
-                ui.label(RichText::new(format!(
-                    "{} row(s) will be updated and {deleted} deleted on the server. Rows changed by someone else since they were loaded are skipped and kept for review.",
-                    count - deleted
-                )).color(theme::SECONDARY));
-                ui.add_space(14.0);
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.add_enabled(!busy, primary_button(if busy { "Saving…" } else { "Apply changes" })).clicked() {
-                        return Some(true);
-                    }
-                    if ui.add_enabled(!busy, egui::Button::new("Cancel")).clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                        return Some(false);
-                    }
-                    None
-                })
-                .inner
-            })
-            .flatten();
-            match choice {
-                Some(true) => {
-                    if let Some(batch) = self.mutation_batch(tab_id) {
-                        let profile = batch.profile_id;
-                        if self.pending_requests.is_empty() {
-                            self.dispatch(
-                                Command::Mutate(batch),
-                                "Saving changes",
-                                Some(tab_id),
-                                Some(profile),
-                                RequestKind::Mutation,
-                            );
-                        } else {
-                            self.show_error("Wait for the active operation to finish, then save.");
-                        }
-                    }
-                }
-                Some(false) if !busy => self.confirm_save = None,
                 _ => {}
             }
         }

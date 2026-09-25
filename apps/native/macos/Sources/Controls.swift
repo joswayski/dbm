@@ -14,6 +14,8 @@ final class GButton: NSButton {
     var handler: (() -> Void)?
     var labelFont = Graphite.ui(12.5, .medium) { didSet { invalidate() } }
     var minHeight: CGFloat = 28 { didSet { invalidate() } }
+    /// Draws the icon after the title, e.g. a menu chevron.
+    var iconTrailing = false { didSet { needsDisplay = true } }
     private var hovering = false
     private var tracking: NSTrackingArea?
 
@@ -119,13 +121,17 @@ final class GButton: NSButton {
         let hintWidth = shortcut.map { ($0 as NSString).size(withAttributes: [.font: Graphite.ui(11, .medium)]).width + 18 } ?? 0
         let content = (icon == nil ? 0 : 14) + (icon != nil && !title.isEmpty ? 6 : 0) + textSize.width + hintWidth
         var x = style == .icon ? (bounds.width - 14) / 2 : max(padding, (bounds.width - content) / 2)
-        if let icon {
+        if let icon, !iconTrailing {
             icon.draw(in: NSRect(x: x, y: (bounds.height - 14) / 2, width: 14, height: 14), color: color)
             x += 14 + (title.isEmpty ? 0 : 6)
         }
         if !title.isEmpty {
             text.draw(at: NSPoint(x: x, y: (bounds.height - textSize.height) / 2), withAttributes: textAttributes)
             x += textSize.width
+        }
+        if let icon, iconTrailing {
+            icon.draw(in: NSRect(x: x + 6, y: (bounds.height - 12) / 2, width: 12, height: 12), color: color)
+            x += 18
         }
         if let shortcut {
             let attributes: [NSAttributedString.Key: Any] = [.font: Graphite.ui(11, .medium), .foregroundColor: color.withAlphaComponent(0.9)]
@@ -434,6 +440,19 @@ final class GPopUp: NSPopUpButton {
     }
 
     @objc private func selected() { onSelect?(indexOfSelectedItem) }
+
+    override func draw(_ dirtyRect: NSRect) {
+        drawFieldBezel(bounds, focused: false, enabled: isEnabled)
+        Icon.chevronDown.draw(in: NSRect(x: bounds.maxX - 22, y: bounds.midY - 6, width: 12, height: 12), color: Graphite.muted)
+        let text = NSAttributedString(string: titleOfSelectedItem ?? "", attributes: [
+            .font: Graphite.ui(12.5), .foregroundColor: isEnabled ? Graphite.text : Graphite.faint,
+        ])
+        let height = text.size().height
+        text.draw(with: NSRect(x: 10, y: (bounds.height - height) / 2, width: max(0, bounds.width - 38), height: height),
+                  options: [.truncatesLastVisibleLine, .usesLineFragmentOrigin])
+    }
+
+    override var isFlipped: Bool { true }
 }
 
 /// A vertical scroll view whose document is a flipped stack filling its width.

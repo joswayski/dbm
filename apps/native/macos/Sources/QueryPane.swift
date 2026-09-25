@@ -345,7 +345,8 @@ final class QueryPane: NSView, NSTextViewDelegate, NSSplitViewDelegate {
         let top = FlippedView()
         top.translatesAutoresizingMaskIntoConstraints = false
         let row = hstack([editorCard, historyCard], spacing: 10)
-        top.pin(row, insets: NSEdgeInsets(top: 0, left: 14, bottom: 10, right: 14))
+        row.distribution = .fill
+        top.pin(row, insets: NSEdgeInsets(top: 2, left: 14, bottom: 10, right: 14))
         editorCard.heightAnchor.constraint(equalTo: row.heightAnchor).isActive = true
         historyCard.heightAnchor.constraint(equalTo: row.heightAnchor).isActive = true
         editorCard.setContentHuggingPriority(.init(1), for: .horizontal)

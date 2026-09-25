@@ -12,6 +12,9 @@ final class GridHeaderCell: NSTableHeaderCell {
         cellFrame.fill()
         Graphite.border.setFill()
         NSRect(x: cellFrame.minX, y: cellFrame.maxY - 1, width: cellFrame.width, height: 1).fill()
+        // The header view also draws its filler past the last column with a
+        // copy of this cell; that area stays blank.
+        guard !stringValue.isEmpty else { return }
         var x = cellFrame.minX + 10
         let midY = cellFrame.midY
         if primaryKey {

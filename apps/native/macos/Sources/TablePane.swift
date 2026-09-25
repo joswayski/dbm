@@ -32,8 +32,11 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
                                           tooltip: "Copies only the current preview page") { [weak self] in self?.copyVisible() }
     private lazy var exportButton = GButton("Export all", icon: .download, style: .toolbar,
                                             tooltip: "Prompts for a location and exports every filtered row") { [weak self] in self?.export() }
-    private lazy var selectionButton = GButton("", icon: .chevronDown, style: .toolbar,
-                                               tooltip: "Actions for the selected rows") { [weak self] in self?.showSelectionMenu() }
+    private lazy var selectionButton: GButton = {
+        let button = GButton("", icon: .chevronDown, style: .toolbar, tooltip: "Actions for the selected rows") { [weak self] in self?.showSelectionMenu() }
+        button.iconTrailing = true
+        return button
+    }()
     private lazy var inspectorButton = GButton("", icon: .inspector, style: .icon,
                                                tooltip: "Row inspector") { [weak self] in self?.toggleInspector() }
 
@@ -52,6 +55,7 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
     private lazy var retryButton = GButton("Couldn't load rows · Retry", style: .secondary) { [weak self] in self?.refresh() }
     private let inspector = InspectorView()
     private var inspectorWidth: NSLayoutConstraint!
+    private var pendingHeight: NSLayoutConstraint!
     private var columnSignature = ""
     private var editor: GTextField?
     private var editingCell: (row: Int, column: Int)?
@@ -169,14 +173,28 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
         status.pin(statusRow, insets: NSEdgeInsets(top: 1, left: 14, bottom: 0, right: 10))
         status.heightAnchor.constraint(equalToConstant: Graphite.statusBarHeight).isActive = true
 
-        let column = vstack([toolbar, filters, body, pendingBar, status], spacing: 0, alignment: .leading)
-        column.distribution = .fill
-        for view in [toolbar, filters, body, pendingBar, status] {
-            view.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true
+        // Explicit constraints: the grid body takes all space the bars leave.
+        for view in [toolbar, filters, body, pendingBar, status] as [NSView] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(view)
+            NSLayoutConstraint.activate([
+                view.leadingAnchor.constraint(equalTo: leadingAnchor),
+                view.trailingAnchor.constraint(equalTo: trailingAnchor),
+            ])
         }
-        body.setContentHuggingPriority(.init(1), for: .vertical)
-        body.setContentCompressionResistancePriority(.init(1), for: .vertical)
-        pin(column)
+        pendingHeight = pendingBar.heightAnchor.constraint(equalToConstant: 0)
+        pendingBar.constraints.filter { $0.firstAttribute == .height && $0.secondItem == nil }.forEach { $0.isActive = false }
+        NSLayoutConstraint.activate([
+            toolbar.topAnchor.constraint(equalTo: topAnchor),
+            filters.topAnchor.constraint(equalTo: toolbar.bottomAnchor),
+            body.topAnchor.constraint(equalTo: filters.bottomAnchor),
+            pendingBar.topAnchor.constraint(equalTo: body.bottomAnchor),
+            status.topAnchor.constraint(equalTo: pendingBar.bottomAnchor),
+            status.bottomAnchor.constraint(equalTo: bottomAnchor),
+            pendingHeight,
+        ])
+        filters.setContentHuggingPriority(.required, for: .vertical)
+        filters.setContentCompressionResistancePriority(.required, for: .vertical)
         reload()
     }
 
@@ -224,6 +242,7 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
         let deleted = state.pending.values.filter(\.deleted).count
         let edited = pendingCount - deleted
         pendingBar.isHidden = pendingCount == 0
+        pendingHeight.constant = pendingCount == 0 ? 0 : Graphite.pendingBarHeight
         pendingTitle.stringValue = "\(pendingCount) pending \(pendingCount == 1 ? "change" : "changes")"
         editedChip.text = "\(edited) \(edited == 1 ? "edited row" : "edited rows")"
         editedChip.isHidden = edited == 0

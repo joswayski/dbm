@@ -737,6 +737,35 @@ pub fn describe_schema_refresh(
     (true, format!("{kind} refreshed · {}.", changes.join(" · ")))
 }
 
+/// A before/after pair split around their common prefix and suffix, for
+/// highlighting what a staged edit changed.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InlineDiff {
+    pub prefix: String,
+    pub removed: String,
+    pub added: String,
+    pub suffix: String,
+}
+
+pub fn inline_diff(before: &str, after: &str) -> InlineDiff {
+    let old: Vec<char> = before.chars().collect();
+    let new: Vec<char> = after.chars().collect();
+    let prefix = old.iter().zip(&new).take_while(|(a, b)| a == b).count();
+    let suffix = old[prefix..]
+        .iter()
+        .rev()
+        .zip(new[prefix..].iter().rev())
+        .take_while(|(a, b)| a == b)
+        .count();
+    InlineDiff {
+        prefix: old[..prefix].iter().collect(),
+        removed: old[prefix..old.len() - suffix].iter().collect(),
+        added: new[prefix..new.len() - suffix].iter().collect(),
+        suffix: old[old.len() - suffix..].iter().collect(),
+    }
+}
+
 /// Grid and CSV text for a value: `NULL`, raw strings, JSON for everything else.
 pub fn display_value(value: &Value) -> String {
     match value {
@@ -1043,5 +1072,29 @@ mod tests {
             message,
             "Keyspace refreshed · Removed 3 objects: schema audit, table audit.users, table public.Orders."
         );
+    }
+
+    #[test]
+    fn inline_diff_marks_the_changed_middle() {
+        let diff = inline_diff("person2@example.com", "ada@example.com");
+        assert_eq!(
+            (
+                diff.prefix.as_str(),
+                diff.removed.as_str(),
+                diff.added.as_str(),
+                diff.suffix.as_str()
+            ),
+            ("", "person2", "ada", "@example.com")
+        );
+        let same = inline_diff("é", "é");
+        assert_eq!(
+            (
+                same.removed.as_str(),
+                same.added.as_str(),
+                same.suffix.as_str()
+            ),
+            ("", "", "")
+        );
+        assert_eq!(same.prefix, "é");
     }
 }

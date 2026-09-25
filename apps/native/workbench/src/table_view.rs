@@ -8,8 +8,8 @@ use dbm_core::cell_values::{editable_text, numeric_column, parse_cell_input};
 use dbm_core::models::{
     FilterCondition, FilterOperator, OrderSpec, QueryColumn, TablePage, TablePageRequest,
 };
-use dbm_core::sql_text::{csv_document, display_value};
-use eframe::egui::{self, Frame, Margin, RichText, Sense, Stroke, Vec2};
+use dbm_core::sql_text::{csv_document, display_value, inline_diff};
+use eframe::egui::{self, Color32, Frame, Margin, RichText, Sense, Stroke, Vec2};
 use egui_extras::{Column, TableBuilder};
 use serde_json::Value;
 use uuid::Uuid;
@@ -18,6 +18,7 @@ use crate::icons::{self, Icon};
 use crate::theme::{self, chip, mono, primary_button, ui_font};
 
 pub const MAX_PREVIEW_ROWS: u32 = 200;
+const COLLAPSED_COLUMN_WIDTH: f32 = 76.0;
 pub const PENDING_EXPORT_ERROR: &str = "Save or discard pending row changes before exporting.";
 pub const PENDING_REFRESH_ERROR: &str = "Save or discard pending row changes before refreshing.";
 
@@ -96,6 +97,8 @@ pub struct TableState {
     editing: Option<(usize, usize)>,
     focus_editor: bool,
     inspector_open: bool,
+    /// Column indexes collapsed to a narrow strip.
+    collapsed_columns: BTreeSet<usize>,
 }
 
 impl Default for TableState {
@@ -118,6 +121,7 @@ impl Default for TableState {
             editing: None,
             focus_editor: false,
             inspector_open: true,
+            collapsed_columns: BTreeSet::new(),
         }
     }
 }
@@ -943,16 +947,49 @@ fn aligned(ui: &mut egui::Ui, right: bool, add: impl FnOnce(&mut egui::Ui)) {
     ui.with_layout(layout, add);
 }
 
-/// Column header: key glyph, name, type in faint mono, sort indicator.
-/// Returns whether it was clicked.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum HeaderClick {
+    Sort,
+    Toggle,
+}
+
+/// Column header: key glyph, name, type in faint mono, sort indicator, and
+/// (for table grids) a collapse button. Collapsed columns show a narrow
+/// strip that expands on click.
 fn header_cell(
     ui: &mut egui::Ui,
     name: &str,
     data_type: &str,
     primary_key: bool,
     sort: Option<bool>,
-) -> bool {
+    collapsible: Option<bool>,
+) -> Option<HeaderClick> {
     let rect = ui.max_rect();
+    if collapsible == Some(true) {
+        let response = ui
+            .interact(rect, ui.id().with(("expand", name)), Sense::click())
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .on_hover_text(format!("Expand {name}"));
+        icons::paint(
+            ui.painter(),
+            egui::Rect::from_center_size(rect.center() - Vec2::new(0.0, 6.0), Vec2::splat(12.0)),
+            Icon::ChevronRight,
+            theme::MUTED,
+        );
+        let mut job =
+            egui::text::LayoutJob::simple_singleline(name.to_owned(), ui_font(9.5), theme::FAINT);
+        job.wrap = egui::text::TextWrapping::truncate_at_width(rect.width() - 8.0);
+        let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
+        ui.painter().galley(
+            egui::pos2(
+                rect.center().x - galley.size().x / 2.0,
+                rect.center().y + 2.0,
+            ),
+            galley,
+            theme::FAINT,
+        );
+        return response.clicked().then_some(HeaderClick::Toggle);
+    }
     let response = ui
         .horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 5.0;
@@ -966,11 +1003,13 @@ fn header_cell(
                     .strong()
                     .color(theme::TEXT_STRONG),
             );
-            ui.label(
-                RichText::new(data_type)
-                    .font(mono(11.0))
-                    .color(theme::FAINT),
-            );
+            if !data_type.is_empty() {
+                ui.label(
+                    RichText::new(data_type)
+                        .font(mono(11.0))
+                        .color(theme::FAINT),
+                );
+            }
             if let Some(descending) = sort {
                 let icon = if descending {
                     Icon::SortDown
@@ -981,10 +1020,117 @@ fn header_cell(
             }
         })
         .response;
-    ui.interact(rect, response.id.with("sort"), Sense::click())
+    let sort_click = ui
+        .interact(rect, response.id.with("sort"), Sense::click())
         .on_hover_cursor(egui::CursorIcon::PointingHand)
-        .on_hover_text(format!("Sort by {name}"))
-        .clicked()
+        .on_hover_text(format!("Sort by {name}"));
+    if collapsible == Some(false) && sort_click.hovered() {
+        let button = egui::Rect::from_center_size(
+            rect.right_center() - Vec2::new(14.0, 0.0),
+            Vec2::splat(20.0),
+        );
+        let toggle = ui
+            .interact(button, response.id.with("collapse"), Sense::click())
+            .on_hover_text(format!("Collapse {name}"));
+        ui.painter().rect_filled(button, 5, theme::CONTROL_HOVER);
+        icons::paint(
+            ui.painter(),
+            button.shrink(4.0),
+            Icon::ChevronLeft,
+            theme::SECONDARY,
+        );
+        if toggle.clicked() {
+            return Some(HeaderClick::Toggle);
+        }
+    }
+    sort_click.clicked().then_some(HeaderClick::Sort)
+}
+
+/// The staged change on a row: before/after with the changed middle marked.
+fn change_preview(
+    ui: &mut egui::Ui,
+    columns: &[dbm_core::models::TableColumn],
+    pending: &PendingRow,
+) {
+    ui.set_max_width(420.0);
+    if pending.deleted {
+        ui.label(
+            RichText::new("Pending delete")
+                .strong()
+                .color(theme::DANGER),
+        );
+        ui.label(
+            RichText::new("This row will be deleted when changes are saved.")
+                .color(theme::SECONDARY),
+        );
+        return;
+    }
+    ui.label(
+        RichText::new("Pending edit")
+            .strong()
+            .color(theme::MODIFIED),
+    );
+    for (index, column) in columns.iter().enumerate() {
+        if pending.changes[index] == pending.original[index] {
+            continue;
+        }
+        let diff = inline_diff(
+            &display_value(&pending.original[index]),
+            &display_value(&pending.changes[index]),
+        );
+        ui.add_space(4.0);
+        ui.label(
+            RichText::new(&column.name)
+                .strong()
+                .color(theme::TEXT_STRONG),
+        );
+        let part =
+            |job: &mut egui::text::LayoutJob, text: &str, background: Color32, color: Color32| {
+                job.append(
+                    text,
+                    0.0,
+                    egui::TextFormat {
+                        font_id: mono(12.0),
+                        color,
+                        background,
+                        ..Default::default()
+                    },
+                );
+            };
+        let mut before = egui::text::LayoutJob::default();
+        part(
+            &mut before,
+            &diff.prefix,
+            Color32::TRANSPARENT,
+            theme::MUTED,
+        );
+        part(
+            &mut before,
+            &diff.removed,
+            theme::DANGER_SOFT,
+            theme::DANGER,
+        );
+        part(
+            &mut before,
+            &diff.suffix,
+            Color32::TRANSPARENT,
+            theme::MUTED,
+        );
+        let mut after = egui::text::LayoutJob::default();
+        part(&mut after, &diff.prefix, Color32::TRANSPARENT, theme::TEXT);
+        part(
+            &mut after,
+            &diff.added,
+            Color32::from_rgba_unmultiplied(90, 211, 148, 40),
+            theme::SUCCESS,
+        );
+        part(&mut after, &diff.suffix, Color32::TRANSPARENT, theme::TEXT);
+        ui.horizontal_wrapped(|ui| {
+            ui.label(before);
+            ui.label(RichText::new("→").color(theme::FAINT));
+            ui.label(after);
+        });
+    }
 }
 
 /// Read-only query results.
@@ -1013,7 +1159,7 @@ pub fn result_grid(ui: &mut egui::Ui, tab_id: u64, columns: &[QueryColumn], rows
                 .header(theme::HEADER_HEIGHT, |mut header| {
                     for column in columns {
                         header.col(|ui| {
-                            header_cell(ui, &column.name, "", false, None);
+                            header_cell(ui, &column.name, "", false, None, None);
                         });
                     }
                 })
@@ -1053,6 +1199,8 @@ fn grid(
     let mut clicked_row = None;
     let mut context_row = None;
     let mut edit_cell = None;
+    let mut toggled_column = None;
+    let mut discard_row = None;
     let modifiers = ui.input(|i| i.modifiers);
     if page.rows.is_empty() {
         ui.centered_and_justified(|ui| {
@@ -1064,27 +1212,41 @@ fn grid(
         .id_salt(("grid-scroll", tab_id, cx.embedded))
         .show(ui, |ui| {
             grid_scope(ui);
-            TableBuilder::new(ui)
+            let mut builder = TableBuilder::new(ui)
                 .id_salt(("grid", tab_id, cx.embedded))
                 .sense(Sense::click())
-                .auto_shrink([false, false])
-                .columns(
+                .auto_shrink([false, false]);
+            for index in 0..columns.len() {
+                builder = builder.column(if state.collapsed_columns.contains(&index) {
+                    Column::exact(COLLAPSED_COLUMN_WIDTH).clip(true)
+                } else {
                     Column::initial(170.0)
                         .at_least(60.0)
                         .resizable(true)
-                        .clip(true),
-                    columns.len(),
-                )
+                        .clip(true)
+                });
+            }
+            builder
                 .header(theme::HEADER_HEIGHT, |mut header| {
-                    for column in columns {
+                    for (index, column) in columns.iter().enumerate() {
                         header.col(|ui| {
                             let sort = order
                                 .as_ref()
                                 .filter(|o| o.column == column.name)
                                 .map(|o| o.descending);
                             let key = page.metadata.primary_key.contains(&column.name);
-                            if header_cell(ui, &column.name, &column.data_type, key, sort) {
-                                sort_clicked = Some(column.name.clone());
+                            let collapsed = state.collapsed_columns.contains(&index);
+                            match header_cell(
+                                ui,
+                                &column.name,
+                                &column.data_type,
+                                key,
+                                sort,
+                                Some(collapsed),
+                            ) {
+                                Some(HeaderClick::Sort) => sort_clicked = Some(column.name.clone()),
+                                Some(HeaderClick::Toggle) => toggled_column = Some(index),
+                                None => {}
                             }
                         });
                     }
@@ -1180,7 +1342,12 @@ fn grid(
                                 edit_cell = Some((index, column));
                             }
                         }
-                        let response = row.response();
+                        let preview = state.pending.get(&index).cloned();
+                        let mut response = row.response();
+                        if let Some(preview) = &preview {
+                            response =
+                                response.on_hover_ui(|ui| change_preview(ui, columns, preview));
+                        }
                         if response.clicked() {
                             clicked_row = Some(index);
                         }
@@ -1188,12 +1355,32 @@ fn grid(
                             context_row = Some(index);
                         }
                         response.context_menu(|ui| {
+                            if let Some(preview) = &preview {
+                                let label = if preview.deleted {
+                                    "Undo delete"
+                                } else {
+                                    "Discard edit"
+                                };
+                                if ui.button(label).clicked() {
+                                    discard_row = Some(index);
+                                    ui.close();
+                                }
+                                ui.separator();
+                            }
                             let selected: Vec<usize> = state.selected.iter().copied().collect();
                             selection_menu(ui, cx, state, &selected, actions);
                         });
                     });
                 });
         });
+    if let Some(index) = toggled_column
+        && !state.collapsed_columns.remove(&index)
+    {
+        state.collapsed_columns.insert(index);
+    }
+    if let Some(row) = discard_row {
+        state.pending.remove(&row);
+    }
     if let Some(column) = sort_clicked {
         if state.pending.is_empty() {
             let descending = order

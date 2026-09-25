@@ -23,6 +23,7 @@ pub enum Icon {
     Copy,
     Download,
     Inspector,
+    Sidebar,
     Check,
     Alert,
     Code,
@@ -139,6 +140,15 @@ pub fn paint(painter: &egui::Painter, rect: Rect, icon: Icon, color: Color32) {
             line(p(8.0, 2.5), p(8.0, 10.0));
             path(vec![p(4.5, 7.0), p(8.0, 10.5), p(11.5, 7.0)]);
             line(p(3.0, 13.0), p(13.0, 13.0));
+        }
+        Icon::Sidebar => {
+            painter.rect_stroke(
+                Rect::from_min_max(p(2.5, 3.0), p(13.5, 13.0)),
+                1.5 * scale,
+                stroke,
+                egui::StrokeKind::Middle,
+            );
+            line(p(6.5, 3.0), p(6.5, 13.0));
         }
         Icon::Inspector => {
             painter.rect_stroke(
