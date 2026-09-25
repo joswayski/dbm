@@ -1,5 +1,9 @@
 #![allow(clippy::collapsible_if, clippy::possible_missing_else)]
 
+mod backend;
+mod icons;
+mod table_view;
+mod theme;
 mod workbench;
 
 use eframe::{Renderer, egui};
