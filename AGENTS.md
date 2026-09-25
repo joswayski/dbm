@@ -30,10 +30,10 @@
 
 ## Visual design
 
-- DBM uses a dark workbench chrome: near-black surfaces (`--bg`, `--panel`), muted borders, high-contrast body text, and a cyan accent (`--accent` / `--accent-strong`) for primary actions and focus.
+- DBM uses the Graphite design system (`docs/design-system.md`): neutral graphite surfaces (`--bg`, `--chrome`, `--sidebar`, `--control`), hairline borders, Geist / Geist Mono (bundled, never fetched at runtime), and a system-blue accent (`--accent`, filled as `--accent-strong`) for focus, selection, and the single primary action. Keep `styles.css` tokens and the doc in sync.
 - Connection identity is multi-color: each profile has its own color for sidebar, tabs, and main-pane theming. Do not force a single accent across all connections.
 - Establish hierarchy with typography, spacing, and dense-but-readable layout before adding color. Prefer restrained shadows, small corner radii, and concise UI copy.
-- Preserve accessible contrast on dark surfaces. Status and danger colors (`--success`, `--danger`) keep stable meanings.
+- Preserve accessible contrast on dark surfaces. State colors keep stable meanings: `--modified` for staged edits, `--danger` for staged deletes and destructive actions, `--success` for success (and future inserts).
 
 ## Product behavior to preserve
 

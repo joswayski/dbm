@@ -117,6 +117,12 @@ Passwords are stored in the operating system credential store when available.
   streams).
 - Resizable sidebars and columns, collapsible wide fields, and multi-row
   selection for staged edits and deletes.
+- A row inspector next to table grids that shows every field of the selected
+  row and can stage edits or a delete for it, plus a pending-changes bar with
+  Discard and Save.
+- The Graphite dark interface described in
+  [docs/design-system.md](docs/design-system.md). Its Geist fonts are bundled
+  with the app and never downloaded at runtime.
 - Inline edits and staged deletes for primary-key-backed tables. PostgreSQL
   edits are guarded by `xmin` optimistic concurrency; MySQL edits match on the
   primary key. Redis table views edit strings, hashes, lists, sets, and sorted

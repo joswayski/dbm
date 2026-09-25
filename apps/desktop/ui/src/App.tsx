@@ -7,6 +7,7 @@ import { parseConnectionUrl } from "./connectionUrl";
 import { filterSchemaNodes } from "./schemaFilter";
 import { lineExecutionTarget, requiresConfirmation, sqlExecutionTarget, type SqlExecutionTarget } from "./sqlSelection";
 import { useDbmStore } from "./store";
+import { Icon } from "./Icon";
 import { TableView } from "./TableView";
 import type {
   ConnectionProfile,
@@ -20,10 +21,10 @@ import type {
   UpdateStatus,
 } from "./types";
 
-const DEFAULT_CONNECTION_COLOR = "#38bdf8";
-const CONNECTION_COLORS = ["#38bdf8", "#22c55e", "#a78bfa", "#f59e0b", "#ef4444", "#64748b"];
-const DEFAULT_SIDEBAR_WIDTH = 320;
-const MIN_SIDEBAR_WIDTH = 280;
+const DEFAULT_CONNECTION_COLOR = "#4c9aff";
+const CONNECTION_COLORS = ["#4c9aff", "#ff9f43", "#3dd6c6", "#b48cff", "#ff6b8a", "#7ed957", "#f0b14c", "#8e8e93"];
+const DEFAULT_SIDEBAR_WIDTH = 260;
+const MIN_SIDEBAR_WIDTH = 220;
 const MAX_SIDEBAR_WIDTH = 480;
 const COLLAPSED_SIDEBAR_WIDTH = 48;
 const QUERY_HISTORY_UPDATED_EVENT = "dbm:query-history-updated";
@@ -360,22 +361,20 @@ export default function App() {
         style={{ width: sidebarCollapsed ? COLLAPSED_SIDEBAR_WIDTH : sidebarWidth, minWidth: sidebarCollapsed ? COLLAPSED_SIDEBAR_WIDTH : sidebarWidth }}
       >
         <div className="brand-row">
-          {!sidebarCollapsed ? <div className="brand-mark">DB</div> : null}
+          {!sidebarCollapsed ? <div className="brand-mark" aria-hidden="true"><Icon name="database" size={15} /></div> : null}
           {!sidebarCollapsed ? <div className="brand-copy">
             <strong>DBM</strong>
-            <span>database manager</span>
           </div> : null}
           <button
             className="sidebar-collapse-button"
             onClick={() => setSidebarCollapsed((value) => !value)}
             title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
             aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-          >{sidebarCollapsed ? "›" : "‹"}</button>
+          ><Icon name="sidebar" size={16} /></button>
         </div>
         {!sidebarCollapsed ? <>
         <div className="sidebar-section-title">
           <span>Connections</span>
-          <button className="sidebar-new-button" onClick={() => setModalProfile(null)}>New connection</button>
         </div>
         <div className="connection-list">
           {profiles.length === 0 ? (
@@ -423,8 +422,10 @@ export default function App() {
                         className="text-button"
                         onClick={() => void handleRefreshSchema(profileId)}
                         disabled={refreshingSchemaId === profileId}
-                      >{refreshingSchemaId === profileId ? "Refreshing…" : "Refresh"}</button>
+                      ><Icon name="refresh" size={12} />{refreshingSchemaId === profileId ? "Refreshing…" : "Refresh"}</button>
                     </div>
+                    <div className="schema-filter-wrap">
+                    <Icon name="search" size={13} />
                     <input
                       className="text-input schema-filter"
                       type="search"
@@ -441,6 +442,7 @@ export default function App() {
                       spellCheck={false}
                       autoCapitalize="none"
                     />
+                    </div>
                     <SchemaTree
                       nodes={schemas[profileId] ?? []}
                       filter={schemaFilters[profileId] ?? ""}
@@ -452,6 +454,9 @@ export default function App() {
               </div>
             );
           })}
+        </div>
+        <div className="sidebar-footer">
+          <button className="sidebar-new-button" onClick={() => setModalProfile(null)}><Icon name="plus" />New connection</button>
         </div>
         <div
           className="sidebar-resize-handle"
@@ -488,7 +493,7 @@ export default function App() {
           ) : <div className="breadcrumb">No active connection</div>}
           <UpdateControl />
         </header>
-        {error ? <div className="error-banner" role="alert"><span>{error}</span><button onClick={() => setError(null)} aria-label="Dismiss error">×</button></div> : null}
+        {error ? <div className="error-banner" role="alert"><span>{error}</span><button onClick={() => setError(null)} aria-label="Dismiss error"><Icon name="close" size={13} /></button></div> : null}
         <div className="tab-strip">
           {tabs.map((tab) => (
             <div
@@ -510,7 +515,7 @@ export default function App() {
                   title={`Expand ${tab.title}`}
                   aria-label={`Expand ${tab.title}`}
                 >
-                  <span className="tab-collapse-glyph" aria-hidden="true">↦</span>
+                  <Icon name="expand" size={12} className="tab-collapse-glyph" />
                   <span className="collapsed-tab-name">{tab.title}</span>
                 </button>
               ) : renamingTabId === tab.id ? (
@@ -538,6 +543,7 @@ export default function App() {
                     if (tab.kind === "query") startRenamingTab(tab.id, tab.title);
                   }}
                 >
+                  <Icon name={tab.kind === "table" ? "table" : "code"} size={13} className="tab-kind-icon" />
                   <span>{tab.title}</span>
                 </button>
               )}
@@ -547,7 +553,7 @@ export default function App() {
                   onClick={() => startRenamingTab(tab.id, tab.title)}
                   title={`Rename ${tab.title}`}
                   aria-label={`Rename ${tab.title}`}
-                >✎</button>
+                ><Icon name="pencil" size={12} /></button>
               ) : null}
               {!tab.collapsed && tab.id === activeTabId ? (
                 <button
@@ -555,9 +561,9 @@ export default function App() {
                   onClick={() => handleCollapseTab(tab.id)}
                   title={`Collapse ${tab.title}`}
                   aria-label={`Collapse ${tab.title}`}
-                >↤</button>
+                ><Icon name="collapse" size={12} /></button>
               ) : null}
-              <button className="tab-close" onClick={() => handleCloseTab(tab.id)} aria-label={`Close ${tab.title}`}>×</button>
+              <button className="tab-close" onClick={() => handleCloseTab(tab.id)} aria-label={`Close ${tab.title}`}><Icon name="close" size={12} /></button>
             </div>
           ))}
           {activeWorkspace && activeProfileId ? (
@@ -566,7 +572,7 @@ export default function App() {
               title="New query"
               aria-label="New query"
               onClick={() => handleOpenQuery(activeProfileId)}
-            >＋</button>
+            ><Icon name="plus" /></button>
           ) : null}
         </div>
         <section className="content-pane">
@@ -621,7 +627,7 @@ export default function App() {
       ) : null}
       {toast ? <div className={`app-toast ${toast.kind}`} role="status">
         <span>{toast.message}</span>
-        <button onClick={() => setToast(null)} aria-label="Dismiss notification">×</button>
+        <button onClick={() => setToast(null)} aria-label="Dismiss notification"><Icon name="close" size={13} /></button>
       </div> : null}
     </div>
   );
@@ -768,7 +774,7 @@ function ConnectionItem({
             aria-label={expanded ? "Collapse connection" : "Expand connection"}
             aria-expanded={expanded}
             onClick={() => { setActionsOpen(false); onToggleExpanded(); }}
-          >{expanded ? "⌃" : "⌄"}</button> : null}
+          ><Icon name={expanded ? "chevronUp" : "chevronDown"} size={13} /></button> : null}
           <button
             className="icon-button subtle"
             title="Connection actions"
@@ -776,7 +782,7 @@ function ConnectionItem({
             aria-haspopup="menu"
             aria-expanded={actionsOpen}
             onClick={() => setActionsOpen((open) => !open)}
-          >⋯</button>
+          ><Icon name="more" size={15} /></button>
         </div>
       </div>
       {actionsOpen ? <div className="connection-actions-menu" role="menu">
@@ -844,14 +850,14 @@ function SchemaBranch({
     <div className="schema-node">
       <button
         className={`schema-node-button ${selected ? "active" : ""}`}
-        style={{ paddingLeft: `${10 + depth * 14}px` }}
+        style={{ paddingLeft: `${8 + depth * 14}px` }}
         aria-current={selected ? "page" : undefined}
         onClick={() => {
           if (isTable) onTable(node.schema!, node.table!);
           else setOpen((value) => !value);
         }}>
-        <span className="tree-caret" aria-hidden="true">{isTable ? "▧" : open ? "⌄" : "›"}</span>
-        <span className={`schema-icon ${node.kind}`} aria-hidden="true">{isTable ? (node.kind === "key" ? "K" : "T") : "S"}</span>
+        <span className="tree-caret" aria-hidden="true">{isTable ? null : <Icon name={open ? "chevronDown" : "chevronRight"} size={11} />}</span>
+        <span className={`schema-icon ${node.kind}`} aria-hidden="true"><Icon name={isTable ? (node.kind === "key" ? "key" : node.kind === "view" ? "view" : "table") : "folder"} size={13} /></span>
         <span className="truncate">{node.name}</span>
       </button>
       {open && node.children.length > 0 ? node.children.map((child) => (
@@ -879,7 +885,7 @@ function Welcome({
 }) {
   return (
     <div className="welcome">
-      <div className="welcome-mark">DB<span>M</span></div>
+      <div className="welcome-mark" aria-hidden="true"><Icon name="database" size={28} /></div>
       <h1>{profile ? profile.name : "No connection selected"}</h1>
       <p>{profile
         ? connected
@@ -1070,9 +1076,9 @@ export function QueryView({
             title={executedSql
               ? "Re-run the last executed statement for fresh results"
               : "Run a statement first to enable refresh"}
-          >{runMode === "refresh" ? "Refreshing…" : "Refresh"}</button>
+          ><Icon name="refresh" />{runMode === "refresh" ? "Refreshing…" : "Refresh"}</button>
           <button className="primary-button" onClick={runFromEditor} disabled={running || !executionTarget}>
-            {runMode === "run" ? "Running…" : runLabel}<kbd>{runShortcutGlyph()}</kbd>
+            <Icon name="play" size={12} />{runMode === "run" ? "Running…" : runLabel}<kbd>{runShortcutGlyph()}</kbd>
           </button>
         </div>
       </div>
@@ -1085,12 +1091,12 @@ export function QueryView({
             onClick={runFromEditor}
             disabled={running}
             title={engine === "redis" ? "Run the selected command (Command/Ctrl+Enter)" : "Run the selected SQL (Command/Ctrl+Enter)"}
-          ><span aria-hidden="true">▶</span> Run selection</button> : null}
+          ><Icon name="play" size={11} /> Run selection</button> : null}
           <div className="editor-hint">{engine === "redis"
             ? "The outlined command or selection will run · Command/Ctrl+Enter · results capped at 10,000 rows"
             : "The outlined statement or selected SQL will run · Command/Ctrl+Enter · results capped at 10,000 rows"}</div>
         </div>
-        <aside className="history-panel"><div className="panel-title">History <span>{history.length}</span></div>{history.length === 0 ? <p className="muted">Run a query to start history.</p> : <div className="history-list">{history.slice(0, 100).map((entry) => <button className="history-item" key={entry.id} onClick={() => setSqlText(entry.sql)}><span>{entry.success ? "✓" : "!"}</span><span className="history-sql">{entry.sql.replace(/\s+/g, " ").slice(0, 70)}</span><small>{new Date(entry.executedAt).toLocaleTimeString()}</small></button>)}</div>}</aside>
+        <aside className="history-panel"><div className="panel-title">History <span>{history.length}</span></div>{history.length === 0 ? <p className="muted">Run a query to start history.</p> : <div className="history-list">{history.slice(0, 100).map((entry) => <button className="history-item" key={entry.id} onClick={() => setSqlText(entry.sql)}><span className={entry.success ? "history-status ok" : "history-status failed"}><Icon name={entry.success ? "check" : "alert"} size={12} /></span><span className="history-sql">{entry.sql.replace(/\s+/g, " ").slice(0, 70)}</span><small>{new Date(entry.executedAt).toLocaleTimeString()}</small></button>)}</div>}</aside>
       </div>
       {error ? <div className="inline-error dismissible-message"><span>{error}</span><button onClick={() => setError(null)} aria-label="Dismiss message">×</button></div> : null}
       {response ? editableTable ? <div className="result-panel editable-query-result">
@@ -1210,7 +1216,7 @@ function ProfileModal({
       <div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="connection-modal-title">
         <div className="modal-header">
           <div><span className="eyebrow">{ENGINE_PRESETS[form.engine].label.toUpperCase()}</span><h2 id="connection-modal-title">{profile ? "Edit connection" : "New connection"}</h2></div>
-          <button className="icon-button" onClick={onClose} aria-label="Close">×</button>
+          <button className="icon-button" onClick={onClose} aria-label="Close"><Icon name="close" /></button>
         </div>
         <div
           className="form-grid"
