@@ -2,6 +2,7 @@
 pub mod cell_values;
 pub mod connection_url;
 pub mod error;
+pub mod export;
 pub mod keyring_store;
 pub mod models;
 mod mysql;

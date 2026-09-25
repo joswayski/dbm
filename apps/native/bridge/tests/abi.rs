@@ -69,3 +69,107 @@ fn abi_lifecycle_unicode_nulls_and_independent_response_ownership() {
     unsafe { dbm_bridge_session_free(session) };
     std::fs::remove_dir_all(directory).unwrap();
 }
+
+fn call(session: *mut dbm_native_bridge::DbmBridgeSession, request: &Value) -> Value {
+    let bytes = request.to_string().into_bytes();
+    let reply = unsafe { dbm_bridge_session_call(session, bytes.as_ptr(), bytes.len()) };
+    let reply = unsafe { take(reply) };
+    assert_eq!(reply["ok"], true, "{reply}");
+    reply["value"].clone()
+}
+
+#[test]
+fn shared_editor_helpers_use_utf16_offsets() {
+    let _environment = ENVIRONMENT.lock().unwrap();
+    let directory = std::env::temp_dir().join(format!("dbm-native-abi-{}", uuid::Uuid::new_v4()));
+    unsafe { std::env::set_var("XDG_DATA_HOME", &directory) };
+    let session = unsafe { dbm_bridge_session_create(ptr::null_mut()) };
+    assert!(!session.is_null());
+
+    // "🚀" is two UTF-16 units, so the second statement starts at unit 13.
+    let text = "SELECT '🚀';\nSELECT 2;";
+    let target = call(
+        session,
+        &json!({"command": "executionTarget", "engine": "postgres", "text": text, "selection_from": 15, "selection_to": 15}),
+    );
+    assert_eq!(
+        target,
+        json!({"from": 13, "to": 22, "sql": "SELECT 2;", "kind": "statement"})
+    );
+    let selection = call(
+        session,
+        &json!({"command": "executionTarget", "engine": "redis", "text": "PING\nGET a", "selection_from": 5, "selection_to": 8}),
+    );
+    assert_eq!(selection["sql"], "GET");
+    assert_eq!(selection["kind"], "selection");
+
+    let tokens = call(
+        session,
+        &json!({"command": "highlight", "engine": "postgres", "text": "SELECT '🚀' AS x"}),
+    );
+    assert_eq!(
+        tokens,
+        json!([
+            {"from": 0, "to": 6, "kind": "keyword"},
+            {"from": 7, "to": 11, "kind": "string"},
+            {"from": 12, "to": 14, "kind": "keyword"},
+        ])
+    );
+    assert_eq!(
+        call(
+            session,
+            &json!({"command": "requiresConfirmation", "engine": "postgres", "text": "DELETE FROM users"})
+        ),
+        true
+    );
+    let tree = json!([{"name": "public", "kind": "schema", "schema": "public", "table": null, "children": [
+        {"name": "users", "kind": "table", "schema": "public", "table": "users", "children": []}
+    ]}]);
+    assert_eq!(
+        call(
+            session,
+            &json!({"command": "resolveFullTableSelect", "text": "select * from users;", "tree": tree})
+        ),
+        json!({"schema": "public", "table": "users"})
+    );
+    let column = json!({"name": "active", "dataType": "boolean", "nullable": true, "defaultValue": null, "ordinal": 1});
+    assert_eq!(
+        call(
+            session,
+            &json!({"command": "parseCell", "text": "yes", "column": column, "original": false})
+        ),
+        true
+    );
+    assert_eq!(
+        call(
+            session,
+            &json!({"command": "parseCell", "text": "", "column": column, "original": false})
+        ),
+        Value::Null
+    );
+    assert_eq!(
+        call(session, &json!({"command": "editableText", "value": null})),
+        ""
+    );
+    assert_eq!(
+        call(
+            session,
+            &json!({"command": "csv", "columns": ["a", "b"], "rows": [[1, "x,y"], [null, true]]})
+        ),
+        "a,b\n1,\"x,y\"\nNULL,true"
+    );
+    let imported = call(
+        session,
+        &json!({"command": "parseConnectionUrl", "url": "rediss://cache.local:6380/2"}),
+    );
+    assert_eq!(imported["engine"], "redis");
+    assert_eq!(imported["port"], 6380);
+    assert_eq!(imported["defaultDatabase"], "2");
+    assert_eq!(imported["tlsMode"], "required");
+    let bad = br#"{"command":"parseConnectionUrl","url":"ftp://x"}"#;
+    let reply = unsafe { take(dbm_bridge_session_call(session, bad.as_ptr(), bad.len())) };
+    assert_eq!(reply["ok"], false);
+
+    unsafe { dbm_bridge_session_free(session) };
+    std::fs::remove_dir_all(directory).unwrap();
+}

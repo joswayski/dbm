@@ -14,7 +14,17 @@ use std::ptr;
 use std::sync::Mutex;
 
 use dbm_core::{
-    models::{MutationBatch, QueryRequest, SaveProfileInput, TablePageRequest, WorkspaceInfo},
+    cell_values::{editable_text, parse_cell_input},
+    connection_url::parse_connection_url,
+    export::export_csv,
+    models::{
+        DatabaseEngine, MutationBatch, QueryRequest, SaveProfileInput, SchemaNode, TableColumn,
+        TablePageRequest, WorkspaceInfo,
+    },
+    sql_text::{
+        byte_to_utf16, csv_document, execution_target, highlight, requires_confirmation,
+        resolve_full_table_select, utf16_to_byte,
+    },
     state::AppState,
 };
 use serde::Deserialize;
@@ -62,6 +72,47 @@ enum Request {
     },
     ApplyTableMutations {
         batch: MutationBatch,
+    },
+    /// Streams every row matching `request`'s filters and order to `path`.
+    ExportCsv {
+        request: TablePageRequest,
+        columns: Vec<String>,
+        path: String,
+    },
+    // Editor and grid helpers shared with the other hosts. They touch no
+    // database. Offsets are UTF-16 code units, as `NSString` uses.
+    ExecutionTarget {
+        engine: DatabaseEngine,
+        text: String,
+        selection_from: usize,
+        selection_to: usize,
+    },
+    RequiresConfirmation {
+        engine: DatabaseEngine,
+        text: String,
+    },
+    ResolveFullTableSelect {
+        text: String,
+        tree: Vec<SchemaNode>,
+    },
+    Highlight {
+        engine: DatabaseEngine,
+        text: String,
+    },
+    ParseCell {
+        text: String,
+        column: TableColumn,
+        original: Value,
+    },
+    EditableText {
+        value: Value,
+    },
+    Csv {
+        columns: Vec<String>,
+        rows: Vec<Vec<Value>>,
+    },
+    ParseConnectionUrl {
+        url: String,
     },
 }
 
@@ -180,6 +231,68 @@ async fn dispatch(state: &AppState, request: Request) -> Result<Value, String> {
                 .await
                 .map_err(message)?,
         ),
+        Request::ExportCsv {
+            request,
+            columns,
+            path,
+        } => {
+            let rows = export_csv(std::path::Path::new(&path), &columns, &request, |page| {
+                state.with_session_retry(page.profile_id, move |session| {
+                    let page = page.clone();
+                    async move { session.table_page(&page).await }
+                })
+            })
+            .await?;
+            Ok(json!({ "rows": rows }))
+        }
+        Request::ExecutionTarget {
+            engine,
+            text,
+            selection_from,
+            selection_to,
+        } => {
+            let from = utf16_to_byte(&text, selection_from);
+            let to = utf16_to_byte(&text, selection_to);
+            Ok(
+                execution_target(engine, &text, from, to).map_or(Value::Null, |target| {
+                    json!({
+                        "from": byte_to_utf16(&text, target.from),
+                        "to": byte_to_utf16(&text, target.to),
+                        "sql": target.sql,
+                        "kind": target.kind,
+                    })
+                }),
+            )
+        }
+        Request::RequiresConfirmation { engine, text } => {
+            Ok(Value::Bool(requires_confirmation(engine, &text)))
+        }
+        Request::ResolveFullTableSelect { text, tree } => {
+            Ok(resolve_full_table_select(&text, &tree).map_or(
+                Value::Null,
+                |(schema, table)| json!({ "schema": schema, "table": table }),
+            ))
+        }
+        Request::Highlight { engine, text } => Ok(Value::Array(
+            highlight(engine, &text)
+                .into_iter()
+                .map(|token| {
+                    json!({
+                        "from": byte_to_utf16(&text, token.from),
+                        "to": byte_to_utf16(&text, token.to),
+                        "kind": token.kind,
+                    })
+                })
+                .collect(),
+        )),
+        Request::ParseCell {
+            text,
+            column,
+            original,
+        } => Ok(parse_cell_input(&text, &column, &original)),
+        Request::EditableText { value } => Ok(Value::String(editable_text(&value))),
+        Request::Csv { columns, rows } => Ok(Value::String(csv_document(&columns, &rows))),
+        Request::ParseConnectionUrl { url } => serde_json::to_value(parse_connection_url(&url)?),
     }
     .map_err(message)
 }

@@ -3,7 +3,6 @@
 //! commands in order.
 
 use std::future::Future;
-use std::io::Write;
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 
@@ -14,14 +13,11 @@ use dbm_core::models::{
     WorkspaceInfo,
 };
 use dbm_core::session::DbSession;
-use dbm_core::sql_text::{csv_line, display_value};
+use dbm_core::sql_text::display_value;
 use dbm_core::state::AppState;
 use eframe::egui;
 use serde_json::{Value, json};
 use uuid::Uuid;
-
-/// Rows fetched per request while exporting CSV, as in the desktop app.
-const EXPORT_PAGE_SIZE: u32 = 1_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct RequestId(pub u64);
@@ -261,12 +257,11 @@ async fn live_table_page(state: &AppState, request: TablePageRequest) -> Result<
         .map_err(string_error)
 }
 
-/// Asks for a destination and streams every filtered row there, as the
-/// desktop app does: a UTF-8 BOM for spreadsheet apps, the header, then pages
-/// of rows. A partial file is removed on failure. `None` means canceled.
+/// Asks for a destination, then streams every filtered row there with the
+/// shared exporter. `None` means the dialog was canceled.
 async fn export_csv<F, Fut>(
     request: ExportRequest,
-    mut load: F,
+    load: F,
 ) -> Result<Option<(PathBuf, u64)>, String>
 where
     F: FnMut(TablePageRequest) -> Fut,
@@ -279,52 +274,8 @@ where
     else {
         return Ok(None);
     };
-    let result = write_csv(&path, &request, &mut load).await;
-    if result.is_err() {
-        let _ = std::fs::remove_file(&path);
-    }
-    result.map(|rows| Some((path, rows)))
-}
-
-async fn write_csv<F, Fut>(
-    path: &std::path::Path,
-    request: &ExportRequest,
-    load: &mut F,
-) -> Result<u64, String>
-where
-    F: FnMut(TablePageRequest) -> Fut,
-    Fut: Future<Output = Result<TablePage, String>>,
-{
-    let file = std::fs::File::create(path).map_err(string_error)?;
-    let mut out = std::io::BufWriter::new(file);
-    let header: Vec<Value> = request.columns.iter().cloned().map(Value::String).collect();
-    write!(out, "\u{feff}{}", csv_line(&header)).map_err(string_error)?;
-    let mut offset = 0u32;
-    let mut rows_written = 0u64;
-    loop {
-        let page = load(TablePageRequest {
-            offset,
-            limit: EXPORT_PAGE_SIZE,
-            include_total: Some(false),
-            ..request.page.clone()
-        })
-        .await?;
-        for row in &page.rows {
-            write!(
-                out,
-                "\n{}",
-                csv_line(row.iter().take(request.columns.len()))
-            )
-            .map_err(string_error)?;
-        }
-        rows_written += page.rows.len() as u64;
-        offset += u32::try_from(page.rows.len()).map_err(string_error)?;
-        if !page.has_more || page.rows.is_empty() {
-            break;
-        }
-    }
-    out.flush().map_err(string_error)?;
-    Ok(rows_written)
+    let rows = dbm_core::export::export_csv(&path, &request.columns, &request.page, load).await?;
+    Ok(Some((path, rows)))
 }
 
 pub fn transient_profile(
@@ -725,37 +676,5 @@ mod tests {
         let page = demo_page(&req);
         assert_eq!(page.total_rows, Some(125));
         assert_eq!(page.rows[0][0], json!(500));
-    }
-
-    #[test]
-    fn csv_export_writes_bom_header_and_every_page() {
-        let dir = std::env::temp_dir().join(format!("dbm-export-{}", Uuid::new_v4()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("out.csv");
-        let request = ExportRequest {
-            page: request(0, 0),
-            columns: vec!["id".into(), "email".into(), "active".into(), "note".into()],
-            file_name: "out.csv".into(),
-        };
-        let mut calls = 0;
-        let rows = tokio::runtime::Builder::new_current_thread()
-            .build()
-            .unwrap()
-            .block_on(write_csv(&path, &request, &mut |page: TablePageRequest| {
-                calls += 1;
-                async move { Ok(demo_page(&page)) }
-            }))
-            .unwrap();
-        assert_eq!((rows, calls), (500, 1));
-        let text = std::fs::read_to_string(&path).unwrap();
-        let mut lines = text.lines();
-        assert_eq!(lines.next(), Some("\u{feff}id,email,active,note"));
-        assert_eq!(
-            lines.next(),
-            Some("1,person1@example.com,true,Customer since 2001")
-        );
-        assert_eq!(text.lines().nth(4), Some("4,person4@example.com,true,NULL"));
-        assert_eq!(text.lines().count(), 501);
-        std::fs::remove_dir_all(dir).unwrap();
     }
 }

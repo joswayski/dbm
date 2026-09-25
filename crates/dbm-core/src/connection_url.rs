@@ -2,11 +2,13 @@
 //! `apps/desktop/ui/src/connectionUrl.ts`.
 
 use percent_encoding::percent_decode_str;
+use serde::Serialize;
 use url::Url;
 
 use crate::models::{DatabaseEngine, TlsMode};
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ImportedConnection {
     pub engine: DatabaseEngine,
     pub host: String,

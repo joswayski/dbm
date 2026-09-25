@@ -647,6 +647,29 @@ pub fn filter_schema_nodes(nodes: &[SchemaNode], query: &str) -> Vec<SchemaNode>
     visit(nodes, &query)
 }
 
+/// Converts a UTF-16 code unit offset (as `NSString`/`NSRange` use) to a
+/// byte offset, snapping to the enclosing character.
+pub fn utf16_to_byte(text: &str, offset: usize) -> usize {
+    let mut units = 0;
+    for (byte, character) in text.char_indices() {
+        if units >= offset {
+            return byte;
+        }
+        units += character.len_utf16();
+        if units > offset {
+            return byte;
+        }
+    }
+    text.len()
+}
+
+/// Converts a byte offset to UTF-16 code units.
+pub fn byte_to_utf16(text: &str, offset: usize) -> usize {
+    text[..floor_char_boundary(text, offset)]
+        .encode_utf16()
+        .count()
+}
+
 /// Grid and CSV text for a value: `NULL`, raw strings, JSON for everything else.
 pub fn display_value(value: &Value) -> String {
     match value {
@@ -918,5 +941,22 @@ mod tests {
         assert_eq!(filter_schema_nodes(&tree(), "audit")[0].children.len(), 1);
         assert!(filter_schema_nodes(&tree(), "nothing").is_empty());
         assert_eq!(filter_schema_nodes(&tree(), "  ").len(), 2);
+    }
+
+    #[test]
+    fn utf16_offsets_round_trip_through_bytes() {
+        let text = "a🚀é;b";
+        assert_eq!(utf16_to_byte(text, 0), 0);
+        assert_eq!(utf16_to_byte(text, 1), 1);
+        assert_eq!(
+            utf16_to_byte(text, 2),
+            1,
+            "inside a surrogate pair snaps back"
+        );
+        assert_eq!(utf16_to_byte(text, 3), 5);
+        assert_eq!(utf16_to_byte(text, 4), 7);
+        assert_eq!(utf16_to_byte(text, 99), text.len());
+        assert_eq!(byte_to_utf16(text, 5), 3);
+        assert_eq!(byte_to_utf16(text, text.len()), 6);
     }
 }
