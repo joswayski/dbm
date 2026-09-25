@@ -67,8 +67,8 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
     private let loadingOverlay = LoadingOverlay()
     private let skeleton = GridSkeleton()
     private let messageView = MessageView()
-    private var bodyBelowFilters: NSLayoutConstraint!
-    private var bodyBelowMessage: NSLayoutConstraint!
+    private var bodyBelowFilters: NSLayoutConstraint?
+    private var bodyBelowMessage: NSLayoutConstraint?
     private var overlayTimer: Timer?
     private var columnSignature = ""
     private var editor: GTextField?
@@ -253,7 +253,7 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
         }
         bodyBelowFilters = body.topAnchor.constraint(equalTo: filters.bottomAnchor)
         bodyBelowMessage = body.topAnchor.constraint(equalTo: messageView.bottomAnchor, constant: 8)
-        bodyBelowFilters.isActive = true
+        bodyBelowFilters?.isActive = true
         messageView.onDismiss = { [weak self] in
             self?.tab.tableState?.message = nil
             self?.layoutMessage()
@@ -698,8 +698,8 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
 
     private func layoutMessage() {
         let visible = !messageView.isHidden
-        bodyBelowFilters.isActive = !visible
-        bodyBelowMessage.isActive = visible
+        bodyBelowFilters?.isActive = !visible
+        bodyBelowMessage?.isActive = visible
     }
 
     private func stepLimit(_ amount: Int) {

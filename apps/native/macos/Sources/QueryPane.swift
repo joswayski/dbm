@@ -217,8 +217,9 @@ final class QueryPane: NSView, NSTextViewDelegate, NSSplitViewDelegate {
     private let resultGrid = ResultGrid()
     private let resultCard = PanelView(fill: Graphite.bg)
     private let errorView = MessageView()
-    private var metaBelowTop: NSLayoutConstraint!
-    private var metaBelowError: NSLayoutConstraint!
+    // Optional: the editor's selection delegate reloads before `build()` ends.
+    private var metaBelowTop: NSLayoutConstraint?
+    private var metaBelowError: NSLayoutConstraint?
     private let placeholder = label("Results will appear here.", font: Graphite.ui(13), color: Graphite.muted)
     private(set) var embeddedPane: TablePane?
     private var shownResult: UUID?
@@ -352,7 +353,7 @@ final class QueryPane: NSView, NSTextViewDelegate, NSSplitViewDelegate {
             errorView.topAnchor.constraint(equalTo: results.topAnchor, constant: 8),
             errorView.leadingAnchor.constraint(equalTo: results.leadingAnchor, constant: 14),
             errorView.trailingAnchor.constraint(equalTo: results.trailingAnchor, constant: -14),
-            metaBelowTop,
+            metaBelowTop!,
             meta.leadingAnchor.constraint(equalTo: results.leadingAnchor, constant: 14),
             meta.trailingAnchor.constraint(equalTo: results.trailingAnchor, constant: -14),
             meta.heightAnchor.constraint(equalToConstant: 22),
@@ -440,8 +441,8 @@ final class QueryPane: NSView, NSTextViewDelegate, NSSplitViewDelegate {
 
     private func layoutError() {
         let visible = !errorView.isHidden
-        metaBelowTop.isActive = !visible
-        metaBelowError.isActive = visible
+        metaBelowTop?.isActive = !visible
+        metaBelowError?.isActive = visible
     }
 
     private func reloadResult() {
