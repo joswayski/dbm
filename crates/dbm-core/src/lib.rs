@@ -6,5 +6,6 @@ mod mysql;
 mod postgres;
 mod redis;
 pub mod session;
+pub mod sql_text;
 pub mod state;
 pub mod storage;
