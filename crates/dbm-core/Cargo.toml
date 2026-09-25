@@ -12,6 +12,7 @@ directories.workspace = true
 keyring.workspace = true
 mysql_async.workspace = true
 native-tls.workspace = true
+percent-encoding.workspace = true
 postgres-native-tls.workspace = true
 redis_rs.workspace = true
 rusqlite.workspace = true
@@ -21,6 +22,7 @@ thiserror.workspace = true
 tokio.workspace = true
 tokio-postgres.workspace = true
 tracing.workspace = true
+url.workspace = true
 uuid.workspace = true
 
 [lints]

@@ -204,7 +204,7 @@ pub struct TableMetadata {
     pub has_xmin: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum FilterOperator {
     Equals,

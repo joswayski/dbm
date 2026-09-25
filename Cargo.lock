@@ -811,6 +811,7 @@ dependencies = [
  "keyring",
  "mysql_async",
  "native-tls",
+ "percent-encoding",
  "postgres-native-tls",
  "redis",
  "rusqlite",
@@ -820,6 +821,7 @@ dependencies = [
  "tokio",
  "tokio-postgres",
  "tracing",
+ "url",
  "uuid",
 ]
 

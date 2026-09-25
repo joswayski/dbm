@@ -622,6 +622,31 @@ pub fn highlight(engine: DatabaseEngine, text: &str) -> Vec<Token> {
     tokens
 }
 
+/// Keeps nodes whose name contains `query` (case-insensitive) plus the
+/// branches that lead to them. A matching branch keeps all of its children.
+pub fn filter_schema_nodes(nodes: &[SchemaNode], query: &str) -> Vec<SchemaNode> {
+    let query = query.trim().to_lowercase();
+    if query.is_empty() {
+        return nodes.to_vec();
+    }
+    fn visit(nodes: &[SchemaNode], query: &str) -> Vec<SchemaNode> {
+        nodes
+            .iter()
+            .filter_map(|node| {
+                if node.name.to_lowercase().contains(query) {
+                    return Some(node.clone());
+                }
+                let children = visit(&node.children, query);
+                (!children.is_empty()).then(|| SchemaNode {
+                    children,
+                    ..node.clone()
+                })
+            })
+            .collect()
+    }
+    visit(nodes, &query)
+}
+
 /// Grid and CSV text for a value: `NULL`, raw strings, JSON for everything else.
 pub fn display_value(value: &Value) -> String {
     match value {
@@ -882,5 +907,16 @@ mod tests {
             highlight(PG, "SELECT 'é").last().unwrap().to,
             "SELECT 'é".len()
         );
+    }
+
+    #[test]
+    fn schema_filter_keeps_matching_branches() {
+        let filtered = filter_schema_nodes(&tree(), "USER");
+        assert_eq!(filtered.len(), 2);
+        assert_eq!(filtered[0].children.len(), 1);
+        assert_eq!(filtered[0].children[0].name, "users");
+        assert_eq!(filter_schema_nodes(&tree(), "audit")[0].children.len(), 1);
+        assert!(filter_schema_nodes(&tree(), "nothing").is_empty());
+        assert_eq!(filter_schema_nodes(&tree(), "  ").len(), 2);
     }
 }
