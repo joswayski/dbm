@@ -1861,6 +1861,93 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn shared_workbench_records_success_and_failure_in_active_database() {
+        use crate::keyring_store::CredentialStore;
+        use crate::models::{QueryRequest, SaveProfileInput};
+        use crate::session::DbSession;
+        use crate::state::AppState;
+        use crate::storage::LocalStore;
+        use std::collections::HashMap;
+        use std::sync::Arc;
+
+        let Some((_server, writable)) = start_test_redis().await else {
+            eprintln!("skipping live Redis test because redis-server is unavailable");
+            return;
+        };
+        let path = std::env::temp_dir().join(format!("dbm-workbench-{}.sqlite3", Uuid::new_v4()));
+        let store = LocalStore::from_path(&path).unwrap();
+        let mut profile = store
+            .save_profile(&SaveProfileInput {
+                id: None,
+                name: "Native test".into(),
+                color: None,
+                engine: DatabaseEngine::Redis,
+                host: "127.0.0.1".into(),
+                port: writable.profile().port,
+                username: String::new(),
+                default_database: "0".into(),
+                tls_mode: TlsMode::Disabled,
+                ca_cert_path: None,
+                ssh: None,
+                read_only: true,
+                password: None,
+            })
+            .unwrap();
+        profile.default_database = "3".into();
+        let id = profile.id;
+        let session = DbSession::connect(profile, None).await.unwrap();
+        let state = AppState {
+            store,
+            credentials: CredentialStore,
+            sessions: Mutex::new(HashMap::from([(id, Arc::new(session))])),
+        };
+        let response = state
+            .run_query(QueryRequest {
+                profile_id: id,
+                sql: "PING".into(),
+                max_rows: Some(10),
+            })
+            .await
+            .unwrap();
+        assert_eq!(response.rows, vec![vec![JsonValue::String("PONG".into())]]);
+        let error = state
+            .run_query(QueryRequest {
+                profile_id: id,
+                sql: "SET blocked 1".into(),
+                max_rows: Some(10),
+            })
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("read-only"));
+        assert!(state.store.list_history(id, "0", 100).unwrap().is_empty());
+        let history = state.store.list_history(id, "3", 100).unwrap();
+        assert_eq!(history.len(), 2);
+        assert!(
+            history
+                .iter()
+                .any(|entry| entry.sql == "PING" && entry.success)
+        );
+        assert!(
+            history
+                .iter()
+                .any(|entry| entry.sql == "SET blocked 1" && !entry.success)
+        );
+        state.disconnect(id).await;
+        assert!(
+            state
+                .run_query(QueryRequest {
+                    profile_id: id,
+                    sql: "PING".into(),
+                    max_rows: None,
+                })
+                .await
+                .is_err()
+        );
+        assert_eq!(state.store.list_history(id, "3", 100).unwrap().len(), 2);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
     async fn redis_read_only_profiles_block_writes() {
         let Some((_server, writable)) = start_test_redis().await else {
             eprintln!("skipping live Redis test because redis-server is unavailable");

@@ -1,17 +1,9 @@
 #![deny(unsafe_code)]
 
-mod error;
-mod keyring_store;
-mod models;
-mod mysql;
-mod postgres;
-mod redis;
-mod session;
-mod state;
-mod storage;
 mod updates;
 
 use chrono::Utc;
+use dbm_core::{error, models, session, state};
 use error::AppResult;
 use models::{
     ConnectionProfile, MutationBatch, ProfileSummary, QueryHistoryEntry, QueryRequest,
@@ -195,72 +187,12 @@ async fn load_table_page(
         .map_err(command_error)
 }
 
-fn is_read_only_query(sql: &str) -> bool {
-    matches!(
-        sql.split_whitespace()
-            .next()
-            .map(str::to_ascii_lowercase)
-            .as_deref(),
-        Some("select" | "show" | "describe" | "desc" | "explain")
-    )
-}
-
-#[cfg(test)]
-mod query_tests {
-    use super::is_read_only_query;
-
-    #[test]
-    fn retries_only_read_only_queries() {
-        assert!(is_read_only_query("SELECT * FROM users"));
-        assert!(is_read_only_query("  EXPLAIN SELECT * FROM users"));
-        assert!(!is_read_only_query("UPDATE users SET active = true"));
-        assert!(!is_read_only_query("DELETE FROM users"));
-    }
-}
-
 #[tauri::command]
 async fn run_query(
     state: tauri::State<'_, AppState>,
     request: QueryRequest,
 ) -> Result<models::QueryResponse, String> {
-    // Record history against the database the session is using, which differs
-    // from the saved default after the user switches databases.
-    let database = state
-        .session(request.profile_id)
-        .await
-        .map_err(command_error)?
-        .profile()
-        .default_database
-        .clone();
-    let response = if is_read_only_query(&request.sql) {
-        state
-            .with_session_retry(request.profile_id, |session| {
-                let request = &request;
-                async move { session.run_query(&request.sql, request.max_rows).await }
-            })
-            .await
-    } else {
-        state
-            .session(request.profile_id)
-            .await
-            .map_err(command_error)?
-            .run_query(&request.sql, request.max_rows)
-            .await
-    };
-    let success = response.is_ok();
-    let response = response.map_err(command_error);
-    let duration_ms = response.as_ref().map_or(0, |result| result.duration_ms);
-    let entry = QueryHistoryEntry {
-        id: Uuid::new_v4(),
-        profile_id: request.profile_id,
-        database,
-        sql: request.sql,
-        executed_at: Utc::now(),
-        duration_ms,
-        success,
-    };
-    state.store.add_history(&entry).map_err(command_error)?;
-    response
+    state.run_query(request).await.map_err(command_error)
 }
 
 #[tauri::command]
@@ -293,8 +225,9 @@ async fn apply_table_mutations(
 pub fn run() {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("dbm_desktop=info")),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+                tracing_subscriber::EnvFilter::new("dbm_desktop=info,dbm_core=info")
+            }),
         )
         .with_target(false)
         .compact()

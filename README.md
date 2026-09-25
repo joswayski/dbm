@@ -37,3 +37,4 @@ planned.
 - [Development](docs/development.md): build from source, run tests, local installs
 - [Releases](docs/releases.md): how releases and in-app updates work
 - [Design system](docs/design-system.md): the Graphite UI
+- [Native development preview](docs/native.md): Rust core and experimental macOS AppKit workbench; the downloads above still use Tauri
