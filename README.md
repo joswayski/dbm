@@ -6,12 +6,12 @@ and Redis: saved connections, database and schema or keyspace exploration,
 paginated table and key browsing, SQL or Redis command execution, and safe
 local profile storage.
 
-![Editing a table: a staged edit, a staged delete, a cell mid-edit, and the row inspector](docs/screenshots/table-editing.png)
+![Before/after preview of a staged edit, with the row inspector and pending-changes bar](docs/screenshots/change-preview.png)
 
 | | |
 | --- | --- |
-| ![SQL workbench with results and history](docs/screenshots/query.png) | ![Connection editor](docs/screenshots/connection.png) |
-| ![Before/after preview of a staged edit](docs/screenshots/change-preview.png) | ![Browsing a table with the row inspector](docs/screenshots/table-browsing.png) |
+| ![Editing a table: staged edits, a staged delete, and a cell mid-edit](docs/screenshots/table-editing.png) | ![SQL workbench with results and history](docs/screenshots/query.png) |
+| ![Connection editor](docs/screenshots/connection.png) | ![Browsing a table with the row inspector](docs/screenshots/table-browsing.png) |
 
 The screenshots come from the browser preview's demo data (see below), not a
 real database.
