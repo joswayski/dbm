@@ -33,6 +33,9 @@ pub enum Icon {
     SortUp,
     SortDown,
     Folder,
+    Trash,
+    Undo,
+    Filter,
 }
 
 /// Paints `icon` centered in `rect` using a 16 px design grid.
@@ -97,6 +100,33 @@ pub fn paint(painter: &egui::Painter, rect: Rect, icon: Icon, color: Color32) {
             line(p(8.1, 8.0), p(13.5, 8.0));
             line(p(11.5, 8.0), p(11.5, 10.5));
             line(p(13.5, 8.0), p(13.5, 10.0));
+        }
+        Icon::Filter => {
+            painter.add(Shape::closed_line(
+                vec![
+                    p(2.0, 3.3),
+                    p(14.0, 3.3),
+                    p(9.3, 8.7),
+                    p(9.3, 12.7),
+                    p(6.7, 11.3),
+                    p(6.7, 8.7),
+                ],
+                stroke,
+            ));
+        }
+        Icon::Trash => {
+            line(p(3.0, 4.5), p(13.0, 4.5));
+            path(vec![p(6.5, 4.5), p(6.5, 3.0), p(9.5, 3.0), p(9.5, 4.5)]);
+            path(vec![p(4.5, 4.5), p(5.2, 13.0), p(10.8, 13.0), p(11.5, 4.5)]);
+        }
+        Icon::Undo => {
+            path(vec![p(5.5, 3.5), p(3.0, 6.0), p(5.5, 8.5)]);
+            painter.add(egui::epaint::CubicBezierShape::from_points_stroke(
+                [p(3.0, 6.0), p(12.0, 6.0), p(14.0, 13.0), p(8.0, 13.0)],
+                false,
+                Color32::TRANSPARENT,
+                stroke,
+            ));
         }
         Icon::Folder => {
             painter.add(Shape::closed_line(

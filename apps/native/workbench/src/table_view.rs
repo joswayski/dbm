@@ -22,6 +22,7 @@ use crate::theme::{self, chip, mono, primary_button, ui_font};
 
 pub const MAX_PREVIEW_ROWS: u32 = 200;
 const COLLAPSED_COLUMN_WIDTH: f32 = 76.0;
+const DEFAULT_COLUMN_WIDTH: f32 = 170.0;
 pub const PENDING_EXPORT_ERROR: &str = "Save or discard pending row changes before exporting.";
 pub const PENDING_REFRESH_ERROR: &str = "Save or discard pending row changes before refreshing.";
 
@@ -89,6 +90,10 @@ pub struct TableState {
     loading_since: Option<f64>,
     /// Inline error, notice, or export result under the filters.
     pub message: Option<Message>,
+    /// A column was dragged away from its default width.
+    columns_resized: bool,
+    /// Set by "Reset columns"; the grid forgets its widths on the next frame.
+    reset_columns: bool,
     /// Rows written so far by a running export.
     pub export_progress: Option<Arc<AtomicU64>>,
     pub page_index: u32,
@@ -119,6 +124,8 @@ impl Default for TableState {
             loading: false,
             loading_since: None,
             message: None,
+            columns_resized: false,
+            reset_columns: false,
             export_progress: None,
             page_index: 0,
             limit: MAX_PREVIEW_ROWS,
@@ -354,7 +361,12 @@ pub fn show(ui: &mut egui::Ui, cx: &TableContext<'_>, state: &mut TableState) ->
         return actions;
     };
     egui::TopBottomPanel::top(id("table-filters"))
-        .frame(bar(Margin::symmetric(14, 8)))
+        .frame(bar(Margin {
+            left: 12,
+            right: 10,
+            top: 7,
+            bottom: 7,
+        }))
         .show_inside(ui, |ui| filter_panel(ui, state, &page, &mut actions));
     message_panel(ui, id("table-message"), state);
     egui::TopBottomPanel::bottom(id("table-status"))
@@ -626,9 +638,21 @@ fn filter_panel(
         .map(|c| c.name.as_str())
         .collect();
     let mut apply = false;
+    // Like `.filter-panel`: the header on the left and the query controls
+    // right-aligned beside it, dropping to their own line when they don't
+    // fit. The controls' width is measured on the previous frame.
+    let width_id = ui.id().with("filter-controls-width");
+    let known: f32 = ui.data(|d| d.get_temp(width_id)).unwrap_or(0.0);
+    let mut measured = None;
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 8.0;
-        ui.label(RichText::new("Filters").strong().color(theme::TEXT_STRONG));
+        icons::show(ui, Icon::Filter, 13.0, theme::FAINT);
+        ui.label(
+            RichText::new("Filters")
+                .font(ui_font(12.0))
+                .strong()
+                .color(theme::SECONDARY),
+        );
         ui.label(
             RichText::new("All filters must match")
                 .font(ui_font(12.0))
@@ -640,104 +664,31 @@ fn filter_panel(
                 columns.first().copied().unwrap_or_default(),
             ));
         }
-        ui.add_space(12.0);
-
-        labeled(ui, "Preview limit");
-        let response = ui.add(
-            egui::TextEdit::singleline(&mut state.limit_input)
-                .desired_width(48.0)
-                .horizontal_align(egui::Align::Center),
-        );
-        let step = limit_stepper(ui);
-        if response.lost_focus() || step != 0 {
-            let limit = state
-                .limit_input
-                .trim()
-                .parse::<i64>()
-                .map_or(i64::from(state.limit), |n| n + step)
-                .clamp(1, i64::from(MAX_PREVIEW_ROWS)) as u32;
-            state.limit_input = limit.to_string();
-            if limit != state.limit {
-                state.limit = limit;
-                state.page_index = 0;
-                actions.push(reload_or_block(state));
-            }
+        // 16 px from the header, and the spacing before the controls.
+        let room = ui.available_width() - 16.0 - 2.0 * ui.spacing().item_spacing.x;
+        if known <= room {
+            ui.add_space(room - known + 16.0);
+            let controls =
+                ui.scope(|ui| query_controls(ui, state, page, &columns, actions, &mut apply));
+            measured = Some(controls.response.rect.width());
         }
-        ui.add_space(8.0);
-        labeled(ui, "Sort by");
-        let effective = state.effective_order();
-        let mut column = effective
-            .as_ref()
-            .map(|o| o.column.clone())
-            .unwrap_or_default();
-        let label = |name: &str| {
-            if page.metadata.primary_key.iter().any(|k| k == name) {
-                format!("{name} (primary key)")
-            } else if name.is_empty() {
-                "Choose a sort column".to_owned()
-            } else {
-                name.to_owned()
-            }
-        };
-        egui::ComboBox::from_id_salt("sort-column")
-            .selected_text(label(&column))
-            .width(180.0)
-            .show_ui(ui, |ui| {
-                for name in &columns {
-                    ui.selectable_value(&mut column, (*name).to_owned(), label(name));
-                }
-            });
-        let mut descending = effective.as_ref().is_some_and(|o| o.descending);
-        if effective.is_some() {
-            ui.add_space(8.0);
-            labeled(ui, "Direction");
-            egui::ComboBox::from_id_salt("sort-direction")
-                .selected_text(if descending {
-                    "Descending"
-                } else {
-                    "Ascending"
-                })
-                .width(120.0)
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut descending, false, "Ascending");
-                    ui.selectable_value(&mut descending, true, "Descending");
-                });
-        }
-        let changed_column = effective.as_ref().map(|o| o.column.as_str()) != Some(column.as_str())
-            && !column.is_empty();
-        let changed_direction = effective
-            .as_ref()
-            .is_some_and(|o| o.descending != descending);
-        if changed_column || changed_direction {
-            state.order = Some(OrderSpec {
-                column,
-                descending: descending && !changed_column,
-            });
-            state.page_index = 0;
-            actions.push(reload_or_block(state));
-        }
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui.add(primary_button("Apply filters")).clicked() {
-                apply = true;
-            }
-            let has_filters = !state.applied.is_empty()
-                || state.filters.len() > 1
-                || state
-                    .filters
-                    .iter()
-                    .any(|f| !filter_needs_value(f.operator) || !f.value.trim().is_empty());
-            if has_filters && ui.button("Clear").clicked() {
-                state.filters = columns
-                    .first()
-                    .map(|c| FilterDraft::new(c))
-                    .into_iter()
-                    .collect();
-                state.applied.clear();
-                state.page_index = 0;
-                actions.push(reload_or_block(state));
-            }
-        });
     });
+    if measured.is_none() {
+        ui.add_space(2.0);
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 8.0;
+            ui.add_space((ui.available_width() - known - ui.spacing().item_spacing.x).max(0.0));
+            let controls =
+                ui.scope(|ui| query_controls(ui, state, page, &columns, actions, &mut apply));
+            measured = Some(controls.response.rect.width());
+        });
+    }
+    if let Some(width) = measured {
+        if (width - known).abs() > 0.5 {
+            ui.data_mut(|d| d.insert_temp(width_id, width));
+            ui.ctx().request_repaint();
+        }
+    }
     ui.add_space(2.0);
     let mut remove = None;
     for (index, filter) in state.filters.iter_mut().enumerate() {
@@ -802,6 +753,150 @@ fn filter_panel(
             .collect();
         state.page_index = 0;
         actions.push(reload_or_block(state));
+    }
+}
+
+/// Preview limit, sort, direction, reset, clear, and apply, left to right.
+fn query_controls(
+    ui: &mut egui::Ui,
+    state: &mut TableState,
+    page: &TablePage,
+    columns: &[&str],
+    actions: &mut Vec<TableAction>,
+    apply: &mut bool,
+) {
+    // 6 px between a label and its control, 12 px between groups.
+    ui.spacing_mut().item_spacing.x = 6.0;
+    labeled(ui, "Preview limit");
+    // The stepper sits inside the field, as in the desktop app.
+    let visuals = ui.visuals().widgets.inactive;
+    let (response, step) = Frame::new()
+        .fill(ui.visuals().extreme_bg_color)
+        .stroke(visuals.bg_stroke)
+        .corner_radius(visuals.corner_radius)
+        .inner_margin(Margin {
+            left: 8,
+            right: 2,
+            top: 0,
+            bottom: 0,
+        })
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.x = 2.0;
+            let response = ui.add(
+                egui::TextEdit::singleline(&mut state.limit_input)
+                    .frame(false)
+                    .desired_width(42.0)
+                    .vertical_align(egui::Align::Center)
+                    .min_size(Vec2::new(42.0, 26.0)),
+            );
+            (response, limit_stepper(ui))
+        })
+        .inner;
+    if response.lost_focus() || step != 0 {
+        let limit = state
+            .limit_input
+            .trim()
+            .parse::<i64>()
+            .map_or(i64::from(state.limit), |n| n + step)
+            .clamp(1, i64::from(MAX_PREVIEW_ROWS)) as u32;
+        state.limit_input = limit.to_string();
+        if limit != state.limit {
+            state.limit = limit;
+            state.page_index = 0;
+            actions.push(reload_or_block(state));
+        }
+    }
+    ui.add_space(6.0);
+    labeled(ui, "Sort by");
+    let effective = state.effective_order();
+    let mut column = effective
+        .as_ref()
+        .map(|o| o.column.clone())
+        .unwrap_or_default();
+    let label = |name: &str| {
+        if page.metadata.primary_key.iter().any(|k| k == name) {
+            format!("{name} (primary key)")
+        } else if name.is_empty() {
+            "Choose a sort column".to_owned()
+        } else {
+            name.to_owned()
+        }
+    };
+    egui::ComboBox::from_id_salt("sort-column")
+        .selected_text(label(&column))
+        .width(170.0)
+        .show_ui(ui, |ui| {
+            for name in columns {
+                ui.selectable_value(&mut column, (*name).to_owned(), label(name));
+            }
+        });
+    let mut descending = effective.as_ref().is_some_and(|o| o.descending);
+    if effective.is_some() {
+        ui.add_space(6.0);
+        labeled(ui, "Direction");
+        egui::ComboBox::from_id_salt("sort-direction")
+            .selected_text(if descending {
+                "Descending"
+            } else {
+                "Ascending"
+            })
+            .width(116.0)
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut descending, false, "Ascending");
+                ui.selectable_value(&mut descending, true, "Descending");
+            });
+    }
+    let changed_column = effective.as_ref().map(|o| o.column.as_str()) != Some(column.as_str())
+        && !column.is_empty();
+    let changed_direction = effective
+        .as_ref()
+        .is_some_and(|o| o.descending != descending);
+    if changed_column || changed_direction {
+        state.order = Some(OrderSpec {
+            column,
+            descending: descending && !changed_column,
+        });
+        state.page_index = 0;
+        actions.push(reload_or_block(state));
+    }
+    if state.columns_resized || !state.collapsed_columns.is_empty() {
+        ui.add_space(6.0);
+    }
+    if (state.columns_resized || !state.collapsed_columns.is_empty())
+        && ui
+            .add(
+                egui::Button::new(
+                    RichText::new("Reset columns")
+                        .font(ui_font(12.0))
+                        .color(theme::ACCENT_TEXT),
+                )
+                .frame(false),
+            )
+            .on_hover_text("Restore every column's default width")
+            .clicked()
+    {
+        state.collapsed_columns.clear();
+        state.reset_columns = true;
+    }
+    ui.add_space(6.0);
+    let has_filters = !state.applied.is_empty()
+        || state.filters.len() > 1
+        || state
+            .filters
+            .iter()
+            .any(|f| !filter_needs_value(f.operator) || !f.value.trim().is_empty());
+    if has_filters && ui.button("Clear").clicked() {
+        state.filters = columns
+            .first()
+            .map(|c| FilterDraft::new(c))
+            .into_iter()
+            .collect();
+        state.applied.clear();
+        state.page_index = 0;
+        actions.push(reload_or_block(state));
+    }
+    if ui.add(primary_button("Apply filters")).clicked() {
+        *apply = true;
     }
 }
 
@@ -1081,6 +1176,12 @@ fn header_cell(
     collapsible: Option<bool>,
 ) -> Option<HeaderClick> {
     let rect = ui.max_rect();
+    // `.data-grid th { border-right: 1px solid #242427 }`
+    ui.painter().vline(
+        rect.right() - 0.5,
+        rect.y_range(),
+        Stroke::new(1.0, Color32::from_rgb(0x24, 0x24, 0x27)),
+    );
     if collapsible == Some(true) {
         let response = ui
             .interact(rect, ui.id().with(("expand", name)), Sense::click())
@@ -1266,7 +1367,7 @@ pub fn result_grid(ui: &mut egui::Ui, tab_id: u64, columns: &[QueryColumn], rows
                 .id_salt(("result", tab_id))
                 .auto_shrink([false, false])
                 .columns(
-                    Column::initial(170.0)
+                    Column::initial(DEFAULT_COLUMN_WIDTH)
                         .at_least(60.0)
                         .resizable(true)
                         .clip(true),
@@ -1332,11 +1433,15 @@ fn grid(
                 .id_salt(("grid", tab_id, cx.embedded))
                 .sense(Sense::click())
                 .auto_shrink([false, false]);
+            if std::mem::take(&mut state.reset_columns) {
+                builder.reset();
+            }
+            let mut resized = false;
             for index in 0..columns.len() {
                 builder = builder.column(if state.collapsed_columns.contains(&index) {
                     Column::exact(COLLAPSED_COLUMN_WIDTH).clip(true)
                 } else {
-                    Column::initial(170.0)
+                    Column::initial(DEFAULT_COLUMN_WIDTH)
                         .at_least(60.0)
                         .resizable(true)
                         .clip(true)
@@ -1352,6 +1457,8 @@ fn grid(
                                 .map(|o| o.descending);
                             let key = page.metadata.primary_key.contains(&column.name);
                             let collapsed = state.collapsed_columns.contains(&index);
+                            let width = ui.max_rect().width();
+                            resized |= !collapsed && (width - DEFAULT_COLUMN_WIDTH).abs() > 0.5;
                             match header_cell(
                                 ui,
                                 &column.name,
@@ -1368,6 +1475,7 @@ fn grid(
                     }
                 })
                 .body(|body| {
+                    state.columns_resized = resized;
                     body.rows(theme::ROW_HEIGHT, page.rows.len(), |mut row| {
                         let index = row.index();
                         let pending = state.pending.get(&index);
@@ -1594,11 +1702,24 @@ fn inspector(ui: &mut egui::Ui, cx: &TableContext<'_>, state: &mut TableState, p
         .filter(|&i| i < page.rows.len());
     let pending = single.and_then(|i| state.pending.get(&i).cloned());
     let deleted = pending.as_ref().is_some_and(|p| p.deleted);
-    Frame::new()
-        .inner_margin(Margin::symmetric(12, 8))
+    // Header: 40 px, like `.row-inspector-header`.
+    let header = Frame::new()
+        .inner_margin(Margin {
+            left: 14,
+            right: 8,
+            top: 0,
+            bottom: 0,
+        })
         .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(RichText::new("Row").strong().color(theme::TEXT_STRONG));
+            ui.set_height(40.0);
+            ui.horizontal_centered(|ui| {
+                ui.spacing_mut().item_spacing.x = 8.0;
+                ui.label(
+                    RichText::new("Row")
+                        .font(ui_font(13.0))
+                        .strong()
+                        .color(theme::TEXT_STRONG),
+                );
                 if let Some(index) = single {
                     let summary = page
                         .metadata
@@ -1613,7 +1734,7 @@ fn inspector(ui: &mut egui::Ui, cx: &TableContext<'_>, state: &mut TableState, p
                     if !summary.is_empty() {
                         ui.add(
                             egui::Label::new(
-                                RichText::new(summary).font(mono(11.0)).color(theme::MUTED),
+                                RichText::new(summary).font(mono(12.0)).color(theme::MUTED),
                             )
                             .truncate(),
                         );
@@ -1633,22 +1754,29 @@ fn inspector(ui: &mut egui::Ui, cx: &TableContext<'_>, state: &mut TableState, p
         });
     ui.painter().hline(
         ui.max_rect().x_range(),
-        ui.cursor().top(),
+        header.response.rect.bottom(),
         Stroke::new(1.0, theme::BORDER),
     );
     let Some(index) = single else {
-        ui.add_space(24.0);
-        ui.vertical_centered(|ui| {
-            let message = if state.selected.len() > 1 {
-                format!(
-                    "{} rows selected. Select a single row to inspect it.",
-                    state.selected.len()
-                )
-            } else {
-                "Select a row to inspect and edit its fields.".to_owned()
-            };
-            ui.label(RichText::new(message).color(theme::MUTED));
-        });
+        Frame::new()
+            .inner_margin(Margin::symmetric(20, 28))
+            .show(ui, |ui| {
+                ui.vertical_centered(|ui| {
+                    let message = if state.selected.len() > 1 {
+                        format!(
+                            "{} rows selected. Select a single row to inspect it.",
+                            state.selected.len()
+                        )
+                    } else {
+                        "Select a row to inspect and edit its fields.".to_owned()
+                    };
+                    ui.label(
+                        RichText::new(message)
+                            .font(ui_font(12.5))
+                            .color(theme::FAINT),
+                    );
+                });
+            });
         return;
     };
     let row = &page.rows[index];
@@ -1657,80 +1785,18 @@ fn inspector(ui: &mut egui::Ui, cx: &TableContext<'_>, state: &mut TableState, p
     egui::ScrollArea::vertical()
         .id_salt(("inspector", cx.tab_id, cx.embedded))
         .auto_shrink([false, false])
-        .max_height(ui.available_height() - if footer { 52.0 } else { 0.0 })
+        .max_height(ui.available_height() - if footer { 55.0 } else { 0.0 })
         .show(ui, |ui| {
-            Frame::new()
-                .inner_margin(Margin::symmetric(12, 10))
-                .show(ui, |ui| {
-                    for (column_index, column) in columns.iter().enumerate() {
-                        let is_key = page.metadata.primary_key.contains(&column.name);
-                        let original = &row[column_index];
-                        let current = values.get(column_index).unwrap_or(&Value::Null);
-                        let changed = !deleted && current != original;
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = 6.0;
-                            ui.label(
-                                RichText::new(&column.name)
-                                    .font(ui_font(12.0))
-                                    .strong()
-                                    .color(theme::TEXT_STRONG),
-                            );
-                            ui.label(
-                                RichText::new(&column.data_type)
-                                    .font(mono(11.0))
-                                    .color(theme::FAINT),
-                            );
-                            let note = if is_key {
-                                Some(("Primary key".to_owned(), theme::MODIFIED))
-                            } else if changed {
-                                Some((format!("was {}", display_value(original)), theme::MODIFIED))
-                            } else {
-                                None
-                            };
-                            if let Some((note, color)) = note {
-                                ui.with_layout(
-                                    egui::Layout::right_to_left(egui::Align::Center),
-                                    |ui| {
-                                        ui.add(
-                                            egui::Label::new(
-                                                RichText::new(note)
-                                                    .font(ui_font(11.0))
-                                                    .color(color),
-                                            )
-                                            .truncate(),
-                                        );
-                                    },
-                                );
-                            }
-                        });
-                        let key = (index, column_index);
-                        let field_editable = editable_column(cx, page, column_index) && !deleted;
-                        let mut text = state
-                            .drafts
-                            .get(&key)
-                            .cloned()
-                            .unwrap_or_else(|| editable_text(current));
-                        let response = ui.add_enabled(
-                            field_editable,
-                            egui::TextEdit::singleline(&mut text)
-                                .id(field_editor_id(cx.tab_id, index, column_index))
-                                .font(mono(12.0))
-                                .hint_text(if current.is_null() { "NULL" } else { "" })
-                                .desired_width(f32::INFINITY)
-                                .background_color(if changed {
-                                    theme::MODIFIED_SOFT
-                                } else if field_editable {
-                                    theme::CONTROL
-                                } else {
-                                    theme::CHROME
-                                }),
-                        );
-                        if response.changed() {
-                            state.drafts.insert(key, text);
-                        }
-                        ui.add_space(8.0);
+            Frame::new().inner_margin(Margin::same(14)).show(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = 5.0;
+                for column_index in 0..columns.len() {
+                    // 5 px spacing on each side plus 2 px: the desktop's 12 px gap.
+                    if column_index > 0 {
+                        ui.add_space(2.0);
                     }
-                });
+                    inspector_field(ui, cx, state, page, (index, column_index), values, deleted);
+                }
+            });
         });
     if footer {
         ui.painter().hline(
@@ -1739,26 +1805,159 @@ fn inspector(ui: &mut egui::Ui, cx: &TableContext<'_>, state: &mut TableState, p
             Stroke::new(1.0, theme::BORDER),
         );
         Frame::new()
-            .inner_margin(Margin::symmetric(12, 10))
+            .inner_margin(Margin::symmetric(14, 12))
             .show(ui, |ui| {
                 let (icon, label, color) = if deleted {
-                    (Icon::Refresh, "Restore row", theme::SECONDARY)
+                    (Icon::Undo, "Restore row", theme::TEXT)
                 } else {
-                    (Icon::Close, "Delete row", theme::DANGER)
+                    (Icon::Trash, "Delete row", theme::DANGER)
                 };
-                let button = ui.add(egui::Button::new(
-                    RichText::new(format!("      {label}")).color(color),
-                ));
-                let icon_rect = egui::Rect::from_center_size(
-                    button.rect.left_center() + Vec2::new(16.0, 0.0),
-                    Vec2::splat(12.0),
-                );
-                icons::paint(ui.painter(), icon_rect, icon, color);
-                if button.clicked() {
+                if secondary_icon_button(ui, icon, label, color, ui.available_width()).clicked() {
                     toggle_delete(state, &[index]);
                 }
             });
     }
+}
+
+/// One `.inspector-field`: mono name, type, a right-aligned note, then a
+/// 30 px input. Read-only fields (primary keys, deleted rows, read-only
+/// profiles) render as plain muted text like the desktop's `[readonly]`.
+fn inspector_field(
+    ui: &mut egui::Ui,
+    cx: &TableContext<'_>,
+    state: &mut TableState,
+    page: &TablePage,
+    key: (usize, usize),
+    values: &[Value],
+    deleted: bool,
+) {
+    let (index, column_index) = key;
+    let column = &page.metadata.columns[column_index];
+    let is_key = page.metadata.primary_key.contains(&column.name);
+    let original = &page.rows[index][column_index];
+    let current = values.get(column_index).unwrap_or(&Value::Null);
+    let changed = !deleted && current != original;
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 6.0;
+        ui.label(
+            RichText::new(&column.name)
+                .font(mono(11.5))
+                .color(theme::SECONDARY),
+        );
+        ui.label(
+            RichText::new(&column.data_type)
+                .font(mono(11.0))
+                .color(Color32::from_rgb(0x6f, 0x6f, 0x76)),
+        );
+        let note = if is_key {
+            Some(("Primary key".to_owned(), theme::FAINT))
+        } else if changed {
+            Some((format!("was {}", display_value(original)), theme::MODIFIED))
+        } else {
+            None
+        };
+        if let Some((note, color)) = note {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.add(
+                    egui::Label::new(RichText::new(note).font(ui_font(11.0)).color(color))
+                        .truncate(),
+                );
+            });
+        }
+    });
+    let read_only = !editable_column(cx, page, column_index) || deleted || is_key;
+    let mut text = state
+        .drafts
+        .get(&key)
+        .cloned()
+        .unwrap_or_else(|| editable_text(current));
+    let (fill, stroke) = if read_only {
+        (Color32::TRANSPARENT, Color32::TRANSPARENT)
+    } else if changed {
+        (
+            theme::MODIFIED_SOFT,
+            Color32::from_rgba_unmultiplied(240, 177, 76, 115),
+        )
+    } else {
+        (Color32::from_rgb(0x23, 0x23, 0x26), theme::BORDER_STRONG)
+    };
+    let id = field_editor_id(cx.tab_id, index, column_index);
+    let focused = ui.memory(|m| m.has_focus(id));
+    let (fill, stroke) = if focused && !read_only {
+        (theme::EDIT_SURFACE, theme::ACCENT)
+    } else {
+        (fill, stroke)
+    };
+    let frame = Frame::new()
+        .fill(fill)
+        .stroke(Stroke::new(1.0, stroke))
+        .corner_radius(egui::CornerRadius::same(6))
+        .inner_margin(Margin::symmetric(10, 0));
+    let response = frame
+        .show(ui, |ui| {
+            ui.set_height(28.0);
+            ui.centered_and_justified(|ui| {
+                ui.add(
+                    egui::TextEdit::singleline(&mut text)
+                        .id(id)
+                        .interactive(!read_only)
+                        .frame(false)
+                        .font(mono(12.0))
+                        .text_color(if read_only { theme::MUTED } else { theme::TEXT })
+                        .hint_text(
+                            RichText::new(if current.is_null() { "NULL" } else { "" })
+                                .italics()
+                                .color(theme::FAINT),
+                        )
+                        .desired_width(f32::INFINITY),
+                )
+            })
+            .inner
+        })
+        .inner;
+    if response.changed() && !read_only {
+        state.drafts.insert(key, text);
+    }
+}
+
+/// `.secondary-button`: control fill, strong border, 30 px, icon + label.
+fn secondary_icon_button(
+    ui: &mut egui::Ui,
+    icon: Icon,
+    label: &str,
+    color: Color32,
+    width: f32,
+) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 30.0), Sense::click());
+    let fill = if response.hovered() {
+        theme::CONTROL_HOVER
+    } else {
+        theme::CONTROL
+    };
+    ui.painter().rect(
+        rect,
+        7.0,
+        fill,
+        Stroke::new(1.0, theme::BORDER_STRONG),
+        egui::StrokeKind::Inside,
+    );
+    let galley = ui
+        .painter()
+        .layout_no_wrap(label.to_owned(), ui_font(12.5), color);
+    let total = 14.0 + 6.0 + galley.size().x;
+    let start = rect.center().x - total / 2.0;
+    icons::paint(
+        ui.painter(),
+        Rect::from_center_size(egui::pos2(start + 7.0, rect.center().y), Vec2::splat(14.0)),
+        icon,
+        color,
+    );
+    ui.painter().galley(
+        egui::pos2(start + 20.0, rect.center().y - galley.size().y / 2.0),
+        galley,
+        color,
+    );
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 #[cfg(test)]
