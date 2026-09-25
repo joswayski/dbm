@@ -1701,8 +1701,20 @@ fn grid(
     if let Some(cell) = edit_cell {
         state.selected = BTreeSet::from([cell.0]);
         state.anchor = Some(cell.0);
-        state.editing = Some(cell);
-        state.focus_editor = true;
+        let value = state
+            .pending
+            .get(&cell.0)
+            .map_or(&page.rows[cell.0][cell.1], |p| &p.changes[cell.1]);
+        if let Some(size) = large_value_size(value) {
+            // Selecting still shows the inspector's preview.
+            let text = format!(
+                "This {size} value is too large to edit in the grid; update it with a query."
+            );
+            state.message = Some(Message::error(text, ui.input(|i| i.time)));
+        } else {
+            state.editing = Some(cell);
+            state.focus_editor = true;
+        }
     }
     // Keyboard: Delete toggles staged deletion for the selection; Escape
     // clears it. Only when no text field has focus.
@@ -1928,6 +1940,27 @@ fn inspector_field(
             });
         }
     });
+    // Laying out a multi-megabyte value in a text field costs seconds and
+    // hundreds of megabytes, so large values get a read-only preview.
+    if let Some(size) = large_value_size(current) {
+        let preview: String = editable_text(current).chars().take(160).collect();
+        ui.add(
+            egui::Label::new(
+                RichText::new(format!("{preview}…"))
+                    .font(mono(12.0))
+                    .color(theme::MUTED),
+            )
+            .truncate(),
+        );
+        ui.label(
+            RichText::new(format!(
+                "{size} value — too large to edit here; update it with a query."
+            ))
+            .font(ui_font(11.0))
+            .color(theme::FAINT),
+        );
+        return;
+    }
     let read_only = !editable_column(cx, page, column_index) || deleted || is_key;
     let mut text = state
         .drafts
@@ -1981,6 +2014,25 @@ fn inspector_field(
     if response.changed() && !read_only {
         state.drafts.insert(key, text);
     }
+}
+
+/// Values above this size are previewed rather than edited in the inspector.
+const LARGE_VALUE_BYTES: usize = 64 * 1024;
+
+/// A human-readable size for a text value too large to edit in place.
+fn large_value_size(value: &Value) -> Option<String> {
+    let len = match value {
+        Value::String(text) => text.len(),
+        Value::Null | Value::Bool(_) | Value::Number(_) => return None,
+        other => other.to_string().len(),
+    };
+    (len > LARGE_VALUE_BYTES).then(|| {
+        if len >= 1024 * 1024 {
+            format!("{:.1} MiB", len as f64 / (1024.0 * 1024.0))
+        } else {
+            format!("{} KiB", len / 1024)
+        }
+    })
 }
 
 /// `.secondary-button`: control fill, strong border, 30 px, icon + label.
@@ -2041,6 +2093,20 @@ pub mod tests {
             order_by: None,
             include_total: Some(true),
         })
+    }
+
+    #[test]
+    fn large_values_are_previewed_not_edited() {
+        assert_eq!(large_value_size(&json!("short")), None);
+        assert_eq!(large_value_size(&json!(1)), None);
+        assert_eq!(
+            large_value_size(&json!("x".repeat(100 * 1024))).as_deref(),
+            Some("100 KiB")
+        );
+        assert_eq!(
+            large_value_size(&json!("x".repeat(3 * 1024 * 1024 / 2))).as_deref(),
+            Some("1.5 MiB")
+        );
     }
 
     #[test]

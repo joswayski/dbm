@@ -535,6 +535,10 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
         let row = grid.clickedRow, column = grid.clickedColumn
         guard row >= 0, column >= 0, editable, let page = state.page,
               !page.primaryKey.contains(page.columns[column].name), state.pending[row]?.deleted != true else { return }
+        if let size = largeValueSize(state.values(row)[column]) {
+            showMessage(.error("This \(size) value is too large to edit in the grid; update it with a query."))
+            return
+        }
         beginEditing(row: row, column: column)
     }
 
@@ -872,7 +876,8 @@ final class InspectorView: PanelView {
                 note.alignment = .right
                 let header = hstack([name, type, spacer(), note], spacing: 6)
                 let field = GTextField("", mono: true, height: 30)
-                let readOnly = !editable || isKey || deleted
+                let large = largeValueSize(values[index])
+                let readOnly = !editable || isKey || deleted || large != nil
                 field.isEditable = !readOnly
                 field.isSelectable = true
                 if let cell = field.cell as? GTextFieldCell {
@@ -895,14 +900,19 @@ final class InspectorView: PanelView {
             let original = page.rows[row][index]
             let current = values[index]
             let changed = !deleted && jsonKey(current) != jsonKey(original)
-            notes[index].stringValue = page.primaryKey.contains(column.name) ? "Primary key" : changed ? "was \(displayValue(original))" : ""
+            let large = largeValueSize(current)
+            notes[index].stringValue = page.primaryKey.contains(column.name) ? "Primary key"
+                : large.map { "\($0) — too large to edit here" } ?? (changed ? "was \(displayValue(original))" : "")
             notes[index].textColor = changed ? Graphite.modified : Graphite.faint
             if let cell = field.cell as? GTextFieldCell, !cell.plain {
                 cell.fillOverride = changed ? Graphite.modifiedSoft : NSColor(hex: 0x232326)
                 cell.strokeOverride = changed ? NSColor(hex: 0xf0b14c, alpha: 0.45) : Graphite.borderStrong
                 field.needsDisplay = true
             }
-            if field.currentEditor() == nil {
+            if let large, field.currentEditor() == nil {
+                field.stringValue = String((current as? String ?? "").prefix(160)) + "…"
+                field.toolTip = "This \(large) value is too large to edit here; update it with a query."
+            } else if field.currentEditor() == nil {
                 field.stringValue = Helpers.editableText(current)
                 field.setPlaceholder(current is NSNull ? "NULL" : "")
             }

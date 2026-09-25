@@ -1100,12 +1100,15 @@ impl eframe::App for Workbench {
         self.drain();
         if ctx.input(|input| input.viewport().close_requested()) {
             let dirty = self.tabs.iter().any(|tab| self.tab_dirty(tab.id));
-            if dirty || !self.pending_requests.is_empty() {
+            // Reads can be abandoned; a save or export stopped halfway can't.
+            let writing =
+                self.busy(RequestKind::Mutation, None) || self.busy(RequestKind::Export, None);
+            if dirty || writing {
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
                 self.show_error(if dirty {
                     "Save or discard staged changes before closing DBM."
                 } else {
-                    "Wait for the active database operation to finish before closing DBM."
+                    "Wait for the save or export to finish before closing DBM."
                 });
             }
         }
