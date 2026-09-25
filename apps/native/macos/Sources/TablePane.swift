@@ -119,7 +119,7 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
         sortDirection.onSelect = { [weak self] _ in self?.sortChanged() }
         let addFilter = GButton("Add filter", icon: .plus, style: .link) { [weak self] in self?.addFilter() }
         let header = hstack([
-            IconView(.search, size: 13, color: Graphite.muted),
+            IconView(.filter, size: 13, color: Graphite.faint),
             label("Filters", font: Graphite.ui(13, .semibold), color: Graphite.textStrong),
             label("All filters must match", font: Graphite.ui(12), color: Graphite.faint),
             addFilter, spacer(),
