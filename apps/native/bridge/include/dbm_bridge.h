@@ -17,6 +17,10 @@ char *dbm_bridge_session_call(DbmBridgeSession *session,
                               const uint8_t *request, size_t length);
 void dbm_bridge_session_free(DbmBridgeSession *session);
 
+/* Editor/grid helpers (highlight, executionTarget, parseCell, csv, ...) that
+ * need no session or database. Safe to call from any thread at any time. */
+char *dbm_bridge_helper_call(const uint8_t *request, size_t length);
+
 /* Every non-null response/init error is UTF-8, NUL-terminated, library-owned, and
  * must be released exactly once with this function. Null is accepted. */
 void dbm_bridge_response_free(char *response);

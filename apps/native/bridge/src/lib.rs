@@ -24,8 +24,8 @@ use dbm_core::{
     },
     session::DbSession,
     sql_text::{
-        byte_to_utf16, csv_document, execution_target, highlight, requires_confirmation,
-        resolve_full_table_select, utf16_to_byte,
+        byte_to_utf16, csv_document, describe_schema_refresh, execution_target, highlight,
+        requires_confirmation, resolve_full_table_select, utf16_to_byte,
     },
     state::AppState,
 };
@@ -119,6 +119,11 @@ enum Request {
     },
     ParseConnectionUrl {
         url: String,
+    },
+    DescribeSchemaRefresh {
+        previous: Vec<SchemaNode>,
+        next: Vec<SchemaNode>,
+        kind: String,
     },
 }
 
@@ -329,6 +334,14 @@ fn helper_value(request: Request) -> Result<Value, String> {
         Request::EditableText { value } => Ok(Value::String(editable_text(&value))),
         Request::Csv { columns, rows } => Ok(Value::String(csv_document(&columns, &rows))),
         Request::ParseConnectionUrl { url } => serde_json::to_value(parse_connection_url(&url)?),
+        Request::DescribeSchemaRefresh {
+            previous,
+            next,
+            kind,
+        } => {
+            let (changed, message) = describe_schema_refresh(&previous, &next, &kind);
+            Ok(json!({ "changed": changed, "message": message }))
+        }
         _ => return Err("unsupported native request".into()),
     }
     .map_err(message)
@@ -501,6 +514,37 @@ pub unsafe extern "C" fn dbm_bridge_session_call(
             Backend::Demo(store) => dispatch_demo(store, request),
         };
         match result {
+            Ok(value) => response(json!({"ok": true, "value": value})),
+            Err(error) => error_response(error),
+        }
+    }))
+    .unwrap_or_else(|_| error_response("native bridge call panicked"))
+}
+
+/// Runs one editor or grid helper request (`executionTarget`, `highlight`,
+/// `requiresConfirmation`, `resolveFullTableSelect`, `parseCell`,
+/// `editableText`, `csv`, `parseConnectionUrl`) without a session. These
+/// touch no database or storage, so the UI thread may call this directly
+/// while a session call is running. Free the response as usual.
+///
+/// # Safety
+///
+/// `request` must address `length` readable bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn dbm_bridge_helper_call(request: *const u8, length: usize) -> *mut c_char {
+    catch_unwind(AssertUnwindSafe(|| {
+        if request.is_null() {
+            return error_response("native bridge request is null");
+        }
+        if length > MAX_REQUEST_BYTES {
+            return error_response("native request exceeds 1 MiB limit");
+        }
+        // SAFETY: The caller guarantees `length` readable bytes for non-null `request`.
+        let bytes = unsafe { std::slice::from_raw_parts(request, length) };
+        let Ok(request) = serde_json::from_slice::<Request>(bytes) else {
+            return error_response("invalid native request");
+        };
+        match helper_value(request) {
             Ok(value) => response(json!({"ok": true, "value": value})),
             Err(error) => error_response(error),
         }

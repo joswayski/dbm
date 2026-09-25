@@ -53,23 +53,30 @@ jobs:
       - run: cargo check --workspace --all-targets
       - run: cargo test --workspace --all-targets
       - run: cargo clippy --workspace --all-targets -- -D warnings
+
+  appkit:
+    name: AppKit (macos-14)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.94.0
       - name: Build AppKit development preview
-        if: runner.os == 'macOS'
         run: bash apps/native/macos/build.sh
       - name: Archive AppKit development preview
-        if: runner.os == 'macOS'
         run: ditto -c -k --keepParent 'target/native/DBM Native.app' target/native/DBM-Native-macos.zip
-      - name: Render isolated AppKit fixture
-        if: runner.os == 'macOS'
+      - name: Render isolated AppKit fixture states
         run: |
-          python3 -c 'import subprocess; subprocess.run(["target/native/DBM Native.app/Contents/MacOS/DBMNative", "--demo", "--snapshot", "target/native/appkit-demo.png"], check=True, timeout=30)'
+          mkdir -p target/native/snapshots
+          python3 -c 'import subprocess; subprocess.run(["target/native/DBM Native.app/Contents/MacOS/DBMNative", "--demo", "--snapshot-dir", "target/native/snapshots"], check=True, timeout=120)'
       - uses: actions/upload-artifact@v4
-        if: runner.os == 'macOS'
+        if: always()
         with:
           name: DBM-Native-macos-development
           path: |
             target/native/DBM-Native-macos.zip
-            target/native/appkit-demo.png
+            target/native/snapshots
 
   native-workbench:
     name: Native workbench (${{ matrix.os }})

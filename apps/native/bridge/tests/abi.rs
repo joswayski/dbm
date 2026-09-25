@@ -5,8 +5,8 @@ use std::ptr;
 use std::sync::Mutex;
 
 use dbm_native_bridge::{
-    dbm_bridge_demo_session_create, dbm_bridge_response_free, dbm_bridge_session_call,
-    dbm_bridge_session_create, dbm_bridge_session_free,
+    dbm_bridge_demo_session_create, dbm_bridge_helper_call, dbm_bridge_response_free,
+    dbm_bridge_session_call, dbm_bridge_session_create, dbm_bridge_session_free,
 };
 use serde_json::{Value, json};
 
@@ -206,4 +206,14 @@ fn demo_sessions_answer_from_the_fixture_and_refuse_writes() {
             .contains("saving is disabled")
     );
     unsafe { dbm_bridge_session_free(session) };
+}
+
+#[test]
+fn helper_calls_need_no_session_and_reject_database_commands() {
+    let request = br#"{"command":"requiresConfirmation","engine":"redis","text":"FLUSHALL"}"#;
+    let reply = unsafe { take(dbm_bridge_helper_call(request.as_ptr(), request.len())) };
+    assert_eq!(reply, json!({"ok": true, "value": true}));
+    let request = br#"{"command":"listProfiles"}"#;
+    let reply = unsafe { take(dbm_bridge_helper_call(request.as_ptr(), request.len())) };
+    assert_eq!(reply["error"], "unsupported native request");
 }

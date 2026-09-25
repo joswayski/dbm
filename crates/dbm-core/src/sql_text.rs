@@ -670,6 +670,73 @@ pub fn byte_to_utf16(text: &str, offset: usize) -> usize {
         .count()
 }
 
+/// The notice after refreshing a schema or keyspace tree, as the desktop app
+/// words it. Returns whether anything changed and the message.
+pub fn describe_schema_refresh(
+    previous: &[SchemaNode],
+    next: &[SchemaNode],
+    kind: &str,
+) -> (bool, String) {
+    fn objects(nodes: &[SchemaNode], out: &mut Vec<(String, String)>) {
+        for node in nodes {
+            let name = match (&node.schema, &node.table) {
+                (Some(schema), Some(table)) => format!("{schema}.{table}"),
+                _ => node.name.clone(),
+            };
+            out.push((
+                format!("{}:{name}", node.kind),
+                format!("{} {name}", node.kind),
+            ));
+            objects(&node.children, out);
+        }
+    }
+    let (mut before, mut after) = (Vec::new(), Vec::new());
+    objects(previous, &mut before);
+    objects(next, &mut after);
+    before.sort();
+    after.sort();
+    let keys = |list: &[(String, String)]| {
+        list.iter()
+            .map(|(key, _)| key.clone())
+            .collect::<std::collections::HashSet<_>>()
+    };
+    let (before_keys, after_keys) = (keys(&before), keys(&after));
+    let added: Vec<&str> = after
+        .iter()
+        .filter(|(k, _)| !before_keys.contains(k))
+        .map(|(_, l)| l.as_str())
+        .collect();
+    let removed: Vec<&str> = before
+        .iter()
+        .filter(|(k, _)| !after_keys.contains(k))
+        .map(|(_, l)| l.as_str())
+        .collect();
+    if added.is_empty() && removed.is_empty() {
+        return (false, format!("{kind} is already up to date."));
+    }
+    let summarize = |labels: &[&str]| {
+        if labels.len() == 1 {
+            return labels[0].to_owned();
+        }
+        let visible = labels[..labels.len().min(3)].join(", ");
+        let rest = labels.len().saturating_sub(3);
+        let more = if rest > 0 {
+            format!(", and {rest} more")
+        } else {
+            String::new()
+        };
+        format!("{} objects: {visible}{more}", labels.len())
+    };
+    let mut changes = Vec::new();
+    if !added.is_empty() {
+        changes.push(format!("Added {}", summarize(&added)));
+    }
+    if !removed.is_empty() {
+        changes.push(format!("Removed {}", summarize(&removed)));
+    }
+    (true, format!("{kind} refreshed · {}.", changes.join(" · ")))
+}
+
 /// Grid and CSV text for a value: `NULL`, raw strings, JSON for everything else.
 pub fn display_value(value: &Value) -> String {
     match value {
@@ -958,5 +1025,23 @@ mod tests {
         assert_eq!(utf16_to_byte(text, 99), text.len());
         assert_eq!(byte_to_utf16(text, 5), 3);
         assert_eq!(byte_to_utf16(text, text.len()), 6);
+    }
+
+    #[test]
+    fn schema_refresh_messages_match_the_desktop_app() {
+        let before = tree();
+        assert_eq!(
+            describe_schema_refresh(&before, &before, "Schema"),
+            (false, "Schema is already up to date.".to_owned())
+        );
+        let mut after = tree();
+        after[0].children.pop();
+        after.remove(1);
+        let (changed, message) = describe_schema_refresh(&before, &after, "Keyspace");
+        assert!(changed);
+        assert_eq!(
+            message,
+            "Keyspace refreshed · Removed 3 objects: schema audit, table audit.users, table public.Orders."
+        );
     }
 }
