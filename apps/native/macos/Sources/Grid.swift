@@ -203,6 +203,9 @@ final class GridTableView: NSTableView {
     var onDelete: (() -> Void)?
     var onEscape: (() -> Void)?
     var onCopy: (() -> Void)?
+    /// The row under the pointer, or nil when it leaves the grid.
+    var onHoverRow: ((Int?) -> Void)?
+    private var hoveredRow: Int?
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -236,6 +239,28 @@ final class GridTableView: NSTableView {
     }
 
     @objc func copy(_ sender: Any?) { onCopy?() }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.filter { $0.owner === self }.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+                                       owner: self, userInfo: nil))
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+        let row = self.row(at: convert(event.locationInWindow, from: nil))
+        let hovered = row >= 0 ? row : nil
+        guard hovered != hoveredRow else { return }
+        hoveredRow = hovered
+        onHoverRow?(hovered)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        hoveredRow = nil
+        onHoverRow?(nil)
+    }
 
     override func drawBackground(inClipRect clipRect: NSRect) {
         Graphite.bg.setFill()

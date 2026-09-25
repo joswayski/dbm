@@ -267,6 +267,17 @@ final class TableState {
     }
 
     /// Stages deletion of `rows`, or restores them when all are already staged.
+    /// Like the desktop's `discardPendingRow`: undoing a delete keeps the
+    /// row's edits; otherwise the staged change is dropped.
+    func discardPending(_ row: Int) {
+        guard let pendingRow = pending[row] else { return }
+        if pendingRow.deleted, !jsonEqual(pendingRow.changes, pendingRow.original) {
+            pendingRow.deleted = false
+        } else {
+            pending[row] = nil
+        }
+    }
+
     func toggleDelete(_ rows: [Int]) {
         guard let page else { return }
         let restore = rows.allSatisfy { pending[$0]?.deleted == true }
@@ -352,6 +363,15 @@ enum Helpers {
             let from = int(token["from"]), to = int(token["to"])
             return (NSRange(location: from, length: to - from), string(token["kind"]))
         }
+    }
+
+    /// The common prefix and suffix of two values and what changed between.
+    static func inlineDiff(before: String, after: String) -> (prefix: String, removed: String, added: String, suffix: String) {
+        guard case .success(let value) = Bridge.helper(["command": "inlineDiff", "before": before, "after": after]) else {
+            return ("", before, after, "")
+        }
+        let diff = dictionary(value)
+        return (string(diff["prefix"]), string(diff["removed"]), string(diff["added"]), string(diff["suffix"]))
     }
 
     static func completions(engine: Engine, prefix: String) -> [String] {

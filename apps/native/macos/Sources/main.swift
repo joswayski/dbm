@@ -761,26 +761,27 @@ final class SnapshotDriver {
     func start() {
         let app = self.app
         let postgres = "00000000-0000-0000-0000-000000000001"
-        let redis = "00000000-0000-0000-0000-000000000002"
+        let redis = "00000000-0000-0000-0000-000000000004"
         steps = [
             ("01-welcome", {}),
             ("02-query", { [app] in app.selectProfile(postgres) }),
-            ("03-results", { [app] in app.activeQueryPane?.editor.setSelectedRange(NSRange(location: 0, length: 0)); if let tab = app.activeTab { app.runQuery(tab, sql: "SELECT customer, revenue FROM revenue_by_month;", refresh: false) } }),
-            ("04-table", { [app] in app.openTable(postgres, schema: "public", table: "customers") }),
+            ("03-results", { [app] in app.activeQueryPane?.editor.setSelectedRange(NSRange(location: 0, length: 0)); if let tab = app.activeTab { app.runQuery(tab, sql: "SELECT now();", refresh: false) } }),
+            ("04-table", { [app] in app.openTable(postgres, schema: "public", table: "users") }),
             ("05-pending", { [app] in
                 guard let tab = app.activeTab, let state = tab.tableState else { return }
                 state.selected = IndexSet(integer: 1)
-                state.stage(row: 1, column: 1, text: "ada@example.com")
-                state.stage(row: 1, column: 3, text: "")
+                state.stage(row: 1, column: 1, text: "changed@example.com")
+                state.stage(row: 1, column: 2, text: "")
                 state.toggleDelete([3])
                 app.activeTablePane?.grid.reloadData()
                 app.refresh()
             }),
+            ("05b-change-preview", { [app] in app.activeTablePane?.hoverRow(1) }),
             ("06-embedded", { [app] in
                 app.openQuery(postgres)
                 if let tab = app.activeTab {
-                    app.activeQueryPane?.editor.string = "SELECT * FROM public.customers;"
-                    tab.sql = "SELECT * FROM public.customers;"
+                    app.activeQueryPane?.editor.string = "SELECT * FROM public.users;"
+                    tab.sql = "SELECT * FROM public.users;"
                     app.runQuery(tab, sql: tab.sql, refresh: false)
                 }
             }),
@@ -821,6 +822,13 @@ final class SnapshotDriver {
         guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { exit(1) }
         view.cacheDisplay(in: view.bounds, to: bitmap)
         write(bitmap, name)
+        // Floating cards such as the change preview live in child windows.
+        for (index, child) in (app.window.childWindows ?? []).enumerated() {
+            if let content = child.contentView, let bitmap = content.bitmapImageRepForCachingDisplay(in: content.bounds) {
+                content.cacheDisplay(in: content.bounds, to: bitmap)
+                write(bitmap, "\(name)-popover\(index)")
+            }
+        }
         if let sheet = app.profileSheetWindow?.contentView, let sheetBitmap = sheet.bitmapImageRepForCachingDisplay(in: sheet.bounds) {
             sheet.cacheDisplay(in: sheet.bounds, to: sheetBitmap)
             write(sheetBitmap, "\(name)-sheet")

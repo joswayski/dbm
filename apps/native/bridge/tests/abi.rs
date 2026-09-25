@@ -181,10 +181,10 @@ fn demo_sessions_answer_from_the_fixture_and_refuse_writes() {
     let profiles = call(session, &json!({"command": "listProfiles"}));
     let id = profiles[0]["profile"]["id"].as_str().unwrap().to_owned();
     let workspace = call(session, &json!({"command": "connect", "profile_id": id}));
-    assert_eq!(workspace["profile"]["name"], "Acme Analytics");
+    assert_eq!(workspace["profile"]["name"], "Production");
     let page = call(
         session,
-        &json!({"command": "loadTablePage", "request": {"profileId": id, "schema": "public", "table": "customers", "offset": 0, "limit": 5, "filters": [], "orderBy": null}}),
+        &json!({"command": "loadTablePage", "request": {"profileId": id, "schema": "public", "table": "users", "offset": 0, "limit": 5, "filters": [], "orderBy": null}}),
     );
     assert_eq!(page["rows"].as_array().unwrap().len(), 5);
     call(
@@ -193,7 +193,7 @@ fn demo_sessions_answer_from_the_fixture_and_refuse_writes() {
     );
     let history = call(
         session,
-        &json!({"command": "listQueryHistory", "profile_id": id, "database": "analytics"}),
+        &json!({"command": "listQueryHistory", "profile_id": id, "database": "acme"}),
     );
     assert_eq!(history[0]["sql"], "SELECT 1");
     let path = std::env::temp_dir().join(format!("dbm-bridge-demo-{}.csv", std::process::id()));

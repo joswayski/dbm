@@ -66,6 +66,7 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
     private var pendingHeight: NSLayoutConstraint!
     private let loadingOverlay = LoadingOverlay()
     private let skeleton = GridSkeleton()
+    private let changePreview = ChangePreviewController()
     private let messageView = MessageView()
     private var bodyBelowFilters: NSLayoutConstraint?
     private var bodyBelowMessage: NSLayoutConstraint?
@@ -171,6 +172,10 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
         grid.onDelete = { [weak self] in self?.deleteSelection() }
         grid.onEscape = { [weak self] in self?.grid.deselectAll(nil) }
         grid.onCopy = { [weak self] in self?.copySelected() }
+        grid.onHoverRow = { [weak self] row in self?.hoverRow(row) }
+        NotificationCenter.default.addObserver(self, selector: #selector(gridScrolled), name: NSView.boundsDidChangeNotification,
+                                               object: gridScrollView.contentView)
+        gridScrollView.contentView.postsBoundsChangedNotifications = true
         (grid.headerView as? GridHeaderView)?.onToggleColumn = { [weak self] column in self?.toggleColumn(column) }
         let menu = NSMenu()
         menu.delegate = self
@@ -312,6 +317,7 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
         grid.isEnabled = interactive
         updateLoadingOverlay(visible: state.loading && page != nil)
         skeleton.isHidden = !(state.loading && page == nil)
+        if let row = changePreview.row, state.pending[row] == nil { changePreview.close() }
         messageView.show(state.message)
         layoutMessage()
         inspector.show(tab: tab, host: host, editable: editable, interactive: interactive) { [weak self] in self?.stagedFromInspector() }
@@ -454,21 +460,42 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
 
     func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
         let view = GridRowView()
-        if let pending = state.pending[row], let page = state.page {
+        if let pending = state.pending[row] {
             view.mark = pending.deleted ? .deleted : .modified
-            view.toolTip = changePreview(pending, columns: page.columns)
         }
         return view
     }
 
-    /// The staged change on a row, before → after, as the desktop app's hover preview.
-    private func changePreview(_ pending: PendingRow, columns: [Column]) -> String {
-        if pending.deleted { return "Pending delete\nThis row will be deleted when changes are saved." }
-        let lines = columns.indices.compactMap { index -> String? in
-            guard jsonKey(pending.changes[index]) != jsonKey(pending.original[index]) else { return nil }
-            return "\(columns[index].name): \(displayValue(pending.original[index])) → \(displayValue(pending.changes[index]))"
+    // MARK: Change preview
+
+    /// Shows the staged row's before → after card while the pointer is over
+    /// it, like the desktop app. A card that is closing finishes first.
+    func hoverRow(_ row: Int?) {
+        guard let row, editor == nil, let pending = state.pending[row], let page = state.page, let window,
+              row < grid.numberOfRows else {
+            changePreview.scheduleClose()
+            return
         }
-        return (["Pending edit"] + lines).joined(separator: "\n")
+        if changePreview.row == row { changePreview.cancelClose(); return }
+        if changePreview.row != nil, changePreview.closing { return }
+        let rect = window.convertToScreen(grid.convert(grid.rect(ofRow: row), to: nil))
+        changePreview.show(row: row, pending: pending, columns: page.columns, rowRect: rect, in: window) { [weak self] in
+            self?.discardPending(row)
+        }
+    }
+
+    @objc private func gridScrolled() { changePreview.close() }
+
+    /// Discards a staged row, keeping its edits when only a delete is undone.
+    private func discardPending(_ row: Int) {
+        state.discardPending(row)
+        grid.reloadData()
+        reload()
+    }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        super.viewWillMove(toWindow: newWindow)
+        if newWindow == nil { changePreview.close() }
     }
 
     private func toggleColumn(_ column: Int) {
@@ -592,9 +619,7 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
         }
         if clicked >= 0, let pending = state.pending[clicked] {
             menu.addItem(ClosureMenuItem(pending.deleted ? "Undo delete" : "Discard edit") { [weak self] in
-                self?.state.pending[clicked] = nil
-                self?.grid.reloadData()
-                self?.reload()
+                self?.discardPending(clicked)
             })
             menu.addItem(.separator())
         }
