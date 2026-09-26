@@ -15,3 +15,16 @@ for name in ("geist", "geist-mono"):
     font.save(f"apps/native/workbench/assets/{name}.ttf")
 '
 ```
+
+`geist-medium.ttf` and `geist-semibold.ttf` are static weight 500 and 600
+instances of `geist.ttf`; egui only draws a variable font's default instance.
+
+```sh
+uv run --with fonttools python -c '
+from fontTools.ttLib import TTFont
+from fontTools.varLib.instancer import instantiateVariableFont
+for weight, name in ((500, "medium"), (600, "semibold")):
+    font = instantiateVariableFont(TTFont("geist.ttf"), {"wght": weight}, updateFontNames=False)
+    font.save(f"geist-{name}.ttf")
+'
+```

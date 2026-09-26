@@ -443,21 +443,18 @@ fn toolbar(
             ui.add_space(-6.0);
             ui.label(
                 RichText::new(format!(".{}", cx.table))
-                    .font(ui_font(15.0))
-                    .strong()
+                    .font(theme::semibold(15.0))
                     .color(theme::TEXT_STRONG),
             );
         } else {
             ui.label(
                 RichText::new(format!("{}.{}", cx.schema, cx.table))
-                    .strong()
+                    .font(theme::semibold(13.0))
                     .color(theme::TEXT_STRONG),
             );
         }
         if let Some(page) = &state.page {
-            let rows = page
-                .total_rows
-                .map_or_else(|| "—".to_owned(), |n| n.to_string());
+            let rows = page.total_rows.map_or_else(|| "—".to_owned(), theme::count);
             ui.label(
                 RichText::new(format!(
                     "{rows} rows · {} columns",
@@ -501,7 +498,7 @@ fn toolbar(
             }
             let total = state
                 .total_rows()
-                .map_or_else(String::new, |n| format!(" ({n})"));
+                .map_or_else(String::new, |n| format!(" ({})", theme::count(n)));
             let export_label = if cx.exporting {
                 ui.ctx()
                     .request_repaint_after(std::time::Duration::from_millis(200));
@@ -510,8 +507,14 @@ fn toolbar(
                     .as_ref()
                     .map_or(0, |rows| rows.load(Ordering::Relaxed));
                 match state.total_rows() {
-                    Some(total) => format!("Exporting {done} / {total}…"),
-                    None => format!("Exporting {done}…"),
+                    Some(total) => {
+                        format!(
+                            "Exporting {} / {}…",
+                            theme::count(done),
+                            theme::count(total)
+                        )
+                    }
+                    None => format!("Exporting {}…", theme::count(done)),
                 }
             } else {
                 format!("Export all{total}")
@@ -534,7 +537,10 @@ fn toolbar(
                 ui,
                 has_page,
                 Icon::Copy,
-                Some(&format!("Copy visible ({})", copyable.len())),
+                Some(&format!(
+                    "Copy visible ({})",
+                    theme::count(copyable.len() as u64)
+                )),
                 "Copies only the current preview page",
             ) {
                 let label = rows_label(copyable.len(), "visible");
@@ -654,8 +660,7 @@ fn filter_panel(
         icons::show(ui, Icon::Filter, 13.0, theme::FAINT);
         ui.label(
             RichText::new("Filters")
-                .font(ui_font(12.0))
-                .strong()
+                .font(theme::semibold(12.0))
                 .color(theme::SECONDARY),
         );
         ui.label(
@@ -663,7 +668,13 @@ fn filter_panel(
                 .font(ui_font(12.0))
                 .color(theme::FAINT),
         );
-        let add = icons::button(ui, Icon::Plus, Some("Add filter"), "Add another filter");
+        let add = icons::text_button(
+            ui,
+            Some(Icon::Plus),
+            "Add filter",
+            12.0,
+            "Add another filter",
+        );
         if add.clicked() {
             state.filters.push(FilterDraft::new(
                 columns.first().copied().unwrap_or_default(),
@@ -915,14 +926,14 @@ fn status_bar(
     ui.horizontal_centered(|ui| {
         let total = page
             .total_rows
-            .map_or_else(String::new, |n| format!(" of {n}"));
+            .map_or_else(String::new, |n| format!(" of {}", theme::count(n)));
         let rows = if page.rows.is_empty() {
             format!("No rows{total}")
         } else {
             format!(
                 "Rows {}–{}{total}",
-                page.offset + 1,
-                page.offset + page.rows.len() as u32
+                theme::count(page.offset + 1),
+                theme::count(page.offset + page.rows.len() as u32)
             )
         };
         ui.label(text(rows));
@@ -944,8 +955,10 @@ fn status_bar(
                     .total_rows
                     .map(|n| n.div_ceil(u64::from(page.limit.max(1))).max(1));
                 ui.label(text(match pages {
-                    Some(pages) => format!("Page {current} of {pages}"),
-                    None => format!("Page {current}"),
+                    Some(pages) => {
+                        format!("Page {} of {}", theme::count(current), theme::count(pages))
+                    }
+                    None => format!("Page {}", theme::count(current)),
                 }));
                 if enabled_icon_button(
                     ui,
@@ -981,7 +994,7 @@ fn pending_bar(
             .circle_filled(rect.center(), 4.0, theme::MODIFIED);
         ui.label(
             RichText::new(plural(count, "pending change", "pending changes"))
-                .strong()
+                .font(theme::semibold(13.0))
                 .color(theme::TEXT_STRONG),
         );
         if edited > 0 {
@@ -1178,9 +1191,34 @@ fn loading_overlay(ui: &mut egui::Ui, area: Rect, state: &mut TableState) {
     );
 }
 
+/// The desktop's `defaultColumnWidth`, rule for rule.
+fn default_column_width(data_type: &str) -> f32 {
+    let lower = data_type.to_ascii_lowercase();
+    if lower.contains("json") || lower.contains("array") {
+        320.0
+    } else if lower.contains("timestamp") {
+        230.0
+    } else if lower.contains("text") || lower.contains("character") || lower.contains("uuid") {
+        220.0
+    } else if lower.starts_with("bool") {
+        110.0
+    } else if numeric_column(data_type) {
+        130.0
+    } else {
+        160.0
+    }
+}
+
 fn grid_scope(ui: &mut egui::Ui) {
     ui.spacing_mut().item_spacing = Vec2::ZERO;
-    ui.visuals_mut().widgets.noninteractive.bg_stroke = Stroke::NONE;
+    let widgets = &mut ui.visuals_mut().widgets;
+    widgets.noninteractive.bg_stroke = Stroke::NONE;
+    // `tbody tr:hover { background: rgba(255,255,255,.025) }`; egui_extras
+    // paints `hovered.bg_fill` under the hovered row.
+    widgets.hovered.bg_fill = Color32::from_white_alpha(6);
+    // `.column-resize-handle:hover::after { background: var(--accent) }`.
+    widgets.hovered.bg_stroke = Stroke::new(1.0, theme::ACCENT);
+    widgets.active.bg_stroke = Stroke::new(1.0, theme::ACCENT);
     let band = egui::Rect::from_min_size(
         ui.cursor().min,
         Vec2::new(
@@ -1479,8 +1517,7 @@ fn change_preview_card(
                             } else {
                                 "Pending edit"
                             })
-                            .font(ui_font(12.5))
-                            .strong()
+                            .font(theme::semibold(12.5))
                             .color(theme::TEXT_STRONG),
                         );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1681,7 +1718,7 @@ pub fn result_grid(ui: &mut egui::Ui, tab_id: u64, columns: &[QueryColumn], rows
                                 ui.add_space(6.0);
                                 aligned(ui, numeric[column], |ui| {
                                     ui.add_space(10.0);
-                                    ui.label(cell_text(value));
+                                    ui.add(egui::Label::new(cell_text(value)).truncate());
                                 });
                             });
                         }
@@ -1721,6 +1758,15 @@ fn grid(
     egui::ScrollArea::horizontal()
         .id_salt(("grid-scroll", tab_id, cx.embedded))
         .show(ui, |ui| {
+            // Rows are clickable but keep the arrow cursor, as in the desktop.
+            let visible = ui.clip_rect();
+            theme::plain_cursor_zone(
+                ui,
+                Rect::from_min_max(
+                    egui::pos2(visible.left(), ui.cursor().min.y + theme::HEADER_HEIGHT),
+                    visible.max,
+                ),
+            );
             grid_scope(ui);
             let mut builder = TableBuilder::new(ui)
                 .id_salt(("grid", tab_id, cx.embedded))
@@ -1730,12 +1776,12 @@ fn grid(
                 builder.reset();
             }
             let mut resized = false;
-            for index in 0..columns.len() {
+            for (index, column) in columns.iter().enumerate() {
                 builder = builder.column(if state.collapsed_columns.contains(&index) {
                     Column::exact(COLLAPSED_COLUMN_WIDTH).clip(true)
                 } else {
-                    Column::initial(DEFAULT_COLUMN_WIDTH)
-                        .at_least(60.0)
+                    Column::initial(default_column_width(&column.data_type))
+                        .range(70.0..=800.0)
                         .resizable(true)
                         .clip(true)
                 });
@@ -1751,7 +1797,8 @@ fn grid(
                             let key = page.metadata.primary_key.contains(&column.name);
                             let collapsed = state.collapsed_columns.contains(&index);
                             let width = ui.max_rect().width();
-                            resized |= !collapsed && (width - DEFAULT_COLUMN_WIDTH).abs() > 0.5;
+                            resized |= !collapsed
+                                && (width - default_column_width(&column.data_type)).abs() > 0.5;
                             match header_cell(
                                 ui,
                                 &column.name,
@@ -1849,7 +1896,7 @@ fn grid(
                                 }
                                 aligned(ui, right_align, |ui| {
                                     ui.add_space(10.0);
-                                    ui.label(text);
+                                    ui.add(egui::Label::new(text).truncate());
                                 });
                             });
                             if response.double_clicked()
@@ -1956,7 +2003,8 @@ fn grid(
     }
     // Keyboard: Delete toggles staged deletion for the selection; Escape
     // clears it. Only when no text field has focus.
-    let free = ui.memory(|m| m.focused().is_none());
+    let free =
+        ui.memory(|m| m.focused().is_none()) && theme::focused_last_frame(ui.ctx()).is_none();
     if free
         && !state.selected.is_empty()
         && editable(cx, page)
@@ -1982,13 +2030,18 @@ fn field_editor_id(tab_id: u64, row: usize, column: usize) -> egui::Id {
 /// draft instead, reverting the field.
 fn commit_unfocused_drafts(ui: &egui::Ui, tab_id: u64, state: &mut TableState) {
     let focused = ui.memory(|m| m.focused());
+    // egui has already dropped focus on the frame Escape is pressed.
+    let before = theme::focused_last_frame(ui.ctx());
     let escape = ui.input(|i| i.key_pressed(egui::Key::Escape));
     let keys: Vec<(usize, usize)> = state.drafts.keys().copied().collect();
     for key in keys {
-        let has_focus = focused == Some(cell_editor_id(tab_id, key.0, key.1))
-            || focused == Some(field_editor_id(tab_id, key.0, key.1));
+        let ids = [
+            Some(cell_editor_id(tab_id, key.0, key.1)),
+            Some(field_editor_id(tab_id, key.0, key.1)),
+        ];
+        let has_focus = ids.contains(&focused);
         let opening = state.editing == Some(key) && state.focus_editor;
-        if has_focus && escape {
+        if escape && (has_focus || ids.contains(&before)) {
             state.drafts.remove(&key);
             if let Some(id) = focused {
                 ui.memory_mut(|m| m.surrender_focus(id));
@@ -2029,8 +2082,7 @@ fn inspector(ui: &mut egui::Ui, cx: &TableContext<'_>, state: &mut TableState, p
                 ui.spacing_mut().item_spacing.x = 8.0;
                 ui.label(
                     RichText::new("Row")
-                        .font(ui_font(13.0))
-                        .strong()
+                        .font(theme::semibold(13.0))
                         .color(theme::TEXT_STRONG),
                 );
                 if let Some(index) = single {

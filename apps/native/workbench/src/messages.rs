@@ -202,15 +202,17 @@ fn export_body(ui: &mut egui::Ui, path: &std::path::Path, rows: u64) -> Response
     let font = ui_font(12.5);
     ui.spacing_mut().item_spacing.x = 0.0;
     ui.label(
-        RichText::new(format!("Exported {rows} filtered {noun} to "))
-            .font(font.clone())
-            .color(NOTICE_TEXT),
+        RichText::new(format!(
+            "Exported {} filtered {noun} to ",
+            crate::theme::count(rows)
+        ))
+        .font(font.clone())
+        .color(NOTICE_TEXT),
     );
     let link = ui.add(
         egui::Label::new(
             RichText::new(&name)
-                .font(font.clone())
-                .strong()
+                .font(crate::theme::medium(font.size))
                 .underline()
                 .color(EXPORT_LINK),
         )

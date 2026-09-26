@@ -1124,6 +1124,7 @@ impl eframe::App for Workbench {
             .show(ctx, |ui| self.content_ui(ui));
         self.dialogs(ctx);
         self.toast_ui(ctx);
+        theme::end_frame(ctx);
     }
 }
 
@@ -1173,8 +1174,7 @@ impl Workbench {
                     );
                     ui.label(
                         RichText::new("DBM")
-                            .strong()
-                            .size(14.0)
+                            .font(theme::semibold(13.0))
                             .color(theme::TEXT_STRONG),
                     );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1227,7 +1227,11 @@ impl Workbench {
             .any(|m| m.profile == Some(id) && m.label == "Connecting");
         let width = ui.available_width();
         let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 44.0), Sense::click());
-        let response = response.on_hover_text(if connected { "" } else { "Connect" });
+        let response = if connected {
+            response
+        } else {
+            response.on_hover_text("Connect")
+        };
         response.widget_info(|| {
             egui::WidgetInfo::selected(egui::WidgetType::Button, true, active, &profile.name)
         });
@@ -1380,13 +1384,16 @@ impl Workbench {
                     } else {
                         "Refresh"
                     };
-                    if icon_btn(
-                        ui,
-                        !refreshing,
-                        Icon::Refresh,
-                        Some(label),
-                        "Reload the schema tree",
-                    ) {
+                    let refresh = ui.add_enabled_ui(!refreshing, |ui| {
+                        icons::text_button(
+                            ui,
+                            Some(Icon::Refresh),
+                            label,
+                            11.5,
+                            "Reload the schema tree",
+                        )
+                    });
+                    if refresh.inner.clicked() {
                         self.send(Command::Schema(id), "Refreshing schema", Some(id));
                     }
                 });
@@ -1401,8 +1408,12 @@ impl Workbench {
                     })
                     .desired_width(f32::INFINITY),
             );
-            if response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            // Escape clears the filter and keeps it focused, as in the desktop.
+            let focused =
+                response.has_focus() || theme::focused_last_frame(ui.ctx()) == Some(response.id);
+            if focused && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                 filter.clear();
+                response.request_focus();
             }
             let query = filter.clone();
             let nodes =
@@ -1463,7 +1474,11 @@ impl Workbench {
                         let color = self.profile_color(profile.id);
                         let (rect, _) = ui.allocate_exact_size(Vec2::splat(10.0), Sense::hover());
                         ui.painter().circle_filled(rect.center(), 4.0, color);
-                        ui.label(RichText::new(&profile.name).strong().color(theme::TEXT_STRONG));
+                        ui.label(
+                            RichText::new(&profile.name)
+                                .font(theme::semibold(13.0))
+                                .color(theme::TEXT_STRONG),
+                        );
                         let target = if profile.username.is_empty() {
                             format!("{}:{}/{}", profile.host, profile.port, profile.default_database)
                         } else {
@@ -1589,9 +1604,31 @@ impl Workbench {
             }
             return;
         }
+        // The whole tab is the click target (select, middle-click close,
+        // double-click rename). Its area comes from the last frame so the
+        // buttons laid out on top of it still take their own clicks.
+        let rect_id = egui::Id::new(("tab-rect", tab.id));
+        let last_rect = ui.ctx().data(|d| d.get_temp::<egui::Rect>(rect_id));
+        let hovered = last_rect.is_some_and(|r| ui.rect_contains_pointer(r));
+        if let Some(rect) = last_rect {
+            let whole = ui.interact(rect, rect_id, Sense::click());
+            if whole.clicked() {
+                self.select_tab(tab.id);
+            }
+            if whole.double_clicked() && tab.kind == TabKind::Query {
+                self.renaming = Some((tab.id, tab.title.clone()));
+            }
+            if whole.middle_clicked() {
+                self.close_tab(tab.id);
+                return;
+            }
+        }
         let frame = Frame::new()
             .fill(if active {
                 theme::BG
+            } else if hovered {
+                // `.tab:hover { background: rgba(255,255,255,.04) }`
+                Color32::from_white_alpha(10)
             } else {
                 Color32::TRANSPARENT
             })
@@ -1625,7 +1662,13 @@ impl Workbench {
                     icons::show(ui, glyph, 13.0, color.gamma_multiply(0.85));
                     if let Some((_, draft)) = self.renaming.as_mut().filter(|(id, _)| *id == tab.id)
                     {
-                        let edit = ui.add(egui::TextEdit::singleline(draft).desired_width(120.0));
+                        // `.tab-title-input`: 140 px on the edit surface.
+                        let edit = ui.add(
+                            egui::TextEdit::singleline(draft)
+                                .desired_width(140.0)
+                                .font(theme::ui_font(12.5))
+                                .background_color(theme::EDIT_SURFACE),
+                        );
                         edit.request_focus();
                         if edit.lost_focus() {
                             let escape = ui.input(|i| i.key_pressed(egui::Key::Escape));
@@ -1638,38 +1681,66 @@ impl Workbench {
                             self.renaming = None;
                         }
                     } else {
-                        let title = ui.add(
-                            egui::Label::new(RichText::new(&tab.title).size(12.5).color(
-                                if active {
-                                    theme::TEXT_STRONG
+                        // `.tab-title`: 230 px at most, weight 500 when active.
+                        ui.scope(|ui| {
+                            ui.set_max_width(230.0);
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(&tab.title)
+                                        .font(if active {
+                                            theme::medium(12.5)
+                                        } else {
+                                            theme::ui_font(12.5)
+                                        })
+                                        .color(if active {
+                                            theme::TEXT_STRONG
+                                        } else if hovered {
+                                            theme::TEXT
+                                        } else {
+                                            theme::MUTED
+                                        }),
+                                )
+                                .truncate()
+                                .selectable(false),
+                            );
+                        });
+                        // `.tab-rename`: a pencil after the title on hover. Its
+                        // space is kept so the tab doesn't change width.
+                        let plate = (tab.kind == TabKind::Query)
+                            .then(|| ui.allocate_exact_size(Vec2::splat(22.0), Sense::hover()).0);
+                        if let Some(plate) = plate.filter(|_| hovered) {
+                            let pencil = ui
+                                .interact(
+                                    plate,
+                                    egui::Id::new(("tab-rename", tab.id)),
+                                    Sense::click(),
+                                )
+                                .on_hover_text(format!("Rename {}", tab.title));
+                            ui.painter().rect_filled(
+                                plate,
+                                5,
+                                if pencil.hovered() {
+                                    theme::CONTROL_HOVER
+                                } else if active {
+                                    theme::BG
                                 } else {
-                                    theme::MUTED
+                                    theme::CHROME
                                 },
-                            ))
-                            .truncate()
-                            .sense(Sense::click()),
-                        );
-                        if title.clicked() {
-                            self.select_tab(tab.id);
+                            );
+                            icons::paint(
+                                ui.painter(),
+                                plate.shrink(5.0),
+                                Icon::Pencil,
+                                if pencil.hovered() {
+                                    theme::TEXT
+                                } else {
+                                    theme::FAINT
+                                },
+                            );
+                            if pencil.clicked() {
+                                self.renaming = Some((tab.id, tab.title.clone()));
+                            }
                         }
-                        if title.double_clicked() && tab.kind == TabKind::Query {
-                            self.renaming = Some((tab.id, tab.title.clone()));
-                        }
-                        if title.middle_clicked() {
-                            self.close_tab(tab.id);
-                        }
-                    }
-                    if tab.kind == TabKind::Query
-                        && self.renaming.is_none()
-                        && icon_btn(
-                            ui,
-                            true,
-                            Icon::Pencil,
-                            None,
-                            &format!("Rename {}", tab.title),
-                        )
-                    {
-                        self.renaming = Some((tab.id, tab.title.clone()));
                     }
                     if active
                         && icon_btn(
@@ -1682,12 +1753,19 @@ impl Workbench {
                     {
                         self.collapse_tab(tab.id);
                     }
-                    if icon_btn(ui, true, Icon::Close, None, &format!("Close {}", tab.title)) {
-                        self.close_tab(tab.id);
+                    // Close shows on hover and on the active tab; its space is
+                    // kept so tabs don't shift.
+                    if hovered || active {
+                        if icon_btn(ui, true, Icon::Close, None, &format!("Close {}", tab.title)) {
+                            self.close_tab(tab.id);
+                        }
+                    } else {
+                        ui.add_space(28.0);
                     }
                 });
             })
             .response;
+        ui.ctx().data_mut(|d| d.insert_temp(rect_id, response.rect));
         if active {
             let rect = response.rect;
             ui.painter().rect_filled(
@@ -1921,8 +1999,7 @@ impl Workbench {
             ui.add_space(22.0);
             ui.label(
                 RichText::new(title)
-                    .size(20.0)
-                    .strong()
+                    .font(theme::semibold(20.0))
                     .color(theme::TEXT_STRONG),
             );
             ui.add_space(8.0);
@@ -1963,8 +2040,7 @@ impl Workbench {
                         }));
                         ui.label(
                             RichText::new(&tab.title)
-                                .font(ui_font(15.0))
-                                .strong()
+                                .font(theme::semibold(15.0))
                                 .color(theme::TEXT_STRONG),
                         );
                     });
@@ -2376,7 +2452,11 @@ impl Workbench {
             .inner_margin(Margin::symmetric(12, 9))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("History").strong().color(theme::TEXT_STRONG));
+                    ui.label(
+                        RichText::new("History")
+                            .font(theme::semibold(12.0))
+                            .color(theme::SECONDARY),
+                    );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.label(
                             RichText::new(entries.len().to_string())
@@ -2689,8 +2769,7 @@ fn dialog_title(ui: &mut egui::Ui, eyebrow_text: Option<&str>, title: &str) {
     }
     ui.label(
         RichText::new(title)
-            .size(17.0)
-            .strong()
+            .font(theme::semibold(17.0))
             .color(theme::TEXT_STRONG),
     );
     ui.add_space(10.0);
@@ -2794,7 +2873,8 @@ impl Workbench {
                 dialog_title(ui, None, "Export a large table?");
                 ui.label(
                     RichText::new(format!(
-                        "This export contains {total} rows and may take a while. Continue?"
+                        "This export contains {} rows and may take a while. Continue?",
+                        theme::count(total)
                     ))
                     .color(theme::SECONDARY),
                 );

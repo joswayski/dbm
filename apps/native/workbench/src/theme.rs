@@ -60,6 +60,17 @@ pub fn ui_font(size: f32) -> FontId {
     FontId::proportional(size)
 }
 
+/// Geist at weight 500. egui draws a variable font's default instance only,
+/// so the heavier weights are bundled as static instances.
+pub fn medium(size: f32) -> FontId {
+    FontId::new(size, egui::FontFamily::Name("medium".into()))
+}
+
+/// Geist at weight 600, for headings and primary buttons.
+pub fn semibold(size: f32) -> FontId {
+    FontId::new(size, egui::FontFamily::Name("semibold".into()))
+}
+
 pub fn configure(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
     fonts.font_data.insert(
@@ -80,6 +91,28 @@ pub fn configure(ctx: &egui::Context) {
         .entry(egui::FontFamily::Monospace)
         .or_default()
         .insert(0, "Geist Mono".into());
+    let fallbacks = fonts.families[&egui::FontFamily::Proportional][1..].to_vec();
+    for (family, name, bytes) in [
+        (
+            "medium",
+            "Geist Medium",
+            &include_bytes!("../assets/geist-medium.ttf")[..],
+        ),
+        (
+            "semibold",
+            "Geist SemiBold",
+            &include_bytes!("../assets/geist-semibold.ttf")[..],
+        ),
+    ] {
+        fonts
+            .font_data
+            .insert(name.into(), egui::FontData::from_static(bytes).into());
+        let mut list = vec![name.to_owned()];
+        list.extend(fallbacks.iter().cloned());
+        fonts
+            .families
+            .insert(egui::FontFamily::Name(family.into()), list);
+    }
     ctx.set_fonts(fonts);
 
     let mut visuals = egui::Visuals::dark();
@@ -120,8 +153,6 @@ pub fn configure(ctx: &egui::Context) {
     }
     widgets.inactive.fg_stroke = Stroke::new(1.0, SECONDARY);
     widgets.hovered.fg_stroke = Stroke::new(1.0, TEXT_STRONG);
-    // `cursor: pointer` on every clickable control, as in the desktop app.
-    visuals.interact_cursor = Some(egui::CursorIcon::PointingHand);
     ctx.set_visuals(visuals);
 
     ctx.style_mut(|style| {
@@ -152,12 +183,85 @@ pub fn configure(ctx: &egui::Context) {
     });
 }
 
+/// A count with thousands separators, like `toLocaleString()` in en-US.
+pub fn count(value: impl Into<u64>) -> String {
+    let digits = value.into().to_string();
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+    for (index, digit) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(digit);
+    }
+    out
+}
+
+/// Rectangles, with their layer, where clickable rows keep the arrow cursor
+/// (`.data-grid tbody tr { cursor: default }`).
+#[derive(Clone, Default)]
+struct PlainCursorZones(Vec<(egui::LayerId, egui::Rect)>);
+
+/// Keeps the default cursor over `rect` on `ui`'s layer this frame.
+pub fn plain_cursor_zone(ui: &egui::Ui, rect: egui::Rect) {
+    let layer = ui.layer_id();
+    ui.ctx().data_mut(|d| {
+        d.get_temp_mut_or_default::<PlainCursorZones>(egui::Id::NULL)
+            .0
+            .push((layer, rect));
+    });
+}
+
+/// The widget that had keyboard focus when the previous frame ended. egui
+/// drops focus as soon as Escape is pressed, so Escape handlers ask this.
+pub fn focused_last_frame(ctx: &egui::Context) -> Option<egui::Id> {
+    ctx.data(|d| d.get_temp::<Option<egui::Id>>(egui::Id::new("focused-last-frame")))
+        .flatten()
+}
+
+/// Runs after the UI is built. egui never reads `Visuals::interact_cursor`,
+/// so this applies `button { cursor: pointer }`: a hovered clickable widget
+/// that set no cursor of its own gets the pointing hand, or not-allowed when
+/// disabled. It also records the focused widget for `focused_last_frame`.
+pub fn end_frame(ctx: &egui::Context) {
+    let zones = ctx.data_mut(|d| {
+        d.remove_temp::<PlainCursorZones>(egui::Id::NULL)
+            .unwrap_or_default()
+    });
+    let focused = ctx.memory(|m| m.focused());
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new("focused-last-frame"), focused));
+    if ctx.output(|o| o.cursor_icon) != egui::CursorIcon::Default {
+        return;
+    }
+    let hovered: Vec<egui::Id> = ctx.interaction_snapshot(|s| s.hovered.iter().copied().collect());
+    let pointer = ctx.pointer_hover_pos();
+    for id in hovered {
+        let Some(response) = ctx.read_response(id) else {
+            continue;
+        };
+        if !response.sense.senses_click() {
+            continue;
+        }
+        let plain = zones.0.iter().any(|(layer, rect)| {
+            *layer == response.layer_id && pointer.is_some_and(|p| rect.contains(p))
+        });
+        if plain {
+            continue;
+        }
+        ctx.set_cursor_icon(if response.enabled() {
+            egui::CursorIcon::PointingHand
+        } else {
+            egui::CursorIcon::NotAllowed
+        });
+        return;
+    }
+}
+
 /// Primary action: accent fill, white semibold text. One per surface.
 pub fn primary_button(text: &str) -> egui::Button<'static> {
     egui::Button::new(
         egui::RichText::new(text.to_owned())
             .color(Color32::WHITE)
-            .strong(),
+            .font(semibold(12.5)),
     )
     .fill(ACCENT_STRONG)
     .stroke(Stroke::NONE)
@@ -185,15 +289,20 @@ pub fn chip(ui: &mut egui::Ui, text: &str, color: Color32) -> egui::Response {
 
 /// 11 pt semibold section label in sentence case.
 pub fn section_label(text: &str) -> egui::RichText {
-    egui::RichText::new(text)
-        .font(ui_font(11.0))
-        .strong()
-        .color(MUTED)
+    egui::RichText::new(text).font(semibold(11.0)).color(MUTED)
 }
 
 pub fn eyebrow(text: &str) -> egui::RichText {
-    egui::RichText::new(text)
-        .font(ui_font(10.5))
-        .strong()
-        .color(FAINT)
+    egui::RichText::new(text).font(semibold(10.5)).color(FAINT)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn counts_use_thousands_separators() {
+        assert_eq!(super::count(0u32), "0");
+        assert_eq!(super::count(999u32), "999");
+        assert_eq!(super::count(1_000u32), "1,000");
+        assert_eq!(super::count(1_234_567u64), "1,234,567");
+    }
 }

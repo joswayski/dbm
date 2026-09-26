@@ -291,23 +291,30 @@ pub fn button(ui: &mut egui::Ui, icon: Icon, label: Option<&str>, tooltip: &str)
             theme::SECONDARY,
         )
     });
+    // `.toolbar-button`: 28 px, 9 px padding, a 6% white wash on hover.
     let icon_size = 14.0;
-    let padding = Vec2::new(7.0, 5.0);
+    let padding = Vec2::new(if label.is_some() { 9.0 } else { 7.0 }, 5.0);
     let width = padding.x * 2.0 + icon_size + text.as_ref().map_or(0.0, |g| g.size().x + 6.0);
-    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 26.0), Sense::click());
-    let response = response.on_hover_text(tooltip);
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 28.0), Sense::click());
+    // Titles also explain why a control is disabled, as the desktop's do.
+    let response = if enabled {
+        response.on_hover_text(tooltip)
+    } else {
+        response.on_disabled_hover_text(tooltip)
+    };
     response.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label.unwrap_or(tooltip))
     });
     if ui.is_rect_visible(rect) {
         let hovered = response.hovered() && enabled;
         if hovered || response.has_focus() {
-            ui.painter().rect_filled(rect, 6, theme::CONTROL_HOVER);
+            ui.painter()
+                .rect_filled(rect, 6, Color32::from_white_alpha(15));
         }
         let color = if !enabled {
             theme::FAINT
         } else if hovered {
-            theme::TEXT_STRONG
+            theme::TEXT
         } else {
             theme::SECONDARY
         };
@@ -323,6 +330,62 @@ pub fn button(ui: &mut egui::Ui, icon: Icon, label: Option<&str>, tooltip: &str)
             );
             ui.painter().galley(pos, galley, color);
         }
+    }
+    response
+}
+
+/// `.text-button`: an accent-text link with an optional icon, 12 px medium,
+/// padding 3×6, and an accent wash on hover.
+pub fn text_button(
+    ui: &mut egui::Ui,
+    icon: Option<Icon>,
+    label: &str,
+    size: f32,
+    tooltip: &str,
+) -> Response {
+    let enabled = ui.is_enabled();
+    let galley =
+        ui.painter()
+            .layout_no_wrap(label.to_owned(), theme::medium(size), theme::ACCENT_TEXT);
+    let icon_size = size + 1.0;
+    let icon_width = icon.map_or(0.0, |_| icon_size + 4.0);
+    let (rect, response) = ui.allocate_exact_size(
+        Vec2::new(12.0 + icon_width + galley.size().x, galley.size().y + 6.0),
+        Sense::click(),
+    );
+    let response = if enabled {
+        response.on_hover_text(tooltip)
+    } else {
+        response.on_disabled_hover_text(tooltip)
+    };
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label));
+    if ui.is_rect_visible(rect) {
+        if response.hovered() && enabled {
+            ui.painter().rect_filled(rect, 5, theme::ACCENT_SOFT);
+        }
+        let color = if enabled {
+            theme::ACCENT_TEXT
+        } else {
+            theme::FAINT
+        };
+        let mut x = rect.left() + 6.0;
+        if let Some(icon) = icon {
+            paint(
+                ui.painter(),
+                Rect::from_center_size(
+                    Pos2::new(x + icon_size / 2.0, rect.center().y),
+                    Vec2::splat(icon_size),
+                ),
+                icon,
+                color,
+            );
+            x += icon_width;
+        }
+        ui.painter().galley(
+            Pos2::new(x, rect.center().y - galley.size().y / 2.0),
+            galley,
+            color,
+        );
     }
     response
 }
