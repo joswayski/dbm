@@ -774,30 +774,51 @@ fn query_controls(
     // 6 px between a label and its control, 12 px between groups.
     ui.spacing_mut().item_spacing.x = 6.0;
     labeled(ui, "Preview limit");
-    // The stepper sits inside the field, as in the desktop app.
-    let visuals = ui.visuals().widgets.inactive;
-    let (response, step) = Frame::new()
-        .fill(ui.visuals().extreme_bg_color)
-        .stroke(visuals.bg_stroke)
-        .corner_radius(visuals.corner_radius)
-        .inner_margin(Margin {
-            left: 8,
-            right: 2,
-            top: 0,
-            bottom: 0,
-        })
-        .show(ui, |ui| {
-            ui.spacing_mut().item_spacing.x = 2.0;
-            let response = ui.add(
-                egui::TextEdit::singleline(&mut state.limit_input)
-                    .frame(false)
-                    .desired_width(42.0)
-                    .vertical_align(egui::Align::Center)
-                    .min_size(Vec2::new(42.0, 26.0)),
-            );
-            (response, limit_stepper(ui))
-        })
-        .inner;
+    // `.limit-input-wrap`: an 84×28 mono field with a 22 px stepper column
+    // inside its right edge.
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(84.0, 28.0), Sense::hover());
+    let field = Rect::from_min_max(rect.min, egui::pos2(rect.right() - 23.0, rect.bottom()));
+    ui.painter().rect_filled(rect, 6, theme::CONTROL);
+    // A child UI keeps the parent cursor after the whole 84 px box.
+    let response = ui
+        .new_child(
+            egui::UiBuilder::new()
+                .max_rect(
+                    field
+                        .shrink2(Vec2::new(9.0, 0.0))
+                        .translate(Vec2::new(1.0, 0.0)),
+                )
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        )
+        .add(
+            egui::TextEdit::singleline(&mut state.limit_input)
+                .frame(false)
+                .font(mono(12.0))
+                .desired_width(field.width() - 18.0)
+                .vertical_align(egui::Align::Center),
+        );
+    let focused = response.has_focus();
+    ui.painter().rect(
+        rect,
+        6,
+        Color32::TRANSPARENT,
+        Stroke::new(
+            1.0,
+            if focused {
+                theme::ACCENT
+            } else {
+                theme::BORDER_STRONG
+            },
+        ),
+        egui::StrokeKind::Inside,
+    );
+    let step = limit_stepper(
+        ui,
+        Rect::from_min_max(
+            egui::pos2(rect.right() - 23.0, rect.top() + 1.0),
+            rect.max - Vec2::splat(1.0),
+        ),
+    );
     if response.lost_focus() || step != 0 {
         let limit = state
             .limit_input
@@ -1129,30 +1150,56 @@ fn loading_skeleton(ui: &mut egui::Ui) {
     }
 }
 
-/// Up/down arrows beside the preview limit, like the desktop stepper.
-fn limit_stepper(ui: &mut egui::Ui) -> i64 {
+/// `.limit-stepper`: up/down halves split by `--border-strong` lines, a 6%
+/// wash on hover. Returns +1, -1 or 0.
+fn limit_stepper(ui: &mut egui::Ui, column: Rect) -> i64 {
+    let divider = Stroke::new(1.0, theme::BORDER_STRONG);
+    ui.painter()
+        .vline(column.left() + 0.5, column.y_range(), divider);
     let mut step = 0;
-    ui.vertical(|ui| {
-        ui.spacing_mut().item_spacing.y = 0.0;
-        for (icon, amount, tip) in [
-            (Icon::ChevronUp, 1, "Increase preview limit"),
-            (Icon::ChevronDown, -1, "Decrease preview limit"),
-        ] {
-            let (rect, response) = ui.allocate_exact_size(Vec2::new(16.0, 12.0), Sense::click());
-            let color = if response.hovered() {
-                theme::TEXT
+    let half = column.height() / 2.0;
+    for (index, (icon, amount, tip)) in [
+        (Icon::ChevronUp, 1, "Increase preview limit"),
+        (Icon::ChevronDown, -1, "Decrease preview limit"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let rect = Rect::from_min_size(
+            egui::pos2(column.left() + 1.0, column.top() + half * index as f32),
+            Vec2::new(column.width() - 1.0, half),
+        );
+        let response = ui
+            .interact(rect, ui.id().with(("limit-step", index)), Sense::click())
+            .on_hover_text(tip);
+        let hovered = response.hovered();
+        if hovered {
+            let corner = if index == 0 {
+                egui::CornerRadius {
+                    ne: 5,
+                    ..Default::default()
+                }
             } else {
-                theme::FAINT
+                egui::CornerRadius {
+                    se: 5,
+                    ..Default::default()
+                }
             };
-            if response.hovered() {
-                ui.painter().rect_filled(rect, 2.0, theme::CONTROL_HOVER);
-            }
-            icons::paint(ui.painter(), rect.shrink2(Vec2::new(3.0, 1.0)), icon, color);
-            if response.on_hover_text(tip).clicked() {
-                step = amount;
-            }
+            ui.painter()
+                .rect_filled(rect, corner, Color32::from_white_alpha(15));
         }
-    });
+        icons::paint(
+            ui.painter(),
+            Rect::from_center_size(rect.center(), Vec2::splat(10.0)),
+            icon,
+            if hovered { theme::TEXT } else { theme::MUTED },
+        );
+        if response.clicked() {
+            step = amount;
+        }
+    }
+    ui.painter()
+        .hline(column.x_range(), column.center().y, divider);
     step
 }
 
