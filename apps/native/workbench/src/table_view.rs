@@ -113,6 +113,8 @@ pub struct TableState {
     inspector_open: bool,
     /// Column indexes collapsed to a narrow strip.
     collapsed_columns: BTreeSet<usize>,
+    /// The staged-row hover card, if one is open.
+    preview: Option<PreviewCard>,
 }
 
 impl Default for TableState {
@@ -141,6 +143,7 @@ impl Default for TableState {
             focus_editor: false,
             inspector_open: true,
             collapsed_columns: BTreeSet::new(),
+            preview: None,
         }
     }
 }
@@ -1251,53 +1254,77 @@ fn header_cell(
         );
         return response.clicked().then_some(HeaderClick::Toggle);
     }
-    let response = ui
-        .horizontal_centered(|ui| {
-            ui.spacing_mut().item_spacing.x = 5.0;
-            ui.add_space(10.0);
-            if primary_key {
-                icons::show(ui, Icon::Key, 11.0, theme::MODIFIED).on_hover_text("Primary key");
+    // Hover is read from the pointer, not from a response: the collapse
+    // button registered on top of the sort area would otherwise steal the
+    // hover, hide itself, and flicker on and off every frame.
+    let hovered = ui.rect_contains_pointer(rect);
+    let button = egui::Rect::from_center_size(
+        rect.right_center() - Vec2::new(16.0, 0.0),
+        Vec2::splat(24.0),
+    );
+    let show_collapse = collapsible == Some(false) && hovered;
+    let sort_rect = if show_collapse {
+        egui::Rect::from_min_max(rect.min, egui::pos2(button.left() - 2.0, rect.max.y))
+    } else {
+        rect
+    };
+    let sort_hovered = ui.rect_contains_pointer(sort_rect);
+    if sort_hovered {
+        ui.painter()
+            .rect_filled(sort_rect, 0, Color32::from_white_alpha(8));
+    }
+    ui.horizontal_centered(|ui| {
+        ui.spacing_mut().item_spacing.x = 5.0;
+        ui.add_space(10.0);
+        if primary_key {
+            icons::show(ui, Icon::Key, 11.0, theme::MODIFIED).on_hover_text("Primary key");
+        }
+        ui.label(RichText::new(name).size(12.0).color(if sort.is_some() {
+            theme::TEXT_STRONG
+        } else {
+            theme::TEXT
+        }));
+        if !data_type.is_empty() {
+            ui.label(
+                RichText::new(data_type)
+                    .font(mono(11.0))
+                    .color(theme::FAINT),
+            );
+        }
+        // `.sort-indicator`: an accent arrow for the sorted column, neutral
+        // two-way arrows on hover elsewhere.
+        match sort {
+            Some(true) => {
+                icons::show(ui, Icon::ArrowDown, 12.0, theme::ACCENT_TEXT);
             }
-            ui.label(RichText::new(name).size(12.0).color(if sort.is_some() {
-                theme::TEXT_STRONG
-            } else {
-                theme::TEXT
-            }));
-            if !data_type.is_empty() {
-                ui.label(
-                    RichText::new(data_type)
-                        .font(mono(11.0))
-                        .color(theme::FAINT),
-                );
+            Some(false) => {
+                icons::show(ui, Icon::ArrowUp, 12.0, theme::ACCENT_TEXT);
             }
-            if let Some(descending) = sort {
-                let icon = if descending {
-                    Icon::SortDown
-                } else {
-                    Icon::SortUp
-                };
-                icons::show(ui, icon, 10.0, theme::ACCENT);
+            None if sort_hovered => {
+                icons::show(ui, Icon::Sort, 12.0, Color32::from_rgb(0x5c, 0x5c, 0x62));
             }
-        })
-        .response;
+            None => {}
+        }
+    });
     let sort_click = ui
-        .interact(rect, response.id.with("sort"), Sense::click())
-        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .interact(sort_rect, ui.id().with(("sort", name)), Sense::click())
         .on_hover_text(format!("Sort by {name}"));
-    if collapsible == Some(false) && sort_click.hovered() {
-        let button = egui::Rect::from_center_size(
-            rect.right_center() - Vec2::new(14.0, 0.0),
-            Vec2::splat(20.0),
-        );
+    if show_collapse {
         let toggle = ui
-            .interact(button, response.id.with("collapse"), Sense::click())
+            .interact(button, ui.id().with(("collapse", name)), Sense::click())
             .on_hover_text(format!("Collapse {name}"));
-        ui.painter().rect_filled(button, 5, theme::CONTROL_HOVER);
+        if toggle.hovered() {
+            ui.painter().rect_filled(button, 6, theme::CONTROL_HOVER);
+        }
         icons::paint(
             ui.painter(),
-            button.shrink(4.0),
+            button.shrink(6.0),
             Icon::ChevronLeft,
-            theme::SECONDARY,
+            if toggle.hovered() {
+                theme::TEXT
+            } else {
+                theme::MUTED
+            },
         );
         if toggle.clicked() {
             return Some(HeaderClick::Toggle);
@@ -1306,91 +1333,292 @@ fn header_cell(
     sort_click.clicked().then_some(HeaderClick::Sort)
 }
 
-/// The staged change on a row: before/after with the changed middle marked.
-fn change_preview(
-    ui: &mut egui::Ui,
+/// Opens, keeps, or closes the staged-row card: it follows the hovered
+/// staged row, stays while the pointer is on the card, and closes 140 ms
+/// after the pointer leaves both.
+fn update_preview(
+    ui: &egui::Ui,
+    cx: &TableContext<'_>,
+    state: &mut TableState,
     columns: &[dbm_core::models::TableColumn],
-    pending: &PendingRow,
+    hovered: Option<(usize, Rect)>,
+    discard_row: &mut Option<usize>,
 ) {
-    ui.set_max_width(420.0);
-    if pending.deleted {
-        ui.label(
-            RichText::new("Pending delete")
-                .strong()
-                .color(theme::DANGER),
-        );
-        ui.label(
-            RichText::new("This row will be deleted when changes are saved.")
-                .color(theme::SECONDARY),
-        );
+    let now = ui.input(|i| i.time);
+    if let Some((row, anchor)) = hovered {
+        match &mut state.preview {
+            // Crossing other rows on the way to the card doesn't retarget it.
+            Some(card) if card.row != row && card.close_at.is_some() => {}
+            Some(card) if card.row == row => {
+                card.anchor = anchor;
+                card.close_at = None;
+            }
+            _ => {
+                state.preview = Some(PreviewCard {
+                    row,
+                    anchor,
+                    close_at: None,
+                });
+            }
+        }
+    }
+    let Some(mut card) = state.preview else {
+        return;
+    };
+    let Some(pending) = state.pending.get(&card.row) else {
+        state.preview = None;
+        return;
+    };
+    let id = egui::Id::new(("change-preview", cx.tab_id, cx.embedded));
+    let (over_card, discard) = change_preview_card(ui.ctx(), id, card.anchor, columns, pending);
+    if discard {
+        *discard_row = Some(card.row);
+        state.preview = None;
         return;
     }
-    ui.label(
-        RichText::new("Pending edit")
-            .strong()
-            .color(theme::MODIFIED),
-    );
-    for (index, column) in columns.iter().enumerate() {
-        if pending.changes[index] == pending.original[index] {
-            continue;
+    if over_card || hovered.is_some_and(|(row, _)| row == card.row) {
+        card.close_at = None;
+    } else if let Some(close_at) = card.close_at {
+        if now >= close_at {
+            state.preview = None;
+            return;
         }
-        let diff = inline_diff(
-            &display_value(&pending.original[index]),
-            &display_value(&pending.changes[index]),
-        );
-        ui.add_space(4.0);
-        ui.label(
-            RichText::new(&column.name)
-                .strong()
-                .color(theme::TEXT_STRONG),
-        );
-        let part =
-            |job: &mut egui::text::LayoutJob, text: &str, background: Color32, color: Color32| {
-                job.append(
-                    text,
-                    0.0,
-                    egui::TextFormat {
-                        font_id: mono(12.0),
-                        color,
-                        background,
-                        ..Default::default()
-                    },
-                );
-            };
-        let mut before = egui::text::LayoutJob::default();
-        part(
-            &mut before,
-            &diff.prefix,
-            Color32::TRANSPARENT,
-            theme::MUTED,
-        );
-        part(
-            &mut before,
-            &diff.removed,
-            theme::DANGER_SOFT,
-            theme::DANGER,
-        );
-        part(
-            &mut before,
-            &diff.suffix,
-            Color32::TRANSPARENT,
-            theme::MUTED,
-        );
-        let mut after = egui::text::LayoutJob::default();
-        part(&mut after, &diff.prefix, Color32::TRANSPARENT, theme::TEXT);
-        part(
-            &mut after,
-            &diff.added,
-            Color32::from_rgba_unmultiplied(90, 211, 148, 40),
-            theme::SUCCESS,
-        );
-        part(&mut after, &diff.suffix, Color32::TRANSPARENT, theme::TEXT);
-        ui.horizontal_wrapped(|ui| {
-            ui.label(before);
-            ui.label(RichText::new("→").color(theme::FAINT));
-            ui.label(after);
-        });
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_secs_f64(close_at - now));
+    } else {
+        card.close_at = Some(now + 0.14);
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(140));
     }
+    state.preview = Some(card);
+}
+
+/// The hover card for a staged row, open while the pointer is on the row or
+/// on the card itself.
+#[derive(Clone, Copy)]
+struct PreviewCard {
+    row: usize,
+    /// The row's rectangle when it was last hovered.
+    anchor: Rect,
+    /// When the pointer left both the row and the card.
+    close_at: Option<f64>,
+}
+
+/// The desktop's `ChangePreview`: a card under the staged row with Before →
+/// After per changed column (changed characters marked) or the pending
+/// delete, and a button that discards the change. Returns whether the
+/// pointer is over the card and whether the button was clicked.
+fn change_preview_card(
+    ctx: &egui::Context,
+    id: egui::Id,
+    anchor: Rect,
+    columns: &[dbm_core::models::TableColumn],
+    pending: &PendingRow,
+) -> (bool, bool) {
+    let screen = ctx.content_rect();
+    let changes: Vec<(&str, String, String)> = columns
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| pending.changes[*index] != pending.original[*index])
+        .map(|(index, column)| {
+            (
+                column.name.as_str(),
+                display_value(&pending.original[index]),
+                display_value(&pending.changes[index]),
+            )
+        })
+        .collect();
+    let longest = changes
+        .iter()
+        .map(|(_, before, after)| before.chars().count().max(after.chars().count()))
+        .max()
+        .unwrap_or(0);
+    let ideal = longest.min(42) as f32 * 7.0 * 2.0 + 90.0;
+    let width = ideal.clamp(380.0, 680.0).min(screen.width() - 32.0);
+    let left = (anchor.left() + 16.0).clamp(screen.left() + 16.0, screen.right() - width - 16.0);
+    let space_below = (screen.bottom() - anchor.bottom() - 16.0).max(0.0);
+    let space_above = (anchor.top() - screen.top() - 16.0).max(0.0);
+    let below = space_below >= 260.0 || space_below >= space_above;
+    let max_height = (if below { space_below } else { space_above }).clamp(140.0, 520.0);
+    let (position, pivot) = if below {
+        (egui::pos2(left, anchor.bottom()), egui::Align2::LEFT_TOP)
+    } else {
+        (egui::pos2(left, anchor.top()), egui::Align2::LEFT_BOTTOM)
+    };
+    let mut discard = false;
+    let area = egui::Area::new(id)
+        .order(egui::Order::Foreground)
+        .fixed_pos(position)
+        .pivot(pivot)
+        .constrain(false)
+        .show(ctx, |ui| {
+            Frame::new()
+                .fill(theme::POPOVER)
+                .stroke(Stroke::new(1.0, theme::BORDER_STRONG))
+                .corner_radius(10)
+                .inner_margin(12)
+                .shadow(ui.visuals().popup_shadow)
+                .show(ui, |ui| {
+                    ui.set_width(width - 24.0);
+                    ui.spacing_mut().item_spacing.y = 10.0;
+                    ui.horizontal(|ui| {
+                        let (dot, _) = ui.allocate_exact_size(Vec2::splat(7.0), Sense::hover());
+                        ui.painter().circle_filled(
+                            dot.center(),
+                            3.5,
+                            if pending.deleted {
+                                theme::DANGER
+                            } else {
+                                theme::MODIFIED
+                            },
+                        );
+                        ui.label(
+                            RichText::new(if pending.deleted {
+                                "Pending delete"
+                            } else {
+                                "Pending edit"
+                            })
+                            .font(ui_font(12.5))
+                            .strong()
+                            .color(theme::TEXT_STRONG),
+                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let label = if pending.deleted {
+                                "Undo delete"
+                            } else {
+                                "Discard edit"
+                            };
+                            let button =
+                                egui::Button::new(RichText::new(label).font(ui_font(12.0)))
+                                    .min_size(Vec2::new(0.0, 26.0));
+                            if ui.add(button).clicked() {
+                                discard = true;
+                            }
+                        });
+                    });
+                    if pending.deleted {
+                        ui.label(
+                            RichText::new("This row will be deleted when changes are saved.")
+                                .font(ui_font(12.0))
+                                .color(theme::MUTED),
+                        );
+                        return;
+                    }
+                    egui::ScrollArea::vertical()
+                        .max_height(max_height - 60.0)
+                        .auto_shrink([false, true])
+                        .show(ui, |ui| {
+                            for (name, before, after) in &changes {
+                                change_diff(ui, name, before, after);
+                            }
+                        });
+                });
+        });
+    let hovered = area.response.contains_pointer();
+    (hovered, discard)
+}
+
+/// `.change-diff`: a rule, the mono column name, then Before → After boxes.
+fn change_diff(ui: &mut egui::Ui, name: &str, before: &str, after: &str) {
+    let diff = inline_diff(before, after);
+    let (rule, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 1.0), Sense::hover());
+    ui.painter().rect_filled(rule, 0, theme::BORDER);
+    ui.add_space(-4.0);
+    ui.label(RichText::new(name).font(mono(11.5)).color(theme::SECONDARY));
+    ui.add_space(-4.0);
+    let box_width = ((ui.available_width() - 16.0 - 16.0) / 2.0).max(60.0);
+    ui.horizontal_top(|ui| {
+        ui.spacing_mut().item_spacing.x = 8.0;
+        diff_box(
+            ui,
+            box_width,
+            "Before",
+            [&diff.prefix, &diff.removed, &diff.suffix],
+            Color32::from_rgb(0x1e, 0x1e, 0x20),
+            theme::MUTED,
+            Color32::from_rgba_unmultiplied(255, 107, 97, 56),
+        );
+        // Geist has no arrow glyph, so the arrow is drawn.
+        ui.vertical(|ui| {
+            ui.add_space(26.0);
+            icons::show(ui, Icon::ArrowRight, 14.0, theme::FAINT);
+        });
+        diff_box(
+            ui,
+            box_width,
+            "After",
+            [&diff.prefix, &diff.added, &diff.suffix],
+            theme::MODIFIED_SOFT,
+            theme::TEXT_STRONG,
+            Color32::from_rgba_unmultiplied(240, 177, 76, 82),
+        );
+    });
+}
+
+/// `.change-diff-values pre`: wrapped mono text with the changed middle marked.
+fn diff_box(
+    ui: &mut egui::Ui,
+    width: f32,
+    caption: &str,
+    [prefix, changed, suffix]: [&String; 3],
+    fill: Color32,
+    color: Color32,
+    mark: Color32,
+) {
+    const LIMIT: usize = 600;
+    ui.vertical(|ui| {
+        ui.set_width(width);
+        ui.spacing_mut().item_spacing.y = 4.0;
+        ui.label(
+            RichText::new(caption)
+                .font(ui_font(11.0))
+                .color(theme::FAINT),
+        );
+        let mut job = egui::text::LayoutJob::default();
+        let mut used = 0;
+        for (part, marked) in [(prefix, false), (changed, true), (suffix, false)] {
+            let text: String = part.chars().take(LIMIT.saturating_sub(used)).collect();
+            used += text.chars().count();
+            if text.is_empty() {
+                continue;
+            }
+            job.append(
+                &text,
+                0.0,
+                egui::TextFormat {
+                    font_id: mono(11.5),
+                    color,
+                    background: if marked { mark } else { Color32::TRANSPARENT },
+                    ..Default::default()
+                },
+            );
+        }
+        if prefix.chars().count() + changed.chars().count() + suffix.chars().count() > LIMIT {
+            job.append(
+                "…",
+                0.0,
+                egui::TextFormat {
+                    font_id: mono(11.5),
+                    color: theme::FAINT,
+                    ..Default::default()
+                },
+            );
+        }
+        job.wrap = egui::text::TextWrapping {
+            max_width: width - 16.0,
+            max_rows: 12,
+            break_anywhere: true,
+            ..Default::default()
+        };
+        Frame::new()
+            .fill(fill)
+            .corner_radius(6)
+            .inner_margin(Margin::symmetric(8, 6))
+            .show(ui, |ui| {
+                ui.set_width(width - 16.0);
+                ui.label(job);
+            });
+    });
 }
 
 /// Read-only query results.
@@ -1481,6 +1709,7 @@ fn grid(
     let mut edit_cell = None;
     let mut toggled_column = None;
     let mut discard_row = None;
+    let mut hovered_preview = None;
     let modifiers = ui.input(|i| i.modifiers);
     if page.rows.is_empty() {
         ui.centered_and_justified(|ui| {
@@ -1630,10 +1859,9 @@ fn grid(
                             }
                         }
                         let preview = state.pending.get(&index).cloned();
-                        let mut response = row.response();
-                        if let Some(preview) = &preview {
-                            response =
-                                response.on_hover_ui(|ui| change_preview(ui, columns, preview));
+                        let response = row.response();
+                        if preview.is_some() && response.hovered() {
+                            hovered_preview = Some((index, response.rect));
                         }
                         if response.clicked() {
                             clicked_row = Some(index);
@@ -1665,8 +1893,17 @@ fn grid(
     {
         state.collapsed_columns.insert(index);
     }
+    update_preview(ui, cx, state, columns, hovered_preview, &mut discard_row);
     if let Some(row) = discard_row {
-        state.pending.remove(&row);
+        // Undoing a delete keeps the row's edits, as `discardPendingRow` does.
+        match state.pending.get_mut(&row) {
+            Some(pending) if pending.deleted && pending.changes != pending.original => {
+                pending.deleted = false;
+            }
+            _ => {
+                state.pending.remove(&row);
+            }
+        }
     }
     if let Some(column) = sort_clicked {
         if state.pending.is_empty() {

@@ -30,8 +30,11 @@ pub enum Icon {
     Check,
     Alert,
     Code,
-    SortUp,
-    SortDown,
+    /// Neutral two-way sort arrows, shown on a hovered unsorted header.
+    Sort,
+    ArrowUp,
+    ArrowDown,
+    ArrowRight,
     Folder,
     Trash,
     Undo,
@@ -239,19 +242,23 @@ pub fn paint(painter: &egui::Painter, rect: Rect, icon: Icon, color: Color32) {
             path(vec![p(6.0, 4.5), p(2.5, 8.0), p(6.0, 11.5)]);
             path(vec![p(10.0, 4.5), p(13.5, 8.0), p(10.0, 11.5)]);
         }
-        Icon::SortUp => {
-            painter.add(Shape::convex_polygon(
-                vec![p(8.0, 5.0), p(11.5, 10.5), p(4.5, 10.5)],
-                color,
-                Stroke::NONE,
-            ));
+        Icon::Sort => {
+            path(vec![p(4.67, 2.67), p(4.67, 13.33)]);
+            path(vec![p(2.67, 11.33), p(4.67, 13.33), p(6.67, 11.33)]);
+            path(vec![p(11.33, 13.33), p(11.33, 2.67)]);
+            path(vec![p(9.33, 4.67), p(11.33, 2.67), p(13.33, 4.67)]);
         }
-        Icon::SortDown => {
-            painter.add(Shape::convex_polygon(
-                vec![p(4.5, 5.5), p(11.5, 5.5), p(8.0, 11.0)],
-                color,
-                Stroke::NONE,
-            ));
+        Icon::ArrowUp => {
+            line(p(8.0, 12.67), p(8.0, 3.33));
+            path(vec![p(4.0, 7.33), p(8.0, 3.33), p(12.0, 7.33)]);
+        }
+        Icon::ArrowRight => {
+            line(p(3.33, 8.0), p(12.67, 8.0));
+            path(vec![p(8.67, 4.0), p(12.67, 8.0), p(8.67, 12.0)]);
+        }
+        Icon::ArrowDown => {
+            line(p(8.0, 3.33), p(8.0, 12.67));
+            path(vec![p(4.0, 8.67), p(8.0, 12.67), p(12.0, 8.67)]);
         }
     }
 }
