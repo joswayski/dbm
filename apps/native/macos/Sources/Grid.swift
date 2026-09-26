@@ -189,6 +189,18 @@ final class GridHeaderView: NSTableHeaderView {
         }
     }
 
+    /// Text for the tooltip rects above; NSTableHeaderView owns the protocol.
+    override func view(_ view: NSView, stringForToolTip tag: NSView.ToolTipTag, point: NSPoint,
+                       userData data: UnsafeMutableRawPointer?) -> String {
+        let column = self.column(at: point)
+        guard column >= 0, let tableColumn = tableView?.tableColumns[column] else { return "" }
+        let name = tableColumn.title
+        let collapsed = (tableColumn.headerCell as? GridHeaderCell)?.collapsed == true
+        if collapsed { return "Expand \(name)" }
+        let onButton = point.x > headerRect(ofColumn: column).maxX - GridHeaderCell.collapseWidth
+        return onButton ? "Collapse \(name)" : "Sort by \(name)"
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         // Rebuild the rects after a column resize, move, or collapse.
         let signature = (tableView?.tableColumns ?? []).map {
@@ -211,19 +223,6 @@ final class GridHeaderView: NSTableHeaderView {
         super.draw(dirtyRect)
         Graphite.border.setFill()
         NSRect(x: 0, y: bounds.height - 1, width: bounds.width, height: 1).fill()
-    }
-}
-
-extension GridHeaderView: NSViewToolTipOwner {
-    func view(_ view: NSView, stringForToolTip tag: NSView.ToolTipTag, point: NSPoint,
-              userData data: UnsafeMutableRawPointer?) -> String {
-        let column = self.column(at: point)
-        guard column >= 0, let tableColumn = tableView?.tableColumns[column] else { return "" }
-        let name = tableColumn.title
-        let collapsed = (tableColumn.headerCell as? GridHeaderCell)?.collapsed == true
-        if collapsed { return "Expand \(name)" }
-        let onButton = point.x > headerRect(ofColumn: column).maxX - GridHeaderCell.collapseWidth
-        return onButton ? "Collapse \(name)" : "Sort by \(name)"
     }
 }
 
