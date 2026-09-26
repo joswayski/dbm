@@ -1316,14 +1316,15 @@ fn header_cell(
         if toggle.hovered() {
             ui.painter().rect_filled(button, 6, theme::CONTROL_HOVER);
         }
+        // `.collapse-column`: the desktop's bar-and-arrow collapse glyph.
         icons::paint(
             ui.painter(),
             button.shrink(6.0),
-            Icon::ChevronLeft,
+            Icon::Collapse,
             if toggle.hovered() {
                 theme::TEXT
             } else {
-                theme::MUTED
+                theme::FAINT
             },
         );
         if toggle.clicked() {
