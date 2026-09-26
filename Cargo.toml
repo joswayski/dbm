@@ -1,5 +1,5 @@
 [workspace]
-members = ["apps/desktop/src-tauri", "crates/dbm-core", "apps/native/bridge"]
+members = ["apps/desktop/src-tauri", "crates/dbm-core", "crates/dbm-update", "apps/native/bridge"]
 resolver = "2"
 
 [workspace.package]

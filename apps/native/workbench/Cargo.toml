@@ -10,6 +10,7 @@ publish = false
 [dependencies]
 chrono = "0.4"
 dbm-core = { path = "../../../crates/dbm-core" }
+dbm-update = { path = "../../../crates/dbm-update" }
 eframe = { version = "=0.33.3", default-features = false, features = ["accesskit", "default_fonts", "persistence", "wgpu", "wayland", "x11"] }
 wgpu = { version = "=27.0.1", default-features = false, features = ["std", "vulkan", "dx12", "metal", "wgsl"] }
 egui_extras = "=0.33.3"

@@ -298,3 +298,48 @@ Automatic releases skip the checks below. Before recommending DBM to others:
 - [GitHub: artifact attestations](https://docs.github.com/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations)
 - [Tauri: Linux code signing](https://v2.tauri.app/distribute/sign/linux/)
 - [Debian: package and repository signing](https://www.debian.org/doc/manuals/securing-debian-manual/deb-pack-sign.en.html)
+
+## Native preview channel
+
+The native apps (AppKit on macOS, egui on Windows and Linux) ship separately
+from the Tauri release, through one rolling pre-release tagged
+`native-preview`. `.github/workflows/native-preview.yml` runs on every merge to
+`main` that touches `apps/native/`, `crates/`, or the Cargo manifests, and on
+manual dispatch. It uses the same `release` environment secrets as the Tauri
+release; no new secrets are needed.
+
+- **Build number:** the workflow's run number, compiled in as
+  `DBM_NATIVE_BUILD` and written to the app bundle's `CFBundleVersion`.
+  Development builds have none and never check for updates.
+- **macOS:** `build.sh` signs the bridge dylib and the app with the Developer
+  ID and the hardened runtime. The app is notarized and stapled, zipped for
+  the updater (`DBM-Native-macOS.zip`), and packaged into a signed, notarized,
+  stapled `DBM-Native-macOS.dmg` for first installs. Gatekeeper opens it
+  without a warning.
+- **Windows and Linux:** the release `dbm-workbench` executables, published as
+  `DBM-Native-Windows-x64.exe` and `DBM-Native-Linux-x64`. The Windows build is
+  not Authenticode-signed yet, so SmartScreen may still warn on first run.
+- **Updater signatures:** every updater artifact is signed with the Tauri
+  updater key (`npx tauri signer sign`). `crates/dbm-update` verifies it
+  against the public key from `tauri.conf.json` before installing anything.
+- **Manifest:** `native-latest.json` lists the build number, version text,
+  notes (the merge commit's subject), and each platform's URL and signature.
+  The workflow uploads the binaries first and the manifest last.
+
+Installed native builds check the manifest five seconds after launch and every
+30 minutes. The top bar then offers **Update to build N**. Installing asks for
+confirmation, because unsaved query text and staged edits are discarded. It
+then downloads and verifies the build, swaps it in, and restarts.
+
+- On macOS the new bundle must also pass `codesign --verify`. The app must sit
+  in a folder the user can write to, such as `/Applications`.
+- On Windows the running executable is renamed aside and removed on the next
+  launch.
+
+The channel never becomes the latest release, so the Tauri app's updater, which
+reads `releases/latest/download/latest.json`, is unaffected.
+
+The first native preview must be installed by hand from the `native-preview`
+release page; later builds arrive automatically. Debug builds can test the
+updater against a local channel by setting `DBM_UPDATE_MANIFEST` and
+`DBM_UPDATE_PUBLIC_KEY`; release builds ignore both.

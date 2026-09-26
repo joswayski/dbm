@@ -314,6 +314,10 @@ pub struct Workbench {
     confirm_delete: Option<Uuid>,
     confirm_query: Option<ConfirmQuery>,
     confirm_export: Option<u64>,
+    /// Self-updates from the native preview channel.
+    updates: crate::updates::Updates,
+    /// A downloaded-on-confirm update awaiting the user's go-ahead.
+    confirm_update: Option<dbm_update::Available>,
     renaming: Option<(u64, String)>,
     sidebar_collapsed: bool,
     /// The sidebar's resize edge was clicked; arrow keys resize it.
@@ -361,6 +365,8 @@ impl Workbench {
             confirm_delete: None,
             confirm_query: None,
             confirm_export: None,
+            updates: crate::updates::Updates::new(),
+            confirm_update: None,
             renaming: None,
             sidebar_collapsed: false,
             sidebar_handle_focused: false,
@@ -1103,6 +1109,9 @@ impl eframe::App for Workbench {
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.now = ctx.input(|input| input.time);
+        if !self.demo {
+            self.updates.poll(ctx, self.now);
+        }
         self.window_width = ctx.content_rect().width();
         self.drain();
         if ctx.input(|input| input.viewport().close_requested()) {
@@ -1599,6 +1608,32 @@ impl Workbench {
                         ui.label(RichText::new("No active connection").color(theme::MUTED));
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        // `.update-control`: only on channel builds.
+                        if self.updates.enabled() && !self.demo {
+                            let label = self.updates.label();
+                            let button = match &self.updates.state {
+                                crate::updates::State::Available(_) => theme::accent_button(&label),
+                                _ => theme::secondary_button(&label),
+                            }
+                            .small();
+                            let busy = matches!(
+                                self.updates.state,
+                                crate::updates::State::Checking | crate::updates::State::Installing
+                            );
+                            let detail = self.updates.detail();
+                            let response = ui
+                                .add_enabled(!busy, button)
+                                .on_hover_text(&detail)
+                                .on_disabled_hover_text(&detail);
+                            if response.clicked() {
+                                match &self.updates.state {
+                                    crate::updates::State::Available(update) => {
+                                        self.confirm_update = Some(update.clone());
+                                    }
+                                    _ => self.updates.check(ctx, false),
+                                }
+                            }
+                        }
                         if self.demo {
                             chip(ui, "Demo fixture · not a live connection", theme::MODIFIED)
                                 .on_hover_text("Isolated deterministic data; profiles and edits are not persisted.");
@@ -3130,6 +3165,39 @@ impl Workbench {
                     if run {
                         self.run_query(confirm.tab, confirm.sql, confirm.refresh, true);
                     }
+                }
+            }
+        }
+        if let Some(update) = self.confirm_update.clone() {
+            let choice = modal(ctx, "Install update", 420.0, |ui| {
+                dialog_title(
+                    ui,
+                    None,
+                    &format!("Install build {} and restart now?", update.build),
+                );
+                ui.label(
+                    RichText::new("Unsaved query text and pending table edits will be lost.")
+                        .color(theme::SECONDARY),
+                );
+                ui.add_space(14.0);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.add(primary_button("Install and restart")).clicked() {
+                        return Some(true);
+                    }
+                    if ui.add(theme::secondary_button("Later")).clicked()
+                        || ui.input(|i| i.key_pressed(egui::Key::Escape))
+                    {
+                        return Some(false);
+                    }
+                    None
+                })
+                .inner
+            })
+            .flatten();
+            if let Some(install) = choice {
+                self.confirm_update = None;
+                if install {
+                    self.updates.install(ctx, update);
                 }
             }
         }

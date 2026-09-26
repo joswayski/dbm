@@ -176,6 +176,17 @@ enum Request {
         next: Vec<SchemaNode>,
         kind: String,
     },
+    // Self-updates from the native preview channel. They block on the
+    // network, so hosts call them off the main thread.
+    /// This build's channel number, or null for development builds.
+    UpdateCurrent {},
+    /// A newer signed build for this platform, or null.
+    UpdateCheck {},
+    /// Downloads and verifies `update` into `directory`; returns the file path.
+    UpdateDownload {
+        update: dbm_update::Available,
+        directory: String,
+    },
 }
 
 enum Backend {
@@ -393,6 +404,19 @@ fn helper_value(request: Request) -> Result<Value, String> {
             serde_json::to_value(completions(engine, &prefix))
         }
         Request::InlineDiff { before, after } => serde_json::to_value(inline_diff(&before, &after)),
+        Request::UpdateCurrent {} => {
+            Ok(dbm_update::current_build().map_or(Value::Null, Value::from))
+        }
+        Request::UpdateCheck {} => {
+            let Some(current) = dbm_update::current_build() else {
+                return Ok(Value::Null);
+            };
+            serde_json::to_value(dbm_update::check(current)?)
+        }
+        Request::UpdateDownload { update, directory } => {
+            let path = dbm_update::download(&update, std::path::Path::new(&directory))?;
+            Ok(Value::String(path.to_string_lossy().into_owned()))
+        }
         Request::DescribeSchemaRefresh {
             previous,
             next,
