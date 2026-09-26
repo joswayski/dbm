@@ -265,6 +265,7 @@ pub fn end_frame(ctx: &egui::Context) {
     });
     let focused = ctx.memory(|m| m.focused());
     ctx.data_mut(|d| d.insert_temp(egui::Id::new("focused-last-frame"), focused));
+    focus_ring(ctx, focused);
     if ctx.output(|o| o.cursor_icon) != egui::CursorIcon::Default {
         return;
     }
@@ -290,6 +291,37 @@ pub fn end_frame(ctx: &egui::Context) {
         });
         return;
     }
+}
+
+/// `:focus-visible { outline: 2px solid rgba(76,154,255,.35); outline-offset:
+/// 1px }`: a ring around the focused control, only after Tab navigation (a
+/// pointer press hides it again), as a browser draws focus-visible.
+fn focus_ring(ctx: &egui::Context, focused: Option<egui::Id>) {
+    let key = egui::Id::new("keyboard-navigation");
+    let (tab, pointer) = ctx.input(|i| (i.key_pressed(egui::Key::Tab), i.pointer.any_pressed()));
+    let mut keyboard = ctx.data(|d| d.get_temp::<bool>(key)).unwrap_or(false);
+    if tab {
+        keyboard = true;
+    }
+    if pointer {
+        keyboard = false;
+    }
+    ctx.data_mut(|d| d.insert_temp(key, keyboard));
+    let Some(response) = keyboard
+        .then_some(focused)
+        .flatten()
+        .and_then(|id| ctx.read_response(id))
+    else {
+        return;
+    };
+    ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, key))
+        .with_clip_rect(response.interact_rect.expand(4.0))
+        .rect_stroke(
+            response.rect.expand(2.0),
+            8,
+            Stroke::new(2.0, Color32::from_rgba_unmultiplied(76, 154, 255, 89)),
+            egui::StrokeKind::Middle,
+        );
 }
 
 /// Primary action: accent fill, white semibold text. One per surface.

@@ -316,6 +316,8 @@ pub struct Workbench {
     confirm_export: Option<u64>,
     renaming: Option<(u64, String)>,
     sidebar_collapsed: bool,
+    /// The sidebar's resize edge was clicked; arrow keys resize it.
+    sidebar_handle_focused: bool,
     completion: Option<Completion>,
     now: f64,
     /// The window's width this frame, for layout defaults.
@@ -361,6 +363,7 @@ impl Workbench {
             confirm_export: None,
             renaming: None,
             sidebar_collapsed: false,
+            sidebar_handle_focused: false,
             completion: None,
             now: 0.0,
             window_width: 1280.0,
@@ -1160,6 +1163,38 @@ impl Workbench {
         if handle.as_ref().is_some_and(egui::Response::double_clicked) {
             ctx.data_mut(|d| d.remove::<egui::containers::panel::PanelState>(panel_id));
         }
+        // A click on the edge selects it, like the desktop's focusable
+        // separator; a click elsewhere or Escape releases it.
+        let press = ctx.input(|i| {
+            i.pointer
+                .any_pressed()
+                .then(|| i.pointer.latest_pos())
+                .flatten()
+        });
+        if let Some(origin) = press {
+            self.sidebar_handle_focused = handle
+                .as_ref()
+                .is_some_and(|r| r.interact_rect.contains(origin));
+        }
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.sidebar_handle_focused = false;
+        }
+        // Arrow keys step the width by 10 px within 220-480.
+        if self.sidebar_handle_focused && ctx.memory(|m| m.focused().is_none()) {
+            let delta = ctx.input_mut(|i| {
+                let none = egui::Modifiers::NONE;
+                let right = i.consume_key(none, egui::Key::ArrowRight);
+                let left = i.consume_key(none, egui::Key::ArrowLeft);
+                f32::from(i8::from(right) - i8::from(left)) * 10.0
+            });
+            if delta != 0.0 {
+                if let Some(mut state) = egui::containers::panel::PanelState::load(ctx, panel_id) {
+                    let width = (state.rect.width() + delta).clamp(220.0, 480.0);
+                    state.rect.set_width(width);
+                    ctx.data_mut(|d| d.insert_persisted(panel_id, state));
+                }
+            }
+        }
         let panel = egui::SidePanel::left(panel_id)
             .resizable(true)
             .default_width(260.0)
@@ -1250,7 +1285,7 @@ impl Workbench {
             });
         // A 2 px accent line while the edge is hovered or dragged, painted
         // over egui's own 1 px line.
-        if handle.is_some_and(|r| r.hovered() || r.dragged()) {
+        if self.sidebar_handle_focused || handle.is_some_and(|r| r.hovered() || r.dragged()) {
             let edge = panel.response.rect.right();
             ctx.layer_painter(egui::LayerId::new(
                 egui::Order::Foreground,
