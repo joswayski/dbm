@@ -425,3 +425,28 @@ pub fn menu_trigger(ui: &mut egui::Ui, label: &str, tooltip: &str) -> Response {
     );
     response
 }
+
+/// `.icon-toggle`: 30×28, a 6% wash on hover; when on, an accent-soft fill
+/// with an accent icon.
+pub fn toggle(ui: &mut egui::Ui, icon: Icon, on: bool, tooltip: &str) -> Response {
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(30.0, 28.0), Sense::click());
+    let response = response.on_hover_text(tooltip);
+    response
+        .widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, on, tooltip));
+    let hovered = response.hovered();
+    let (fill, color) = if on {
+        (theme::ACCENT_SOFT, theme::ACCENT_TEXT)
+    } else if hovered {
+        (Color32::from_white_alpha(15), theme::TEXT)
+    } else {
+        (Color32::TRANSPARENT, theme::MUTED)
+    };
+    ui.painter().rect_filled(rect, 6, fill);
+    paint(
+        ui.painter(),
+        Rect::from_center_size(rect.center(), Vec2::splat(14.0)),
+        icon,
+        color,
+    );
+    response
+}

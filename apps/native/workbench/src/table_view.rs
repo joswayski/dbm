@@ -110,7 +110,7 @@ pub struct TableState {
     pub drafts: HashMap<(usize, usize), String>,
     editing: Option<(usize, usize)>,
     focus_editor: bool,
-    inspector_open: bool,
+    pub inspector_open: bool,
     /// Column indexes collapsed to a narrow strip.
     collapsed_columns: BTreeSet<usize>,
     /// The staged-row hover card, if one is open.
@@ -337,12 +337,8 @@ pub struct TableContext<'a> {
 pub fn show(ui: &mut egui::Ui, cx: &TableContext<'_>, state: &mut TableState) -> Vec<TableAction> {
     let mut actions = Vec::new();
     let id = |name: &str| egui::Id::new((name, cx.tab_id, cx.embedded));
-    let bar = |margin: Margin| {
-        Frame::new()
-            .fill(theme::CHROME)
-            .inner_margin(margin)
-            .stroke(Stroke::new(1.0, theme::BORDER))
-    };
+    // Panels draw their own one-edge separator, so frames carry no stroke.
+    let bar = |margin: Margin| Frame::new().fill(theme::CHROME).inner_margin(margin);
 
     egui::TopBottomPanel::top(id("table-toolbar"))
         .exact_height(theme::TOOLBAR_HEIGHT)
@@ -465,21 +461,12 @@ fn toolbar(
             );
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let (tip, fill) = if state.inspector_open {
-                ("Hide row inspector", Some(theme::ACCENT_SOFT))
+            let tip = if state.inspector_open {
+                "Hide row inspector"
             } else {
-                ("Show row inspector", None)
+                "Show row inspector"
             };
-            let toggle = icons::button(ui, Icon::Inspector, None, tip);
-            if let Some(fill) = fill {
-                ui.painter().rect_stroke(
-                    toggle.rect,
-                    6,
-                    Stroke::new(1.0, theme::ACCENT.gamma_multiply(0.6)),
-                    egui::StrokeKind::Inside,
-                );
-                ui.painter().rect_filled(toggle.rect, 6, fill);
-            }
+            let toggle = icons::toggle(ui, Icon::Inspector, state.inspector_open, tip);
             if toggle.clicked() {
                 state.inspector_open = !state.inspector_open;
             }
@@ -925,7 +912,15 @@ fn status_bar(
     page: &TablePage,
     actions: &mut Vec<TableAction>,
 ) {
-    let text = |t: String| RichText::new(t).font(ui_font(12.0)).color(theme::MUTED);
+    // `.status-bar`: 11.5 px #8e8e93; the page label is `--secondary`.
+    let text = |t: String| {
+        let color = if t.starts_with("Page") {
+            theme::SECONDARY
+        } else {
+            Color32::from_rgb(0x8e, 0x8e, 0x93)
+        };
+        RichText::new(t).font(ui_font(11.5)).color(color)
+    };
     ui.horizontal_centered(|ui| {
         let total = page
             .total_rows
@@ -1175,22 +1170,32 @@ fn loading_overlay(ui: &mut egui::Ui, area: Rect, state: &mut TableState) {
             .request_repaint_after(std::time::Duration::from_secs_f64(0.12 - (now - since)));
         return;
     }
+    // `loading-overlay-in`: fades in over 180 ms.
+    let fade = (((now - since - 0.12) / 0.18) as f32).clamp(0.0, 1.0);
+    if fade < 1.0 {
+        ui.ctx().request_repaint();
+    }
     let painter = ui.painter_at(area);
-    painter.rect_filled(area, 0.0, Color32::from_black_alpha(90));
+    // `rgba(22, 22, 24, .35)`
+    painter.rect_filled(
+        area,
+        0.0,
+        Color32::from_rgba_unmultiplied(22, 22, 24, 89).gamma_multiply(fade),
+    );
     let galley =
         painter.layout_no_wrap("Refreshing…".into(), theme::ui_font(12.0), theme::SECONDARY);
     let pill = Rect::from_center_size(area.center(), galley.size() + Vec2::new(24.0, 12.0));
     painter.rect(
         pill,
         pill.height() / 2.0,
-        theme::POPOVER,
-        Stroke::new(1.0, theme::BORDER_STRONG),
+        theme::POPOVER.gamma_multiply(fade),
+        Stroke::new(1.0, theme::BORDER_STRONG.gamma_multiply(fade)),
         egui::StrokeKind::Inside,
     );
-    painter.galley(
+    painter.galley_with_override_text_color(
         pill.center() - galley.size() / 2.0,
         galley,
-        theme::SECONDARY,
+        theme::SECONDARY.gamma_multiply(fade),
     );
 }
 
@@ -1255,6 +1260,33 @@ enum HeaderClick {
 /// Column header: key glyph, name, type in faint mono, sort indicator, and
 /// (for table grids) a collapse button. Collapsed columns show a narrow
 /// strip that expands on click.
+/// Where a header's collapse button sits.
+fn collapse_button_rect(header: Rect) -> Rect {
+    Rect::from_center_size(
+        header.right_center() - Vec2::new(16.0, 0.0),
+        Vec2::splat(24.0),
+    )
+}
+
+/// `.column-action-target` / `.column-action-dimmed`: while a column's
+/// collapse or expand button is hovered, that column is highlighted and the
+/// rest fade to 38%.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ColumnFocus {
+    Target,
+    Dimmed,
+}
+
+fn column_focus(action: Option<usize>, column: usize) -> Option<ColumnFocus> {
+    action.map(|target| {
+        if target == column {
+            ColumnFocus::Target
+        } else {
+            ColumnFocus::Dimmed
+        }
+    })
+}
+
 fn header_cell(
     ui: &mut egui::Ui,
     name: &str,
@@ -1299,10 +1331,7 @@ fn header_cell(
     // button registered on top of the sort area would otherwise steal the
     // hover, hide itself, and flicker on and off every frame.
     let hovered = ui.rect_contains_pointer(rect);
-    let button = egui::Rect::from_center_size(
-        rect.right_center() - Vec2::new(16.0, 0.0),
-        Vec2::splat(24.0),
-    );
+    let button = collapse_button_rect(rect);
     let show_collapse = collapsible == Some(false) && hovered;
     let sort_rect = if show_collapse {
         egui::Rect::from_min_max(rect.min, egui::pos2(button.left() - 2.0, rect.max.y))
@@ -1751,6 +1780,10 @@ fn grid(
     let mut toggled_column = None;
     let mut discard_row = None;
     let mut hovered_preview = None;
+    // The column whose collapse/expand button was hovered last frame.
+    let action_id = egui::Id::new(("column-action", tab_id, cx.embedded));
+    let action = ui.data(|d| d.get_temp::<usize>(action_id));
+    let mut next_action = None;
     let modifiers = ui.input(|i| i.modifiers);
     if page.rows.is_empty() {
         ui.centered_and_justified(|ui| {
@@ -1799,6 +1832,22 @@ fn grid(
                                 .map(|o| o.descending);
                             let key = page.metadata.primary_key.contains(&column.name);
                             let collapsed = state.collapsed_columns.contains(&index);
+                            let header_rect = ui.max_rect();
+                            if column_focus(action, index) == Some(ColumnFocus::Target) {
+                                ui.painter().rect_filled(
+                                    header_rect,
+                                    0,
+                                    Color32::from_rgb(0x23, 0x2a, 0x36),
+                                );
+                            }
+                            let on_action = if collapsed {
+                                ui.rect_contains_pointer(header_rect)
+                            } else {
+                                ui.rect_contains_pointer(collapse_button_rect(header_rect))
+                            };
+                            if on_action {
+                                next_action = Some(index);
+                            }
                             let width = ui.max_rect().width();
                             resized |= !collapsed
                                 && (width - default_column_width(&column.data_type)).abs() > 0.5;
@@ -1813,6 +1862,13 @@ fn grid(
                                 Some(HeaderClick::Sort) => sort_clicked = Some(column.name.clone()),
                                 Some(HeaderClick::Toggle) => toggled_column = Some(index),
                                 None => {}
+                            }
+                            if column_focus(action, index) == Some(ColumnFocus::Dimmed) {
+                                ui.painter().rect_filled(
+                                    header_rect,
+                                    0,
+                                    theme::GRID_HEADER.gamma_multiply(0.62),
+                                );
                             }
                         });
                     }
@@ -1831,6 +1887,14 @@ fn grid(
                             let (_, response) = row.col(|ui| {
                                 let rect = ui.max_rect();
                                 hairline(ui);
+                                let focus = column_focus(action, column);
+                                if focus == Some(ColumnFocus::Target) {
+                                    ui.painter().rect_filled(
+                                        rect,
+                                        0,
+                                        theme::ACCENT.gamma_multiply(0.06),
+                                    );
+                                }
                                 if selected {
                                     ui.painter().rect_filled(rect, 0, theme::ACCENT_SOFT);
                                 }
@@ -1901,6 +1965,13 @@ fn grid(
                                     ui.add_space(10.0);
                                     ui.add(egui::Label::new(text).truncate());
                                 });
+                                if focus == Some(ColumnFocus::Dimmed) {
+                                    ui.painter().rect_filled(
+                                        rect,
+                                        0,
+                                        theme::BG.gamma_multiply(0.62),
+                                    );
+                                }
                             });
                             if response.double_clicked()
                                 && editable_column(cx, page, column)
@@ -1931,6 +2002,13 @@ fn grid(
         && !state.collapsed_columns.remove(&index)
     {
         state.collapsed_columns.insert(index);
+    }
+    if next_action != action {
+        ui.data_mut(|d| match next_action {
+            Some(column) => d.insert_temp(action_id, column),
+            None => d.remove::<usize>(action_id),
+        });
+        ui.ctx().request_repaint();
     }
     update_preview(ui, cx, state, columns, hovered_preview, &mut discard_row);
     if let Some(row) = discard_row {

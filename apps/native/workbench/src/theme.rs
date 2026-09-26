@@ -300,6 +300,7 @@ pub fn primary_button(text: &str) -> ActionButton {
         shortcut: None,
         kind: ButtonKind::Primary,
         min_width: 0.0,
+        small: false,
     }
 }
 
@@ -327,6 +328,7 @@ pub struct ActionButton {
     shortcut: Option<String>,
     kind: ButtonKind,
     min_width: f32,
+    small: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -347,6 +349,12 @@ impl ActionButton {
         self
     }
 
+    /// 26 px with 12 px text, e.g. the export result's "Show in folder".
+    pub fn small(mut self) -> Self {
+        self.small = true;
+        self
+    }
+
     /// Stretches the button, keeping its content centred.
     pub fn min_width(mut self, width: f32) -> Self {
         self.min_width = width;
@@ -357,10 +365,11 @@ impl ActionButton {
 impl egui::Widget for ActionButton {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
         let enabled = ui.is_enabled();
+        let size = if self.small { 12.0 } else { 12.5 };
         let font = if self.kind == ButtonKind::Primary {
-            semibold(12.5)
+            semibold(size)
         } else {
-            medium(12.5)
+            medium(size)
         };
         let text = ui
             .painter()
@@ -372,8 +381,10 @@ impl egui::Widget for ActionButton {
         let icon_width = if self.icon.is_some() { 12.0 + 6.0 } else { 0.0 };
         let kbd_width = kbd.as_ref().map_or(0.0, |g| g.size().x + 10.0 + 6.0);
         let content = icon_width + text.size().x + kbd_width;
-        let width = (24.0 + content).max(self.min_width);
-        let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 30.0), egui::Sense::click());
+        let width = (if self.small { 20.0 } else { 24.0 } + content).max(self.min_width);
+        let height = if self.small { 26.0 } else { 30.0 };
+        let (rect, response) =
+            ui.allocate_exact_size(Vec2::new(width, height), egui::Sense::click());
         response.widget_info(|| {
             egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, &self.text)
         });

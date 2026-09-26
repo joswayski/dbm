@@ -231,13 +231,14 @@ fn export_body(ui: &mut egui::Ui, path: &std::path::Path, rows: u64) -> Response
         if dismiss_button(ui, NOTICE_TEXT, "Dismiss export result") {
             response = Response::Dismiss;
         }
-        if icons::button(
-            ui,
-            Icon::Folder,
-            Some("Show in folder"),
-            "Reveal the exported file",
-        )
-        .clicked()
+        if ui
+            .add(
+                crate::theme::secondary_button("Show in folder")
+                    .icon(Icon::Folder)
+                    .small(),
+            )
+            .on_hover_text("Reveal the exported file")
+            .clicked()
         {
             response = Response::Reveal;
         }

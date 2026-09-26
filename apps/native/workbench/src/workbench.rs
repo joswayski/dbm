@@ -318,6 +318,8 @@ pub struct Workbench {
     sidebar_collapsed: bool,
     completion: Option<Completion>,
     now: f64,
+    /// The window's width this frame, for layout defaults.
+    window_width: f32,
 }
 
 impl Workbench {
@@ -361,6 +363,7 @@ impl Workbench {
             sidebar_collapsed: false,
             completion: None,
             now: 0.0,
+            window_width: 1280.0,
         };
         app.send(Command::LoadProfiles, "Loading connections", None);
         app
@@ -663,7 +666,7 @@ impl Workbench {
         self.query_results.insert(tab_id, result);
         self.tables.remove(&tab_id);
         if embedded {
-            self.tables.insert(tab_id, TableState::default());
+            self.tables.insert(tab_id, self.new_table_state());
             self.load_table(tab_id);
         }
         self.queue_history(Some(tab_id));
@@ -781,7 +784,7 @@ impl Workbench {
             embedded: None,
             collapsed: false,
         });
-        self.tables.insert(id, TableState::default());
+        self.tables.insert(id, self.new_table_state());
         self.active_tab = Some(id);
         self.active_profile = Some(profile);
         self.load_table(id);
@@ -1097,6 +1100,7 @@ impl eframe::App for Workbench {
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.now = ctx.input(|input| input.time);
+        self.window_width = ctx.content_rect().width();
         self.drain();
         if ctx.input(|input| input.viewport().close_requested()) {
             let dirty = self.tabs.iter().any(|tab| self.tab_dirty(tab.id));
@@ -1139,8 +1143,7 @@ impl Workbench {
                 .frame(
                     Frame::new()
                         .fill(theme::SIDEBAR)
-                        .inner_margin(Margin::symmetric(8, 12))
-                        .stroke(Stroke::new(1.0, theme::BORDER)),
+                        .inner_margin(Margin::symmetric(8, 12)),
                 )
                 .show(ctx, |ui| {
                     ui.vertical_centered(|ui| {
@@ -1524,19 +1527,21 @@ impl Workbench {
             .map(|t| t.profile_id)
             .or(self.active_profile)
             .and_then(|id| self.profile(id).cloned());
+        // `.topbar`: 44 px, padding 0 12 0 16, a bottom border only.
         egui::TopBottomPanel::top("top-bar")
-            .exact_height(40.0)
-            .frame(
-                Frame::new()
-                    .fill(theme::CHROME)
-                    .inner_margin(Margin::symmetric(14, 0))
-                    .stroke(Stroke::new(1.0, theme::BORDER)),
-            )
+            .exact_height(44.0)
+            .frame(Frame::new().fill(theme::CHROME).inner_margin(Margin {
+                left: 16,
+                right: 12,
+                top: 0,
+                bottom: 0,
+            }))
             .show(ctx, |ui| {
                 ui.horizontal_centered(|ui| {
                     if let Some(profile) = &profile {
                         let color = self.profile_color(profile.id);
-                        let (rect, _) = ui.allocate_exact_size(Vec2::splat(10.0), Sense::hover());
+                        ui.spacing_mut().item_spacing.x = 9.0;
+                        let (rect, _) = ui.allocate_exact_size(Vec2::splat(8.0), Sense::hover());
                         ui.painter().circle_filled(rect.center(), 4.0, color);
                         ui.label(
                             RichText::new(&profile.name)
@@ -1575,17 +1580,12 @@ impl Workbench {
     fn tab_strip(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::top("tab-strip")
             .exact_height(36.0)
-            .frame(
-                Frame::new()
-                    .fill(theme::CHROME)
-                    .inner_margin(Margin {
-                        left: 6,
-                        right: 6,
-                        top: 4,
-                        bottom: 0,
-                    })
-                    .stroke(Stroke::new(1.0, theme::BORDER)),
-            )
+            .frame(Frame::new().fill(theme::CHROME).inner_margin(Margin {
+                left: 6,
+                right: 6,
+                top: 4,
+                bottom: 0,
+            }))
             .show(ctx, |ui| {
                 egui::ScrollArea::horizontal()
                     .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
@@ -1926,72 +1926,104 @@ fn schema_branch(
         (Some(schema), Some(table)) => Some((schema.clone(), table.clone())),
         _ => None,
     };
-    let indent = 4.0 + depth as f32 * 14.0;
-    if let Some(target) = leaf {
-        let glyph = match node.kind.as_str() {
-            "key" => Icon::Key,
-            "view" => Icon::View,
-            _ => Icon::Table,
-        };
-        let is_selected = selected == Some(&target);
-        let (rect, response) =
-            ui.allocate_exact_size(Vec2::new(ui.available_width(), 26.0), Sense::click());
-        response.widget_info(|| {
-            egui::WidgetInfo::selected(egui::WidgetType::Button, true, is_selected, &node.name)
-        });
-        if is_selected {
-            ui.painter().rect_filled(rect, 6, color.gamma_multiply(0.3));
-        } else if response.hovered() {
-            ui.painter()
-                .rect_filled(rect, 6, Color32::from_white_alpha(8));
-        }
-        let icon_rect = egui::Rect::from_center_size(
-            egui::pos2(rect.left() + indent + 20.0, rect.center().y),
-            Vec2::splat(13.0),
-        );
-        let icon_color = if is_selected { color } else { theme::MUTED };
-        icons::paint(ui.painter(), icon_rect, glyph, icon_color);
-        let mut job = LayoutJob::simple_singleline(
-            node.name.clone(),
-            ui_font(13.0),
-            if is_selected {
-                theme::TEXT_STRONG
-            } else {
-                theme::SECONDARY
-            },
-        );
-        job.wrap =
-            egui::text::TextWrapping::truncate_at_width(rect.right() - icon_rect.right() - 12.0);
-        let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
-        let text_pos = egui::pos2(
-            icon_rect.right() + 8.0,
-            rect.center().y - galley.size().y / 2.0,
-        );
-        ui.painter().galley(text_pos, galley, theme::SECONDARY);
-        if response.clicked() {
-            *open = Some(target);
-        }
-        return;
+    // `.schema-node-button`: 26 px rows padded `8 + depth * 14`, a 12 px caret
+    // column, a 15 px icon, then 12.5 px text.
+    let x0 = 8.0 + depth as f32 * 14.0;
+    let (rect, response) =
+        ui.allocate_exact_size(Vec2::new(ui.available_width(), 26.0), Sense::click());
+    let is_selected = leaf.as_ref().is_some_and(|t| selected == Some(t));
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::Button, true, is_selected, &node.name)
+    });
+    let hovered = response.hovered();
+    if is_selected {
+        ui.painter()
+            .rect_filled(rect, 6, color.gamma_multiply(0.24));
+    } else if hovered {
+        ui.painter()
+            .rect_filled(rect, 6, Color32::from_white_alpha(15));
     }
     let id = ui.make_persistent_id(("schema-node", depth, &node.kind, &node.name));
-    let mut state =
-        egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, depth < 1);
-    if force_open {
-        state.set_open(true);
-    }
-    let header = ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 4.0;
-        ui.add_space(indent);
+    let mut state = (leaf.is_none()).then(|| {
+        let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(
+            ui.ctx(),
+            id,
+            depth < 1,
+        );
+        if force_open {
+            state.set_open(true);
+        }
+        state
+    });
+    if let Some(state) = &state {
         let caret = if state.is_open() {
             Icon::ChevronDown
         } else {
             Icon::ChevronRight
         };
-        icons::show(ui, caret, 12.0, theme::FAINT);
-        let text = RichText::new(&node.name).color(theme::SECONDARY);
-        ui.add(egui::Button::new(text).frame(false)).clicked()
-    });
-    if header.inner {
+        icons::paint(
+            ui.painter(),
+            egui::Rect::from_center_size(
+                egui::pos2(rect.left() + x0 + 6.0, rect.center().y),
+                Vec2::splat(11.0),
+            ),
+            caret,
+            theme::FAINT,
+        );
+    }
+    let glyph = match (leaf.is_some(), node.kind.as_str()) {
+        (false, _) => Icon::Folder,
+        (true, "key") => Icon::Key,
+        (true, "view") => Icon::View,
+        (true, _) => Icon::Table,
+    };
+    // `.schema-icon`: faint, the schema folder muted, and the selected
+    // table's icon 55% connection colour mixed with white.
+    let icon_color = if is_selected {
+        egui::lerp(egui::Rgba::from(color)..=egui::Rgba::WHITE, 0.45).into()
+    } else if node.kind == "schema" {
+        theme::MUTED
+    } else {
+        theme::FAINT
+    };
+    let icon_rect = egui::Rect::from_center_size(
+        egui::pos2(rect.left() + x0 + 18.0 + 7.5, rect.center().y),
+        Vec2::splat(13.0),
+    );
+    icons::paint(ui.painter(), icon_rect, glyph, icon_color);
+    let text_left = rect.left() + x0 + 18.0 + 15.0 + 6.0;
+    let mut job = LayoutJob::simple_singleline(
+        node.name.clone(),
+        if is_selected {
+            theme::medium(12.5)
+        } else {
+            ui_font(12.5)
+        },
+        if is_selected {
+            Color32::WHITE
+        } else if hovered {
+            theme::TEXT
+        } else {
+            theme::SECONDARY
+        },
+    );
+    job.wrap = egui::text::TextWrapping::truncate_at_width(rect.right() - text_left - 8.0);
+    let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
+    ui.painter().galley(
+        egui::pos2(text_left, rect.center().y - galley.size().y / 2.0),
+        galley,
+        theme::SECONDARY,
+    );
+    if let Some(target) = leaf {
+        if response.clicked() {
+            *open = Some(target);
+        }
+        return;
+    }
+    let Some(mut state) = state.take() else {
+        return;
+    };
+    if response.clicked() {
         state.toggle(ui);
     }
     state.show_body_unindented(ui, |ui| {
@@ -2316,6 +2348,14 @@ impl Workbench {
         egui::CentralPanel::default()
             .frame(Frame::new().fill(theme::BG))
             .show_inside(ui, |ui| self.query_result_ui(ui, tab_id, tab.profile_id));
+    }
+
+    /// A fresh table view; the inspector starts open only on windows at
+    /// least 1280 px wide, as in the desktop.
+    fn new_table_state(&self) -> TableState {
+        let mut state = TableState::default();
+        state.inspector_open = self.window_width >= 1280.0;
+        state
     }
 
     fn pending_label(&self, tab: u64) -> Option<&'static str> {
