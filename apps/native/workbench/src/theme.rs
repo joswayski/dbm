@@ -120,6 +120,8 @@ pub fn configure(ctx: &egui::Context) {
     }
     widgets.inactive.fg_stroke = Stroke::new(1.0, SECONDARY);
     widgets.hovered.fg_stroke = Stroke::new(1.0, TEXT_STRONG);
+    // `cursor: pointer` on every clickable control, as in the desktop app.
+    visuals.interact_cursor = Some(egui::CursorIcon::PointingHand);
     ctx.set_visuals(visuals);
 
     ctx.style_mut(|style| {
@@ -128,6 +130,10 @@ pub fn configure(ctx: &egui::Context) {
         style.spacing.interact_size = Vec2::new(28.0, 28.0);
         style.spacing.menu_margin = egui::Margin::same(4);
         style.interaction.selectable_labels = false;
+        // Tooltips show promptly and even while the pointer drifts; egui's
+        // defaults (0.5 s, pointer held still) read as missing.
+        style.interaction.tooltip_delay = 0.25;
+        style.interaction.show_tooltips_only_when_still = false;
         style
             .text_styles
             .insert(egui::TextStyle::Body, ui_font(13.0));
