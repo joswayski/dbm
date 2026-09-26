@@ -183,6 +183,42 @@ pub fn configure(ctx: &egui::Context) {
     });
 }
 
+/// A menu row (`.selection-actions-menu button`): 28 px, 12.5 px text,
+/// accent fill with white text on hover; danger rows are red with a red wash.
+pub fn menu_item(ui: &mut egui::Ui, label: &str, danger: bool) -> egui::Response {
+    let width = ui.available_width().max(ui.min_rect().width());
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 28.0), egui::Sense::click());
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
+    });
+    let hovered = response.hovered();
+    let (fill, color) = match (danger, hovered) {
+        (false, true) => (ACCENT_STRONG, Color32::WHITE),
+        (false, false) => (Color32::TRANSPARENT, TEXT),
+        (true, true) => (
+            Color32::from_rgba_unmultiplied(255, 107, 97, 46),
+            Color32::from_rgb(0xff, 0xb3, 0xac),
+        ),
+        (true, false) => (Color32::TRANSPARENT, DANGER),
+    };
+    ui.painter().rect_filled(rect, 5, fill);
+    let galley = ui
+        .painter()
+        .layout_no_wrap(label.to_owned(), ui_font(12.5), color);
+    ui.painter().galley(
+        egui::pos2(rect.left() + 8.0, rect.center().y - galley.size().y / 2.0),
+        galley,
+        color,
+    );
+    response
+}
+
+/// Menu popups: `padding: 4px` with 1 px between rows, at least `width`.
+pub fn menu_scope(ui: &mut egui::Ui, width: f32) {
+    ui.spacing_mut().item_spacing.y = 1.0;
+    ui.set_min_width(width - 8.0);
+}
+
 /// A count with thousands separators, like `toLocaleString()` in en-US.
 pub fn count(value: impl Into<u64>) -> String {
     let digits = value.into().to_string();
@@ -257,20 +293,159 @@ pub fn end_frame(ctx: &egui::Context) {
 }
 
 /// Primary action: accent fill, white semibold text. One per surface.
-pub fn primary_button(text: &str) -> egui::Button<'static> {
-    egui::Button::new(
-        egui::RichText::new(text.to_owned())
-            .color(Color32::WHITE)
-            .font(semibold(12.5)),
-    )
-    .fill(ACCENT_STRONG)
-    .stroke(Stroke::NONE)
+pub fn primary_button(text: &str) -> ActionButton {
+    ActionButton {
+        text: text.to_owned(),
+        icon: None,
+        shortcut: None,
+        kind: ButtonKind::Primary,
+        min_width: 0.0,
+    }
 }
 
-pub fn danger_button(text: &str) -> egui::Button<'static> {
-    egui::Button::new(egui::RichText::new(text.to_owned()).color(DANGER))
-        .fill(Color32::TRANSPARENT)
-        .stroke(Stroke::NONE)
+/// `.secondary-button`: control fill, strong border, text colour.
+pub fn secondary_button(text: &str) -> ActionButton {
+    ActionButton {
+        kind: ButtonKind::Secondary,
+        ..primary_button(text)
+    }
+}
+
+/// `.danger-button`: danger text on a soft red fill with a red outline.
+pub fn danger_button(text: &str) -> ActionButton {
+    ActionButton {
+        kind: ButtonKind::Danger,
+        ..primary_button(text)
+    }
+}
+
+/// `.primary-button` / `.danger-button`: 30 px, radius 7, 12 px padding, an
+/// optional leading icon and a trailing shortcut pill (`kbd`).
+pub struct ActionButton {
+    text: String,
+    icon: Option<crate::icons::Icon>,
+    shortcut: Option<String>,
+    kind: ButtonKind,
+    min_width: f32,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ButtonKind {
+    Primary,
+    Secondary,
+    Danger,
+}
+
+impl ActionButton {
+    pub fn icon(mut self, icon: crate::icons::Icon) -> Self {
+        self.icon = Some(icon);
+        self
+    }
+
+    pub fn shortcut(mut self, shortcut: &str) -> Self {
+        self.shortcut = Some(shortcut.to_owned());
+        self
+    }
+
+    /// Stretches the button, keeping its content centred.
+    pub fn min_width(mut self, width: f32) -> Self {
+        self.min_width = width;
+        self
+    }
+}
+
+impl egui::Widget for ActionButton {
+    fn ui(self, ui: &mut egui::Ui) -> egui::Response {
+        let enabled = ui.is_enabled();
+        let font = if self.kind == ButtonKind::Primary {
+            semibold(12.5)
+        } else {
+            medium(12.5)
+        };
+        let text = ui
+            .painter()
+            .layout_no_wrap(self.text.clone(), font, Color32::WHITE);
+        let kbd = self.shortcut.as_ref().map(|s| {
+            ui.painter()
+                .layout_no_wrap(s.clone(), medium(11.0), Color32::WHITE)
+        });
+        let icon_width = if self.icon.is_some() { 12.0 + 6.0 } else { 0.0 };
+        let kbd_width = kbd.as_ref().map_or(0.0, |g| g.size().x + 10.0 + 6.0);
+        let content = icon_width + text.size().x + kbd_width;
+        let width = (24.0 + content).max(self.min_width);
+        let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 30.0), egui::Sense::click());
+        response.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, &self.text)
+        });
+        if !ui.is_rect_visible(rect) {
+            return response;
+        }
+        let hovered = response.hovered() && enabled;
+        let pressed = response.is_pointer_button_down_on() && enabled;
+        let (fill, stroke, color) = match self.kind {
+            ButtonKind::Danger => (
+                Color32::from_rgba_unmultiplied(255, 107, 97, if hovered { 41 } else { 23 }),
+                Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 107, 97, 77)),
+                DANGER,
+            ),
+            ButtonKind::Secondary => (
+                if pressed {
+                    CONTROL_ACTIVE
+                } else if hovered {
+                    CONTROL_HOVER
+                } else {
+                    CONTROL
+                },
+                Stroke::new(1.0, BORDER_STRONG),
+                TEXT,
+            ),
+            ButtonKind::Primary => (
+                if pressed {
+                    ACCENT
+                } else if hovered {
+                    Color32::from_rgb(0x45, 0x85, 0xd6)
+                } else {
+                    ACCENT_STRONG
+                },
+                Stroke::NONE,
+                Color32::WHITE,
+            ),
+        };
+        // `button:disabled { opacity: .45 }`
+        let alpha = if enabled { 1.0 } else { 0.45 };
+        let painter = ui.painter();
+        painter.rect(
+            rect,
+            7,
+            fill.gamma_multiply(alpha),
+            Stroke::new(stroke.width, stroke.color.gamma_multiply(alpha)),
+            egui::StrokeKind::Inside,
+        );
+        let color = color.gamma_multiply(alpha);
+        let mut x = rect.center().x - content / 2.0;
+        let y = rect.center().y;
+        if let Some(icon) = self.icon {
+            crate::icons::paint(
+                painter,
+                egui::Rect::from_center_size(egui::pos2(x + 6.0, y), Vec2::splat(12.0)),
+                icon,
+                color,
+            );
+            x += icon_width;
+        }
+        let text_width = text.size().x;
+        painter.galley(egui::pos2(x, y - text.size().y / 2.0), text, color);
+        x += text_width;
+        if let Some(kbd) = kbd {
+            let pill = egui::Rect::from_min_size(
+                egui::pos2(x + 6.0, y - kbd.size().y / 2.0 - 1.0),
+                kbd.size() + Vec2::new(10.0, 2.0),
+            );
+            painter.rect_filled(pill, 4, Color32::from_white_alpha(51).gamma_multiply(alpha));
+            painter.galley(pill.min + Vec2::new(5.0, 1.0), kbd, color);
+        }
+        response
+    }
 }
 
 /// Small rounded label, e.g. "Read-only" or "truncated".

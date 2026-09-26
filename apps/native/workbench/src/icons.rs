@@ -389,3 +389,34 @@ pub fn text_button(
     }
     response
 }
+
+/// `.selection-actions-trigger`: a toolbar button with accent text and a
+/// chevron after the label.
+pub fn menu_trigger(ui: &mut egui::Ui, label: &str, tooltip: &str) -> Response {
+    let galley =
+        ui.painter()
+            .layout_no_wrap(label.to_owned(), theme::ui_font(12.5), theme::ACCENT_TEXT);
+    let width = 9.0 * 2.0 + galley.size().x + 5.0 + 12.0;
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 28.0), Sense::click());
+    let response = response.on_hover_text(tooltip);
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
+    if response.hovered() {
+        ui.painter()
+            .rect_filled(rect, 6, Color32::from_white_alpha(15));
+    }
+    let y = rect.center().y;
+    let text_x = rect.left() + 9.0;
+    let chevron_x = text_x + galley.size().x + 5.0;
+    ui.painter().galley(
+        Pos2::new(text_x, y - galley.size().y / 2.0),
+        galley,
+        theme::ACCENT_TEXT,
+    );
+    paint(
+        ui.painter(),
+        Rect::from_center_size(Pos2::new(chevron_x + 6.0, y), Vec2::splat(12.0)),
+        Icon::ChevronDown,
+        theme::ACCENT_TEXT,
+    );
+    response
+}

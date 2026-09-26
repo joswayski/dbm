@@ -486,14 +486,13 @@ fn toolbar(
             let has_page = state.page.is_some() && !state.loading;
             let selected: Vec<usize> = state.selected.iter().copied().collect();
             if !selected.is_empty() {
-                let menu = icons::button(
+                let menu = icons::menu_trigger(
                     ui,
-                    Icon::ChevronDown,
-                    Some(&format!("{} selected", selected.len())),
+                    &format!("{} selected", theme::count(selected.len() as u64)),
                     "Actions for the selected rows",
                 );
                 egui::Popup::menu(&menu).show(|ui| {
-                    selection_menu(ui, cx, state, &selected, actions);
+                    selection_menu(ui, cx, state, &selected, actions, true);
                 });
             }
             let total = state
@@ -565,14 +564,18 @@ fn toolbar(
 }
 
 /// "N selected" menu and the grid's context menu.
+/// The "N selected" menu, and (without "Clear selection") the row context
+/// menu, as in the desktop.
 fn selection_menu(
     ui: &mut egui::Ui,
     cx: &TableContext<'_>,
     state: &mut TableState,
     selected: &[usize],
     actions: &mut Vec<TableAction>,
+    with_clear: bool,
 ) {
-    if ui.button("Copy selected as CSV").clicked() {
+    theme::menu_scope(ui, if with_clear { 220.0 } else { 200.0 });
+    if theme::menu_item(ui, "Copy selected as CSV", false).clicked() {
         let rows: Vec<usize> = selected
             .iter()
             .copied()
@@ -596,17 +599,12 @@ fn selection_menu(
         } else {
             format!("Stage {} rows for deletion", selected.len())
         };
-        let button = if all_deleted {
-            egui::Button::new(label)
-        } else {
-            egui::Button::new(RichText::new(label).color(theme::DANGER))
-        };
-        if ui.add(button).clicked() {
+        if theme::menu_item(ui, &label, !all_deleted).clicked() {
             toggle_delete(state, selected);
             ui.close();
         }
     }
-    if ui.button("Clear selection").clicked() {
+    if with_clear && theme::menu_item(ui, "Clear selection", false).clicked() {
         state.selected.clear();
         state.anchor = None;
         ui.close();
@@ -633,7 +631,8 @@ fn enabled_icon_button(
 }
 
 fn labeled(ui: &mut egui::Ui, text: &str) {
-    ui.label(RichText::new(text).font(ui_font(12.0)).color(theme::MUTED));
+    // `.table-query-controls label > span`: 11 px faint.
+    ui.label(RichText::new(text).font(ui_font(11.0)).color(theme::FAINT));
 }
 
 fn filter_panel(
@@ -1918,20 +1917,8 @@ fn grid(
                             context_row = Some(index);
                         }
                         response.context_menu(|ui| {
-                            if let Some(preview) = &preview {
-                                let label = if preview.deleted {
-                                    "Undo delete"
-                                } else {
-                                    "Discard edit"
-                                };
-                                if ui.button(label).clicked() {
-                                    discard_row = Some(index);
-                                    ui.close();
-                                }
-                                ui.separator();
-                            }
                             let selected: Vec<usize> = state.selected.iter().copied().collect();
-                            selection_menu(ui, cx, state, &selected, actions);
+                            selection_menu(ui, cx, state, &selected, actions, false);
                         });
                     });
                 });
