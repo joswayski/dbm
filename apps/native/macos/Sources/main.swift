@@ -872,6 +872,9 @@ final class SnapshotDriver {
     }
 }
 
+// Tooltips after a quarter second, like the desktop app's hover titles,
+// instead of AppKit's default of about a second.
+UserDefaults.standard.register(defaults: ["NSInitialToolTipDelay": 250])
 let application = NSApplication.shared
 let controller = AppController()
 application.delegate = controller

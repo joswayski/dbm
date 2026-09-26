@@ -457,7 +457,6 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
                 adjustingColumns = false
                 column.resizingMask = collapsed ? [] : .userResizingMask
             }
-            column.headerToolTip = collapsed ? "Expand \(name)" : "Sort by \(name)"
         }
         grid.headerView?.needsDisplay = true
     }
@@ -1027,6 +1026,7 @@ final class LimitStepper: NSView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
     override var isFlipped: Bool { true }
 
     override func updateTrackingAreas() {

@@ -143,11 +143,6 @@ final class GridHeaderView: NSTableHeaderView {
         guard next.column != hovered.column || next.part != hovered.part else { return }
         let wasAction: Int? = hovered.part == .collapse ? hovered.column : nil
         hovered = next
-        if column >= 0, let tableColumn = tableView?.tableColumns[column], onToggleColumn != nil {
-            let name = tableColumn.title
-            let collapsed = (tableColumn.headerCell as? GridHeaderCell)?.collapsed == true
-            tableColumn.headerToolTip = next.part == .collapse ? "\(collapsed ? "Expand" : "Collapse") \(name)" : "Sort by \(name)"
-        }
         let isAction: Int? = next.part == .collapse ? next.column : nil
         if wasAction != isAction { onColumnAction?(isAction) }
         needsDisplay = true
@@ -169,7 +164,52 @@ final class GridHeaderView: NSTableHeaderView {
         super.mouseDown(with: event)
     }
 
+    /// Column geometry the cursor and tooltip rects were built for.
+    private var rectSignature = ""
+
+    /// Pointer cursors and tooltips per part: "Sort by X" over the name,
+    /// "Collapse X" / "Expand X" over the button. Rects inset 3 pt from the
+    /// dividers keep the resize cursor there.
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        removeAllToolTips()
+        guard let tableView, onToggleColumn != nil else { return }
+        for index in tableView.tableColumns.indices {
+            let header = headerRect(ofColumn: index).insetBy(dx: 3, dy: 0)
+            guard header.width > 0 else { continue }
+            let collapsed = (tableView.tableColumns[index].headerCell as? GridHeaderCell)?.collapsed == true
+            let button = collapsed ? header : NSRect(x: header.maxX - GridHeaderCell.collapseWidth + 3, y: header.minY,
+                                                    width: GridHeaderCell.collapseWidth - 3, height: header.height)
+            let sort = collapsed ? NSRect.zero : NSRect(x: header.minX, y: header.minY,
+                                                        width: max(0, button.minX - header.minX), height: header.height)
+            for rect in [sort, button] where rect.width > 0 {
+                addCursorRect(rect, cursor: .pointingHand)
+                addToolTip(rect, owner: self, userData: nil)
+            }
+        }
+    }
+
+    /// Text for the tooltip rects above; NSTableHeaderView owns the protocol.
+    override func view(_ view: NSView, stringForToolTip tag: NSView.ToolTipTag, point: NSPoint,
+                       userData data: UnsafeMutableRawPointer?) -> String {
+        let column = self.column(at: point)
+        guard column >= 0, let tableColumn = tableView?.tableColumns[column] else { return "" }
+        let name = tableColumn.title
+        let collapsed = (tableColumn.headerCell as? GridHeaderCell)?.collapsed == true
+        if collapsed { return "Expand \(name)" }
+        let onButton = point.x > headerRect(ofColumn: column).maxX - GridHeaderCell.collapseWidth
+        return onButton ? "Collapse \(name)" : "Sort by \(name)"
+    }
+
     override func draw(_ dirtyRect: NSRect) {
+        // Rebuild the rects after a column resize, move, or collapse.
+        let signature = (tableView?.tableColumns ?? []).map {
+            "\($0.width):\(($0.headerCell as? GridHeaderCell)?.collapsed == true)"
+        }.joined(separator: ",")
+        if signature != rectSignature {
+            rectSignature = signature
+            window?.invalidateCursorRects(for: self)
+        }
         let action = hovered.part == .collapse ? hovered.column : -1
         for (index, column) in (tableView?.tableColumns ?? []).enumerated() {
             guard let cell = column.headerCell as? GridHeaderCell else { continue }
