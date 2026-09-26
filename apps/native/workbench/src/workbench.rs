@@ -1446,6 +1446,7 @@ impl Workbench {
                 });
             });
             let filter = self.schema_filters.entry(id).or_default();
+            // `.schema-filter`: 28 px, 12 px text after a search glyph.
             let response = ui.add(
                 egui::TextEdit::singleline(filter)
                     .hint_text(if redis {
@@ -1453,7 +1454,23 @@ impl Workbench {
                     } else {
                         "Filter tables…"
                     })
+                    .font(ui_font(12.0))
+                    .margin(Margin {
+                        left: 27,
+                        right: 9,
+                        top: 6,
+                        bottom: 6,
+                    })
                     .desired_width(f32::INFINITY),
+            );
+            icons::paint(
+                ui.painter(),
+                egui::Rect::from_center_size(
+                    response.rect.left_center() + Vec2::new(14.5, 0.0),
+                    Vec2::splat(13.0),
+                ),
+                Icon::Search,
+                theme::FAINT,
             );
             // Escape clears the filter and keeps it focused, as in the desktop.
             let focused =
@@ -2899,15 +2916,18 @@ fn modal<R>(
     width: f32,
     add: impl FnOnce(&mut egui::Ui) -> R,
 ) -> Option<R> {
-    // Dim the app behind the dialog and swallow clicks on it.
-    egui::Area::new(egui::Id::new(("modal-backdrop", title)))
+    // `.modal-backdrop`: dims the app at 55% and swallows clicks on it;
+    // `backdrop_clicked` reports them.
+    let backdrop_id = egui::Id::new(("modal-backdrop", title));
+    egui::Area::new(backdrop_id)
         .order(egui::Order::Middle)
         .fixed_pos(egui::Pos2::ZERO)
         .show(ctx, |ui| {
             let screen = ctx.content_rect();
-            ui.allocate_rect(screen, Sense::click());
+            let clicked = ui.allocate_rect(screen, Sense::click()).clicked();
+            ui.data_mut(|d| d.insert_temp(backdrop_id, clicked));
             ui.painter()
-                .rect_filled(screen, 0, Color32::from_black_alpha(120));
+                .rect_filled(screen, 0, Color32::from_black_alpha(140));
         });
     egui::Window::new(title)
         .title_bar(false)
@@ -2931,6 +2951,12 @@ fn modal<R>(
         )
         .show(ctx, add)
         .and_then(|response| response.inner)
+}
+
+/// Whether the backdrop of `modal(title)` was clicked this frame.
+fn backdrop_clicked(ctx: &egui::Context, title: &str) -> bool {
+    ctx.data(|d| d.get_temp::<bool>(egui::Id::new(("modal-backdrop", title))))
+        .unwrap_or(false)
 }
 
 fn dialog_title(ui: &mut egui::Ui, eyebrow_text: Option<&str>, title: &str) {
@@ -3081,7 +3107,8 @@ impl Workbench {
         let mut test = false;
         let mut save = false;
         let mut delete = false;
-        modal(ctx, "Connection", 560.0, |ui| {
+        let mut url_enter = false;
+        modal(ctx, "Connection", 600.0, |ui| {
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
                     dialog_title(
@@ -3147,16 +3174,26 @@ impl Workbench {
                     };
                     let response = ui.add(
                         egui::TextEdit::singleline(&mut form.url)
+                            .margin(Margin::symmetric(9, 7))
                             .password(true)
                             .hint_text(placeholder)
                             .desired_width(400.0),
                     );
                     let enter =
                         response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    url_enter = enter;
+                    // Pasting a URL imports it straight away.
+                    let pasted = response.changed()
+                        && ui
+                            .input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Paste(_))));
                     if (ui
-                        .add_enabled(!form.url.trim().is_empty(), egui::Button::new("Import URL"))
+                        .add_enabled(
+                            !form.url.trim().is_empty(),
+                            theme::secondary_button("Import URL"),
+                        )
                         .clicked()
-                        || enter)
+                        || enter
+                        || pasted)
                         && !form.url.trim().is_empty()
                     {
                         form.import_url();
@@ -3166,6 +3203,7 @@ impl Workbench {
                 form_label(ui, "Name");
                 ui.add(
                     egui::TextEdit::singleline(&mut form.name)
+                        .margin(Margin::symmetric(9, 7))
                         .hint_text(engine_preset_name(form.engine))
                         .desired_width(f32::INFINITY),
                 );
@@ -3208,19 +3246,38 @@ impl Workbench {
                 let password_hint = if form.id.is_some() {
                     "Leave blank to keep saved password"
                 } else {
-                    "Stored in OS credential store"
+                    "Stored in OS keychain"
                 };
                 ui.columns(2, |cols| {
                     form_label(&mut cols[0], "Host");
                     cols[0].add(
-                        egui::TextEdit::singleline(&mut form.host).desired_width(f32::INFINITY),
+                        egui::TextEdit::singleline(&mut form.host)
+                            .margin(Margin::symmetric(9, 7))
+                            .desired_width(f32::INFINITY),
                     );
+                    // A plain text field, as in the desktop, kept in sync with
+                    // the numeric port while it isn't being edited.
                     form_label(&mut cols[1], "Port");
-                    cols[1].add(
-                        egui::DragValue::new(&mut form.port)
-                            .range(1..=65535)
-                            .speed(0.0),
+                    let port_id = egui::Id::new("profile-port-text");
+                    let mut text = cols[1]
+                        .data(|d| d.get_temp::<String>(port_id))
+                        .unwrap_or_else(|| form.port.to_string());
+                    let response = cols[1].add(
+                        egui::TextEdit::singleline(&mut text)
+                            .margin(Margin::symmetric(9, 7))
+                            .char_limit(5)
+                            .desired_width(f32::INFINITY),
                     );
+                    text.retain(|c| c.is_ascii_digit());
+                    if let Ok(port) = text.parse::<u16>() {
+                        if port > 0 {
+                            form.port = port;
+                        }
+                    }
+                    if !response.has_focus() {
+                        text = form.port.to_string();
+                    }
+                    cols[1].data_mut(|d| d.insert_temp(port_id, text));
                 });
                 ui.add_space(6.0);
                 ui.columns(2, |cols| {
@@ -3234,6 +3291,7 @@ impl Workbench {
                     );
                     cols[0].add(
                         egui::TextEdit::singleline(&mut form.username)
+                            .margin(Margin::symmetric(9, 7))
                             .hint_text(if redis { "default" } else { "" })
                             .desired_width(f32::INFINITY),
                     );
@@ -3243,6 +3301,7 @@ impl Workbench {
                     );
                     cols[1].add(
                         egui::TextEdit::singleline(&mut form.database)
+                            .margin(Margin::symmetric(9, 7))
                             .hint_text(if redis { "0" } else { "" })
                             .desired_width(f32::INFINITY),
                     );
@@ -3252,6 +3311,7 @@ impl Workbench {
                     form_label(&mut cols[0], "Password");
                     cols[0].add(
                         egui::TextEdit::singleline(&mut form.password)
+                            .margin(Margin::symmetric(9, 7))
                             .password(true)
                             .hint_text(password_hint)
                             .desired_width(f32::INFINITY),
@@ -3275,6 +3335,7 @@ impl Workbench {
                 form_label(ui, "CA certificate path (optional)");
                 ui.add(
                     egui::TextEdit::singleline(&mut form.ca_cert_path)
+                        .margin(Margin::symmetric(9, 7))
                         .hint_text("/path/to/root-ca.pem")
                         .desired_width(f32::INFINITY),
                 );
@@ -3285,16 +3346,49 @@ impl Workbench {
                 );
             });
             if let Some((kind, message)) = &form.feedback {
+                // `.modal-feedback.{info,success,error}`: a tinted box.
                 ui.add_space(8.0);
-                let color = match kind {
-                    FeedbackKind::Info => theme::ACCENT_TEXT,
-                    FeedbackKind::Success => theme::SUCCESS,
-                    FeedbackKind::Error => theme::DANGER,
+                let (fill, stroke, color) = match kind {
+                    FeedbackKind::Info => (
+                        theme::ACCENT_SOFT,
+                        Color32::from_rgba_unmultiplied(76, 154, 255, 77),
+                        theme::ACCENT_TEXT,
+                    ),
+                    FeedbackKind::Success => (
+                        Color32::from_rgba_unmultiplied(90, 211, 148, 26),
+                        Color32::from_rgba_unmultiplied(90, 211, 148, 77),
+                        Color32::from_rgb(0x9b, 0xe7, 0xbf),
+                    ),
+                    FeedbackKind::Error => (
+                        theme::DANGER_SOFT,
+                        Color32::from_rgba_unmultiplied(255, 107, 97, 77),
+                        Color32::from_rgb(0xff, 0xb3, 0xac),
+                    ),
                 };
-                ui.label(RichText::new(message).color(color));
+                Frame::new()
+                    .fill(fill)
+                    .stroke(Stroke::new(1.0, stroke))
+                    .corner_radius(7)
+                    .inner_margin(Margin::symmetric(12, 9))
+                    .show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        ui.label(RichText::new(message).font(ui_font(12.0)).color(color));
+                    });
             }
-            ui.add_space(6.0);
-            ui.label(RichText::new("Passwords are stored in your operating system credential manager and are never written to DBM's profile database.").font(ui_font(11.5)).color(theme::FAINT));
+            ui.add_space(8.0);
+            // `.modal-note`: a faint box.
+            Frame::new()
+                .fill(Color32::from_white_alpha(10))
+                .corner_radius(7)
+                .inner_margin(Margin::symmetric(12, 10))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.label(
+                        RichText::new("Passwords are stored in your operating system credential manager and are never written to DBM's profile database.")
+                            .font(ui_font(11.5))
+                            .color(theme::FAINT),
+                    );
+                });
             ui.add_space(12.0);
             ui.horizontal(|ui| {
                 if form.id.is_some()
@@ -3305,10 +3399,11 @@ impl Workbench {
                     delete = true;
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let label = if form.saving {
-                        "Saving…"
-                    } else {
-                        "Save & connect"
+                    // Save tests first, then connects.
+                    let label = match (&form.feedback, form.saving) {
+                        (Some((FeedbackKind::Info, _)), true) => "Testing…",
+                        (_, true) => "Connecting…",
+                        _ => "Save & connect",
                     };
                     if ui.add_enabled(!busy, primary_button(label)).clicked() {
                         save = true;
@@ -3317,7 +3412,7 @@ impl Workbench {
                     if ui
                         .add_enabled(
                             !busy,
-                            egui::Button::new(if testing {
+                            theme::secondary_button(if testing {
                                 "Testing…"
                             } else {
                                 "Test connection"
@@ -3333,6 +3428,15 @@ impl Workbench {
                 close = true;
             }
         });
+        close |= backdrop_clicked(ctx, "Connection");
+        // Enter in a text field saves, like submitting the desktop form.
+        if !url_enter
+            && !busy
+            && ctx.input(|i| i.key_pressed(egui::Key::Enter))
+            && theme::focused_last_frame(ctx).is_some()
+        {
+            save = true;
+        }
         if test {
             form.feedback = None;
             form.saving = false;

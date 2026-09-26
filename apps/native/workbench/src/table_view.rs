@@ -733,9 +733,13 @@ fn filter_panel(
                     "Value…"
                 };
                 let response = ui.add(
+                    // `.filter-row .text-input`: 28 px, mono 12 px.
                     egui::TextEdit::singleline(&mut filter.value)
                         .hint_text(hint)
-                        .desired_width(value_width),
+                        .font(mono(12.0))
+                        .margin(Margin::symmetric(9, 6))
+                        // The width excludes the margin.
+                        .desired_width(value_width - 18.0),
                 );
                 if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                     apply = true;

@@ -35,6 +35,7 @@ pub enum Icon {
     ArrowUp,
     ArrowDown,
     ArrowRight,
+    Search,
     Folder,
     Trash,
     Undo,
@@ -251,6 +252,10 @@ pub fn paint(painter: &egui::Painter, rect: Rect, icon: Icon, color: Color32) {
         Icon::ArrowUp => {
             line(p(8.0, 12.67), p(8.0, 3.33));
             path(vec![p(4.0, 7.33), p(8.0, 3.33), p(12.0, 7.33)]);
+        }
+        Icon::Search => {
+            painter.circle_stroke(p(6.75, 6.75), 3.75 * scale, stroke);
+            line(p(9.5, 9.5), p(13.0, 13.0));
         }
         Icon::ArrowRight => {
             line(p(3.33, 8.0), p(12.67, 8.0));
