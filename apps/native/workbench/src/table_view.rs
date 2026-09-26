@@ -110,7 +110,7 @@ pub struct TableState {
     pub drafts: HashMap<(usize, usize), String>,
     editing: Option<(usize, usize)>,
     focus_editor: bool,
-    inspector_open: bool,
+    pub inspector_open: bool,
     /// Column indexes collapsed to a narrow strip.
     collapsed_columns: BTreeSet<usize>,
     /// The staged-row hover card, if one is open.
@@ -337,12 +337,8 @@ pub struct TableContext<'a> {
 pub fn show(ui: &mut egui::Ui, cx: &TableContext<'_>, state: &mut TableState) -> Vec<TableAction> {
     let mut actions = Vec::new();
     let id = |name: &str| egui::Id::new((name, cx.tab_id, cx.embedded));
-    let bar = |margin: Margin| {
-        Frame::new()
-            .fill(theme::CHROME)
-            .inner_margin(margin)
-            .stroke(Stroke::new(1.0, theme::BORDER))
-    };
+    // Panels draw their own one-edge separator, so frames carry no stroke.
+    let bar = |margin: Margin| Frame::new().fill(theme::CHROME).inner_margin(margin);
 
     egui::TopBottomPanel::top(id("table-toolbar"))
         .exact_height(theme::TOOLBAR_HEIGHT)
@@ -443,21 +439,18 @@ fn toolbar(
             ui.add_space(-6.0);
             ui.label(
                 RichText::new(format!(".{}", cx.table))
-                    .font(ui_font(15.0))
-                    .strong()
+                    .font(theme::semibold(15.0))
                     .color(theme::TEXT_STRONG),
             );
         } else {
             ui.label(
                 RichText::new(format!("{}.{}", cx.schema, cx.table))
-                    .strong()
+                    .font(theme::semibold(13.0))
                     .color(theme::TEXT_STRONG),
             );
         }
         if let Some(page) = &state.page {
-            let rows = page
-                .total_rows
-                .map_or_else(|| "—".to_owned(), |n| n.to_string());
+            let rows = page.total_rows.map_or_else(|| "—".to_owned(), theme::count);
             ui.label(
                 RichText::new(format!(
                     "{rows} rows · {} columns",
@@ -468,40 +461,30 @@ fn toolbar(
             );
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let (tip, fill) = if state.inspector_open {
-                ("Hide row inspector", Some(theme::ACCENT_SOFT))
+            let tip = if state.inspector_open {
+                "Hide row inspector"
             } else {
-                ("Show row inspector", None)
+                "Show row inspector"
             };
-            let toggle = icons::button(ui, Icon::Inspector, None, tip);
-            if let Some(fill) = fill {
-                ui.painter().rect_stroke(
-                    toggle.rect,
-                    6,
-                    Stroke::new(1.0, theme::ACCENT.gamma_multiply(0.6)),
-                    egui::StrokeKind::Inside,
-                );
-                ui.painter().rect_filled(toggle.rect, 6, fill);
-            }
+            let toggle = icons::toggle(ui, Icon::Inspector, state.inspector_open, tip);
             if toggle.clicked() {
                 state.inspector_open = !state.inspector_open;
             }
             let has_page = state.page.is_some() && !state.loading;
             let selected: Vec<usize> = state.selected.iter().copied().collect();
             if !selected.is_empty() {
-                let menu = icons::button(
+                let menu = icons::menu_trigger(
                     ui,
-                    Icon::ChevronDown,
-                    Some(&format!("{} selected", selected.len())),
+                    &format!("{} selected", theme::count(selected.len() as u64)),
                     "Actions for the selected rows",
                 );
                 egui::Popup::menu(&menu).show(|ui| {
-                    selection_menu(ui, cx, state, &selected, actions);
+                    selection_menu(ui, cx, state, &selected, actions, true);
                 });
             }
             let total = state
                 .total_rows()
-                .map_or_else(String::new, |n| format!(" ({n})"));
+                .map_or_else(String::new, |n| format!(" ({})", theme::count(n)));
             let export_label = if cx.exporting {
                 ui.ctx()
                     .request_repaint_after(std::time::Duration::from_millis(200));
@@ -510,8 +493,14 @@ fn toolbar(
                     .as_ref()
                     .map_or(0, |rows| rows.load(Ordering::Relaxed));
                 match state.total_rows() {
-                    Some(total) => format!("Exporting {done} / {total}…"),
-                    None => format!("Exporting {done}…"),
+                    Some(total) => {
+                        format!(
+                            "Exporting {} / {}…",
+                            theme::count(done),
+                            theme::count(total)
+                        )
+                    }
+                    None => format!("Exporting {}…", theme::count(done)),
                 }
             } else {
                 format!("Export all{total}")
@@ -534,7 +523,10 @@ fn toolbar(
                 ui,
                 has_page,
                 Icon::Copy,
-                Some(&format!("Copy visible ({})", copyable.len())),
+                Some(&format!(
+                    "Copy visible ({})",
+                    theme::count(copyable.len() as u64)
+                )),
                 "Copies only the current preview page",
             ) {
                 let label = rows_label(copyable.len(), "visible");
@@ -559,14 +551,18 @@ fn toolbar(
 }
 
 /// "N selected" menu and the grid's context menu.
+/// The "N selected" menu, and (without "Clear selection") the row context
+/// menu, as in the desktop.
 fn selection_menu(
     ui: &mut egui::Ui,
     cx: &TableContext<'_>,
     state: &mut TableState,
     selected: &[usize],
     actions: &mut Vec<TableAction>,
+    with_clear: bool,
 ) {
-    if ui.button("Copy selected as CSV").clicked() {
+    theme::menu_scope(ui, if with_clear { 220.0 } else { 200.0 });
+    if theme::menu_item(ui, "Copy selected as CSV", false).clicked() {
         let rows: Vec<usize> = selected
             .iter()
             .copied()
@@ -590,17 +586,12 @@ fn selection_menu(
         } else {
             format!("Stage {} rows for deletion", selected.len())
         };
-        let button = if all_deleted {
-            egui::Button::new(label)
-        } else {
-            egui::Button::new(RichText::new(label).color(theme::DANGER))
-        };
-        if ui.add(button).clicked() {
+        if theme::menu_item(ui, &label, !all_deleted).clicked() {
             toggle_delete(state, selected);
             ui.close();
         }
     }
-    if ui.button("Clear selection").clicked() {
+    if with_clear && theme::menu_item(ui, "Clear selection", false).clicked() {
         state.selected.clear();
         state.anchor = None;
         ui.close();
@@ -627,7 +618,8 @@ fn enabled_icon_button(
 }
 
 fn labeled(ui: &mut egui::Ui, text: &str) {
-    ui.label(RichText::new(text).font(ui_font(12.0)).color(theme::MUTED));
+    // `.table-query-controls label > span`: 11 px faint.
+    ui.label(RichText::new(text).font(ui_font(11.0)).color(theme::FAINT));
 }
 
 fn filter_panel(
@@ -654,8 +646,7 @@ fn filter_panel(
         icons::show(ui, Icon::Filter, 13.0, theme::FAINT);
         ui.label(
             RichText::new("Filters")
-                .font(ui_font(12.0))
-                .strong()
+                .font(theme::semibold(12.0))
                 .color(theme::SECONDARY),
         );
         ui.label(
@@ -663,7 +654,13 @@ fn filter_panel(
                 .font(ui_font(12.0))
                 .color(theme::FAINT),
         );
-        let add = icons::button(ui, Icon::Plus, Some("Add filter"), "Add another filter");
+        let add = icons::text_button(
+            ui,
+            Some(Icon::Plus),
+            "Add filter",
+            12.0,
+            "Add another filter",
+        );
         if add.clicked() {
             state.filters.push(FilterDraft::new(
                 columns.first().copied().unwrap_or_default(),
@@ -723,9 +720,13 @@ fn filter_panel(
                     "Value…"
                 };
                 let response = ui.add(
+                    // `.filter-row .text-input`: 28 px, mono 12 px.
                     egui::TextEdit::singleline(&mut filter.value)
                         .hint_text(hint)
-                        .desired_width(value_width),
+                        .font(mono(12.0))
+                        .margin(Margin::symmetric(9, 6))
+                        // The width excludes the margin.
+                        .desired_width(value_width - 18.0),
                 );
                 if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                     apply = true;
@@ -911,18 +912,26 @@ fn status_bar(
     page: &TablePage,
     actions: &mut Vec<TableAction>,
 ) {
-    let text = |t: String| RichText::new(t).font(ui_font(12.0)).color(theme::MUTED);
+    // `.status-bar`: 11.5 px #8e8e93; the page label is `--secondary`.
+    let text = |t: String| {
+        let color = if t.starts_with("Page") {
+            theme::SECONDARY
+        } else {
+            Color32::from_rgb(0x8e, 0x8e, 0x93)
+        };
+        RichText::new(t).font(ui_font(11.5)).color(color)
+    };
     ui.horizontal_centered(|ui| {
         let total = page
             .total_rows
-            .map_or_else(String::new, |n| format!(" of {n}"));
+            .map_or_else(String::new, |n| format!(" of {}", theme::count(n)));
         let rows = if page.rows.is_empty() {
             format!("No rows{total}")
         } else {
             format!(
                 "Rows {}–{}{total}",
-                page.offset + 1,
-                page.offset + page.rows.len() as u32
+                theme::count(page.offset + 1),
+                theme::count(page.offset + page.rows.len() as u32)
             )
         };
         ui.label(text(rows));
@@ -944,8 +953,10 @@ fn status_bar(
                     .total_rows
                     .map(|n| n.div_ceil(u64::from(page.limit.max(1))).max(1));
                 ui.label(text(match pages {
-                    Some(pages) => format!("Page {current} of {pages}"),
-                    None => format!("Page {current}"),
+                    Some(pages) => {
+                        format!("Page {} of {}", theme::count(current), theme::count(pages))
+                    }
+                    None => format!("Page {}", theme::count(current)),
                 }));
                 if enabled_icon_button(
                     ui,
@@ -981,7 +992,7 @@ fn pending_bar(
             .circle_filled(rect.center(), 4.0, theme::MODIFIED);
         ui.label(
             RichText::new(plural(count, "pending change", "pending changes"))
-                .strong()
+                .font(theme::semibold(13.0))
                 .color(theme::TEXT_STRONG),
         );
         if edited > 0 {
@@ -1159,28 +1170,63 @@ fn loading_overlay(ui: &mut egui::Ui, area: Rect, state: &mut TableState) {
             .request_repaint_after(std::time::Duration::from_secs_f64(0.12 - (now - since)));
         return;
     }
+    // `loading-overlay-in`: fades in over 180 ms.
+    let fade = (((now - since - 0.12) / 0.18) as f32).clamp(0.0, 1.0);
+    if fade < 1.0 {
+        ui.ctx().request_repaint();
+    }
     let painter = ui.painter_at(area);
-    painter.rect_filled(area, 0.0, Color32::from_black_alpha(90));
+    // `rgba(22, 22, 24, .35)`
+    painter.rect_filled(
+        area,
+        0.0,
+        Color32::from_rgba_unmultiplied(22, 22, 24, 89).gamma_multiply(fade),
+    );
     let galley =
         painter.layout_no_wrap("Refreshing…".into(), theme::ui_font(12.0), theme::SECONDARY);
     let pill = Rect::from_center_size(area.center(), galley.size() + Vec2::new(24.0, 12.0));
     painter.rect(
         pill,
         pill.height() / 2.0,
-        theme::POPOVER,
-        Stroke::new(1.0, theme::BORDER_STRONG),
+        theme::POPOVER.gamma_multiply(fade),
+        Stroke::new(1.0, theme::BORDER_STRONG.gamma_multiply(fade)),
         egui::StrokeKind::Inside,
     );
-    painter.galley(
+    painter.galley_with_override_text_color(
         pill.center() - galley.size() / 2.0,
         galley,
-        theme::SECONDARY,
+        theme::SECONDARY.gamma_multiply(fade),
     );
+}
+
+/// The desktop's `defaultColumnWidth`, rule for rule.
+fn default_column_width(data_type: &str) -> f32 {
+    let lower = data_type.to_ascii_lowercase();
+    if lower.contains("json") || lower.contains("array") {
+        320.0
+    } else if lower.contains("timestamp") {
+        230.0
+    } else if lower.contains("text") || lower.contains("character") || lower.contains("uuid") {
+        220.0
+    } else if lower.starts_with("bool") {
+        110.0
+    } else if numeric_column(data_type) {
+        130.0
+    } else {
+        160.0
+    }
 }
 
 fn grid_scope(ui: &mut egui::Ui) {
     ui.spacing_mut().item_spacing = Vec2::ZERO;
-    ui.visuals_mut().widgets.noninteractive.bg_stroke = Stroke::NONE;
+    let widgets = &mut ui.visuals_mut().widgets;
+    widgets.noninteractive.bg_stroke = Stroke::NONE;
+    // `tbody tr:hover { background: rgba(255,255,255,.025) }`; egui_extras
+    // paints `hovered.bg_fill` under the hovered row.
+    widgets.hovered.bg_fill = Color32::from_white_alpha(6);
+    // `.column-resize-handle:hover::after { background: var(--accent) }`.
+    widgets.hovered.bg_stroke = Stroke::new(1.0, theme::ACCENT);
+    widgets.active.bg_stroke = Stroke::new(1.0, theme::ACCENT);
     let band = egui::Rect::from_min_size(
         ui.cursor().min,
         Vec2::new(
@@ -1214,6 +1260,33 @@ enum HeaderClick {
 /// Column header: key glyph, name, type in faint mono, sort indicator, and
 /// (for table grids) a collapse button. Collapsed columns show a narrow
 /// strip that expands on click.
+/// Where a header's collapse button sits.
+fn collapse_button_rect(header: Rect) -> Rect {
+    Rect::from_center_size(
+        header.right_center() - Vec2::new(16.0, 0.0),
+        Vec2::splat(24.0),
+    )
+}
+
+/// `.column-action-target` / `.column-action-dimmed`: while a column's
+/// collapse or expand button is hovered, that column is highlighted and the
+/// rest fade to 38%.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ColumnFocus {
+    Target,
+    Dimmed,
+}
+
+fn column_focus(action: Option<usize>, column: usize) -> Option<ColumnFocus> {
+    action.map(|target| {
+        if target == column {
+            ColumnFocus::Target
+        } else {
+            ColumnFocus::Dimmed
+        }
+    })
+}
+
 fn header_cell(
     ui: &mut egui::Ui,
     name: &str,
@@ -1258,10 +1331,7 @@ fn header_cell(
     // button registered on top of the sort area would otherwise steal the
     // hover, hide itself, and flicker on and off every frame.
     let hovered = ui.rect_contains_pointer(rect);
-    let button = egui::Rect::from_center_size(
-        rect.right_center() - Vec2::new(16.0, 0.0),
-        Vec2::splat(24.0),
-    );
+    let button = collapse_button_rect(rect);
     let show_collapse = collapsible == Some(false) && hovered;
     let sort_rect = if show_collapse {
         egui::Rect::from_min_max(rect.min, egui::pos2(button.left() - 2.0, rect.max.y))
@@ -1316,14 +1386,15 @@ fn header_cell(
         if toggle.hovered() {
             ui.painter().rect_filled(button, 6, theme::CONTROL_HOVER);
         }
+        // `.collapse-column`: the desktop's bar-and-arrow collapse glyph.
         icons::paint(
             ui.painter(),
             button.shrink(6.0),
-            Icon::ChevronLeft,
+            Icon::Collapse,
             if toggle.hovered() {
                 theme::TEXT
             } else {
-                theme::MUTED
+                theme::FAINT
             },
         );
         if toggle.clicked() {
@@ -1478,8 +1549,7 @@ fn change_preview_card(
                             } else {
                                 "Pending edit"
                             })
-                            .font(ui_font(12.5))
-                            .strong()
+                            .font(theme::semibold(12.5))
                             .color(theme::TEXT_STRONG),
                         );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1680,7 +1750,7 @@ pub fn result_grid(ui: &mut egui::Ui, tab_id: u64, columns: &[QueryColumn], rows
                                 ui.add_space(6.0);
                                 aligned(ui, numeric[column], |ui| {
                                     ui.add_space(10.0);
-                                    ui.label(cell_text(value));
+                                    ui.add(egui::Label::new(cell_text(value)).truncate());
                                 });
                             });
                         }
@@ -1710,6 +1780,10 @@ fn grid(
     let mut toggled_column = None;
     let mut discard_row = None;
     let mut hovered_preview = None;
+    // The column whose collapse/expand button was hovered last frame.
+    let action_id = egui::Id::new(("column-action", tab_id, cx.embedded));
+    let action = ui.data(|d| d.get_temp::<usize>(action_id));
+    let mut next_action = None;
     let modifiers = ui.input(|i| i.modifiers);
     if page.rows.is_empty() {
         ui.centered_and_justified(|ui| {
@@ -1720,6 +1794,15 @@ fn grid(
     egui::ScrollArea::horizontal()
         .id_salt(("grid-scroll", tab_id, cx.embedded))
         .show(ui, |ui| {
+            // Rows are clickable but keep the arrow cursor, as in the desktop.
+            let visible = ui.clip_rect();
+            theme::plain_cursor_zone(
+                ui,
+                Rect::from_min_max(
+                    egui::pos2(visible.left(), ui.cursor().min.y + theme::HEADER_HEIGHT),
+                    visible.max,
+                ),
+            );
             grid_scope(ui);
             let mut builder = TableBuilder::new(ui)
                 .id_salt(("grid", tab_id, cx.embedded))
@@ -1729,12 +1812,12 @@ fn grid(
                 builder.reset();
             }
             let mut resized = false;
-            for index in 0..columns.len() {
+            for (index, column) in columns.iter().enumerate() {
                 builder = builder.column(if state.collapsed_columns.contains(&index) {
                     Column::exact(COLLAPSED_COLUMN_WIDTH).clip(true)
                 } else {
-                    Column::initial(DEFAULT_COLUMN_WIDTH)
-                        .at_least(60.0)
+                    Column::initial(default_column_width(&column.data_type))
+                        .range(70.0..=800.0)
                         .resizable(true)
                         .clip(true)
                 });
@@ -1749,8 +1832,25 @@ fn grid(
                                 .map(|o| o.descending);
                             let key = page.metadata.primary_key.contains(&column.name);
                             let collapsed = state.collapsed_columns.contains(&index);
+                            let header_rect = ui.max_rect();
+                            if column_focus(action, index) == Some(ColumnFocus::Target) {
+                                ui.painter().rect_filled(
+                                    header_rect,
+                                    0,
+                                    Color32::from_rgb(0x23, 0x2a, 0x36),
+                                );
+                            }
+                            let on_action = if collapsed {
+                                ui.rect_contains_pointer(header_rect)
+                            } else {
+                                ui.rect_contains_pointer(collapse_button_rect(header_rect))
+                            };
+                            if on_action {
+                                next_action = Some(index);
+                            }
                             let width = ui.max_rect().width();
-                            resized |= !collapsed && (width - DEFAULT_COLUMN_WIDTH).abs() > 0.5;
+                            resized |= !collapsed
+                                && (width - default_column_width(&column.data_type)).abs() > 0.5;
                             match header_cell(
                                 ui,
                                 &column.name,
@@ -1762,6 +1862,13 @@ fn grid(
                                 Some(HeaderClick::Sort) => sort_clicked = Some(column.name.clone()),
                                 Some(HeaderClick::Toggle) => toggled_column = Some(index),
                                 None => {}
+                            }
+                            if column_focus(action, index) == Some(ColumnFocus::Dimmed) {
+                                ui.painter().rect_filled(
+                                    header_rect,
+                                    0,
+                                    theme::GRID_HEADER.gamma_multiply(0.62),
+                                );
                             }
                         });
                     }
@@ -1780,6 +1887,14 @@ fn grid(
                             let (_, response) = row.col(|ui| {
                                 let rect = ui.max_rect();
                                 hairline(ui);
+                                let focus = column_focus(action, column);
+                                if focus == Some(ColumnFocus::Target) {
+                                    ui.painter().rect_filled(
+                                        rect,
+                                        0,
+                                        theme::ACCENT.gamma_multiply(0.06),
+                                    );
+                                }
                                 if selected {
                                     ui.painter().rect_filled(rect, 0, theme::ACCENT_SOFT);
                                 }
@@ -1848,8 +1963,15 @@ fn grid(
                                 }
                                 aligned(ui, right_align, |ui| {
                                     ui.add_space(10.0);
-                                    ui.label(text);
+                                    ui.add(egui::Label::new(text).truncate());
                                 });
+                                if focus == Some(ColumnFocus::Dimmed) {
+                                    ui.painter().rect_filled(
+                                        rect,
+                                        0,
+                                        theme::BG.gamma_multiply(0.62),
+                                    );
+                                }
                             });
                             if response.double_clicked()
                                 && editable_column(cx, page, column)
@@ -1870,20 +1992,8 @@ fn grid(
                             context_row = Some(index);
                         }
                         response.context_menu(|ui| {
-                            if let Some(preview) = &preview {
-                                let label = if preview.deleted {
-                                    "Undo delete"
-                                } else {
-                                    "Discard edit"
-                                };
-                                if ui.button(label).clicked() {
-                                    discard_row = Some(index);
-                                    ui.close();
-                                }
-                                ui.separator();
-                            }
                             let selected: Vec<usize> = state.selected.iter().copied().collect();
-                            selection_menu(ui, cx, state, &selected, actions);
+                            selection_menu(ui, cx, state, &selected, actions, false);
                         });
                     });
                 });
@@ -1892,6 +2002,13 @@ fn grid(
         && !state.collapsed_columns.remove(&index)
     {
         state.collapsed_columns.insert(index);
+    }
+    if next_action != action {
+        ui.data_mut(|d| match next_action {
+            Some(column) => d.insert_temp(action_id, column),
+            None => d.remove::<usize>(action_id),
+        });
+        ui.ctx().request_repaint();
     }
     update_preview(ui, cx, state, columns, hovered_preview, &mut discard_row);
     if let Some(row) = discard_row {
@@ -1955,7 +2072,8 @@ fn grid(
     }
     // Keyboard: Delete toggles staged deletion for the selection; Escape
     // clears it. Only when no text field has focus.
-    let free = ui.memory(|m| m.focused().is_none());
+    let free =
+        ui.memory(|m| m.focused().is_none()) && theme::focused_last_frame(ui.ctx()).is_none();
     if free
         && !state.selected.is_empty()
         && editable(cx, page)
@@ -1981,13 +2099,18 @@ fn field_editor_id(tab_id: u64, row: usize, column: usize) -> egui::Id {
 /// draft instead, reverting the field.
 fn commit_unfocused_drafts(ui: &egui::Ui, tab_id: u64, state: &mut TableState) {
     let focused = ui.memory(|m| m.focused());
+    // egui has already dropped focus on the frame Escape is pressed.
+    let before = theme::focused_last_frame(ui.ctx());
     let escape = ui.input(|i| i.key_pressed(egui::Key::Escape));
     let keys: Vec<(usize, usize)> = state.drafts.keys().copied().collect();
     for key in keys {
-        let has_focus = focused == Some(cell_editor_id(tab_id, key.0, key.1))
-            || focused == Some(field_editor_id(tab_id, key.0, key.1));
+        let ids = [
+            Some(cell_editor_id(tab_id, key.0, key.1)),
+            Some(field_editor_id(tab_id, key.0, key.1)),
+        ];
+        let has_focus = ids.contains(&focused);
         let opening = state.editing == Some(key) && state.focus_editor;
-        if has_focus && escape {
+        if escape && (has_focus || ids.contains(&before)) {
             state.drafts.remove(&key);
             if let Some(id) = focused {
                 ui.memory_mut(|m| m.surrender_focus(id));
@@ -2028,8 +2151,7 @@ fn inspector(ui: &mut egui::Ui, cx: &TableContext<'_>, state: &mut TableState, p
                 ui.spacing_mut().item_spacing.x = 8.0;
                 ui.label(
                     RichText::new("Row")
-                        .font(ui_font(13.0))
-                        .strong()
+                        .font(theme::semibold(13.0))
                         .color(theme::TEXT_STRONG),
                 );
                 if let Some(index) = single {

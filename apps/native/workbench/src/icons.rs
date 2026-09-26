@@ -35,6 +35,7 @@ pub enum Icon {
     ArrowUp,
     ArrowDown,
     ArrowRight,
+    Search,
     Folder,
     Trash,
     Undo,
@@ -252,6 +253,10 @@ pub fn paint(painter: &egui::Painter, rect: Rect, icon: Icon, color: Color32) {
             line(p(8.0, 12.67), p(8.0, 3.33));
             path(vec![p(4.0, 7.33), p(8.0, 3.33), p(12.0, 7.33)]);
         }
+        Icon::Search => {
+            painter.circle_stroke(p(6.75, 6.75), 3.75 * scale, stroke);
+            line(p(9.5, 9.5), p(13.0, 13.0));
+        }
         Icon::ArrowRight => {
             line(p(3.33, 8.0), p(12.67, 8.0));
             path(vec![p(8.67, 4.0), p(12.67, 8.0), p(8.67, 12.0)]);
@@ -291,23 +296,30 @@ pub fn button(ui: &mut egui::Ui, icon: Icon, label: Option<&str>, tooltip: &str)
             theme::SECONDARY,
         )
     });
+    // `.toolbar-button`: 28 px, 9 px padding, a 6% white wash on hover.
     let icon_size = 14.0;
-    let padding = Vec2::new(7.0, 5.0);
+    let padding = Vec2::new(if label.is_some() { 9.0 } else { 7.0 }, 5.0);
     let width = padding.x * 2.0 + icon_size + text.as_ref().map_or(0.0, |g| g.size().x + 6.0);
-    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 26.0), Sense::click());
-    let response = response.on_hover_text(tooltip);
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 28.0), Sense::click());
+    // Titles also explain why a control is disabled, as the desktop's do.
+    let response = if enabled {
+        response.on_hover_text(tooltip)
+    } else {
+        response.on_disabled_hover_text(tooltip)
+    };
     response.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label.unwrap_or(tooltip))
     });
     if ui.is_rect_visible(rect) {
         let hovered = response.hovered() && enabled;
         if hovered || response.has_focus() {
-            ui.painter().rect_filled(rect, 6, theme::CONTROL_HOVER);
+            ui.painter()
+                .rect_filled(rect, 6, Color32::from_white_alpha(15));
         }
         let color = if !enabled {
             theme::FAINT
         } else if hovered {
-            theme::TEXT_STRONG
+            theme::TEXT
         } else {
             theme::SECONDARY
         };
@@ -324,5 +336,117 @@ pub fn button(ui: &mut egui::Ui, icon: Icon, label: Option<&str>, tooltip: &str)
             ui.painter().galley(pos, galley, color);
         }
     }
+    response
+}
+
+/// `.text-button`: an accent-text link with an optional icon, 12 px medium,
+/// padding 3×6, and an accent wash on hover.
+pub fn text_button(
+    ui: &mut egui::Ui,
+    icon: Option<Icon>,
+    label: &str,
+    size: f32,
+    tooltip: &str,
+) -> Response {
+    let enabled = ui.is_enabled();
+    let galley =
+        ui.painter()
+            .layout_no_wrap(label.to_owned(), theme::medium(size), theme::ACCENT_TEXT);
+    let icon_size = size + 1.0;
+    let icon_width = icon.map_or(0.0, |_| icon_size + 4.0);
+    let (rect, response) = ui.allocate_exact_size(
+        Vec2::new(12.0 + icon_width + galley.size().x, galley.size().y + 6.0),
+        Sense::click(),
+    );
+    let response = if enabled {
+        response.on_hover_text(tooltip)
+    } else {
+        response.on_disabled_hover_text(tooltip)
+    };
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label));
+    if ui.is_rect_visible(rect) {
+        if response.hovered() && enabled {
+            ui.painter().rect_filled(rect, 5, theme::ACCENT_SOFT);
+        }
+        let color = if enabled {
+            theme::ACCENT_TEXT
+        } else {
+            theme::FAINT
+        };
+        let mut x = rect.left() + 6.0;
+        if let Some(icon) = icon {
+            paint(
+                ui.painter(),
+                Rect::from_center_size(
+                    Pos2::new(x + icon_size / 2.0, rect.center().y),
+                    Vec2::splat(icon_size),
+                ),
+                icon,
+                color,
+            );
+            x += icon_width;
+        }
+        ui.painter().galley(
+            Pos2::new(x, rect.center().y - galley.size().y / 2.0),
+            galley,
+            color,
+        );
+    }
+    response
+}
+
+/// `.selection-actions-trigger`: a toolbar button with accent text and a
+/// chevron after the label.
+pub fn menu_trigger(ui: &mut egui::Ui, label: &str, tooltip: &str) -> Response {
+    let galley =
+        ui.painter()
+            .layout_no_wrap(label.to_owned(), theme::ui_font(12.5), theme::ACCENT_TEXT);
+    let width = 9.0 * 2.0 + galley.size().x + 5.0 + 12.0;
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 28.0), Sense::click());
+    let response = response.on_hover_text(tooltip);
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
+    if response.hovered() {
+        ui.painter()
+            .rect_filled(rect, 6, Color32::from_white_alpha(15));
+    }
+    let y = rect.center().y;
+    let text_x = rect.left() + 9.0;
+    let chevron_x = text_x + galley.size().x + 5.0;
+    ui.painter().galley(
+        Pos2::new(text_x, y - galley.size().y / 2.0),
+        galley,
+        theme::ACCENT_TEXT,
+    );
+    paint(
+        ui.painter(),
+        Rect::from_center_size(Pos2::new(chevron_x + 6.0, y), Vec2::splat(12.0)),
+        Icon::ChevronDown,
+        theme::ACCENT_TEXT,
+    );
+    response
+}
+
+/// `.icon-toggle`: 30×28, a 6% wash on hover; when on, an accent-soft fill
+/// with an accent icon.
+pub fn toggle(ui: &mut egui::Ui, icon: Icon, on: bool, tooltip: &str) -> Response {
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(30.0, 28.0), Sense::click());
+    let response = response.on_hover_text(tooltip);
+    response
+        .widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, on, tooltip));
+    let hovered = response.hovered();
+    let (fill, color) = if on {
+        (theme::ACCENT_SOFT, theme::ACCENT_TEXT)
+    } else if hovered {
+        (Color32::from_white_alpha(15), theme::TEXT)
+    } else {
+        (Color32::TRANSPARENT, theme::MUTED)
+    };
+    ui.painter().rect_filled(rect, 6, fill);
+    paint(
+        ui.painter(),
+        Rect::from_center_size(rect.center(), Vec2::splat(14.0)),
+        icon,
+        color,
+    );
     response
 }

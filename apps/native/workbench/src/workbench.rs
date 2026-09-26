@@ -318,6 +318,8 @@ pub struct Workbench {
     sidebar_collapsed: bool,
     completion: Option<Completion>,
     now: f64,
+    /// The window's width this frame, for layout defaults.
+    window_width: f32,
 }
 
 impl Workbench {
@@ -361,6 +363,7 @@ impl Workbench {
             sidebar_collapsed: false,
             completion: None,
             now: 0.0,
+            window_width: 1280.0,
         };
         app.send(Command::LoadProfiles, "Loading connections", None);
         app
@@ -663,7 +666,7 @@ impl Workbench {
         self.query_results.insert(tab_id, result);
         self.tables.remove(&tab_id);
         if embedded {
-            self.tables.insert(tab_id, TableState::default());
+            self.tables.insert(tab_id, self.new_table_state());
             self.load_table(tab_id);
         }
         self.queue_history(Some(tab_id));
@@ -781,7 +784,7 @@ impl Workbench {
             embedded: None,
             collapsed: false,
         });
-        self.tables.insert(id, TableState::default());
+        self.tables.insert(id, self.new_table_state());
         self.active_tab = Some(id);
         self.active_profile = Some(profile);
         self.load_table(id);
@@ -1097,6 +1100,7 @@ impl eframe::App for Workbench {
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.now = ctx.input(|input| input.time);
+        self.window_width = ctx.content_rect().width();
         self.drain();
         if ctx.input(|input| input.viewport().close_requested()) {
             let dirty = self.tabs.iter().any(|tab| self.tab_dirty(tab.id));
@@ -1124,6 +1128,7 @@ impl eframe::App for Workbench {
             .show(ctx, |ui| self.content_ui(ui));
         self.dialogs(ctx);
         self.toast_ui(ctx);
+        theme::end_frame(ctx);
     }
 }
 
@@ -1138,8 +1143,7 @@ impl Workbench {
                 .frame(
                     Frame::new()
                         .fill(theme::SIDEBAR)
-                        .inner_margin(Margin::symmetric(8, 12))
-                        .stroke(Stroke::new(1.0, theme::BORDER)),
+                        .inner_margin(Margin::symmetric(8, 12)),
                 )
                 .show(ctx, |ui| {
                     ui.vertical_centered(|ui| {
@@ -1150,31 +1154,45 @@ impl Workbench {
                 });
             return;
         }
-        egui::SidePanel::left("sidebar")
+        // `.sidebar-resize-handle`: double-click restores the default width.
+        let panel_id = egui::Id::new("sidebar");
+        let handle = ctx.read_response(panel_id.with("__resize"));
+        if handle.as_ref().is_some_and(egui::Response::double_clicked) {
+            ctx.data_mut(|d| d.remove::<egui::containers::panel::PanelState>(panel_id));
+        }
+        let panel = egui::SidePanel::left(panel_id)
             .resizable(true)
             .default_width(260.0)
             .width_range(220.0..=480.0)
             .frame(
                 Frame::new()
                     .fill(theme::SIDEBAR)
-                    .inner_margin(Margin::symmetric(10, 10))
-                    .stroke(Stroke::new(1.0, theme::BORDER)),
+                    .inner_margin(Margin::symmetric(10, 10)),
             )
             .show(ctx, |ui| {
+                // `.brand-row`: a 26 px control-coloured mark with an inset
+                // ring and an accent database glyph.
                 ui.horizontal(|ui| {
-                    let (rect, _) = ui.allocate_exact_size(Vec2::splat(22.0), Sense::hover());
-                    ui.painter()
-                        .rect_filled(rect, CornerRadius::same(6), theme::ACCENT_STRONG);
+                    ui.set_height(32.0);
+                    ui.add_space(6.0);
+                    ui.spacing_mut().item_spacing.x = 9.0;
+                    let (rect, _) = ui.allocate_exact_size(Vec2::splat(26.0), Sense::hover());
+                    ui.painter().rect(
+                        rect,
+                        CornerRadius::same(7),
+                        theme::CONTROL,
+                        Stroke::new(1.0, Color32::from_white_alpha(15)),
+                        egui::StrokeKind::Inside,
+                    );
                     icons::paint(
                         ui.painter(),
-                        rect.shrink(4.0),
+                        egui::Rect::from_center_size(rect.center(), Vec2::splat(15.0)),
                         Icon::Database,
-                        Color32::WHITE,
+                        theme::ACCENT_TEXT,
                     );
                     ui.label(
                         RichText::new("DBM")
-                            .strong()
-                            .size(14.0)
+                            .font(theme::semibold(13.0))
                             .color(theme::TEXT_STRONG),
                     );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1185,17 +1203,26 @@ impl Workbench {
                 });
                 ui.add_space(10.0);
                 egui::TopBottomPanel::bottom("sidebar-footer")
-                    .frame(Frame::new().inner_margin(Margin::symmetric(0, 8)))
+                    .frame(Frame::new().inner_margin(Margin {
+                        left: 2,
+                        right: 2,
+                        top: 10,
+                        bottom: 0,
+                    }))
+                    .show_separator_line(false)
                     .show_inside(ui, |ui| {
-                        let button = ui.add_sized(
-                            [ui.available_width(), 30.0],
-                            egui::Button::new("New connection"),
+                        // `.sidebar-footer { border-top: 1px solid var(--border) }`
+                        let top = ui.max_rect().top() - 10.0;
+                        ui.painter().hline(
+                            ui.max_rect().x_range().expand(12.0),
+                            top + 0.5,
+                            Stroke::new(1.0, theme::BORDER),
                         );
-                        let icon_rect = egui::Rect::from_center_size(
-                            button.rect.center() - Vec2::new(62.0, 0.0),
-                            Vec2::splat(13.0),
+                        let button = ui.add(
+                            theme::secondary_button("New connection")
+                                .icon(Icon::Plus)
+                                .min_width(ui.available_width()),
                         );
-                        icons::paint(ui.painter(), icon_rect, Icon::Plus, theme::SECONDARY);
                         if button.clicked() {
                             self.profile_form = Some(ProfileForm::fresh());
                         }
@@ -1206,13 +1233,35 @@ impl Workbench {
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         if self.profiles.is_empty() {
-                            ui.label(RichText::new("No saved connections.").color(theme::MUTED));
+                            // `.empty-state.compact`
+                            ui.add_space(18.0);
+                            ui.vertical_centered(|ui| {
+                                ui.label(
+                                    RichText::new("No saved connections.")
+                                        .font(ui_font(12.0))
+                                        .color(theme::FAINT),
+                                );
+                            });
                         }
                         for profile in self.profiles.clone() {
                             self.connection_item(ui, &profile);
                         }
                     });
             });
+        // A 2 px accent line while the edge is hovered or dragged, painted
+        // over egui's own 1 px line.
+        if handle.is_some_and(|r| r.hovered() || r.dragged()) {
+            let edge = panel.response.rect.right();
+            ctx.layer_painter(egui::LayerId::new(
+                egui::Order::Foreground,
+                panel_id.with("handle"),
+            ))
+            .rect_filled(
+                egui::Rect::from_x_y_ranges(edge - 1.0..=edge + 1.0, panel.response.rect.y_range()),
+                0,
+                theme::ACCENT,
+            );
+        }
     }
 
     fn connection_item(&mut self, ui: &mut egui::Ui, profile: &ConnectionProfile) {
@@ -1227,17 +1276,22 @@ impl Workbench {
             .any(|m| m.profile == Some(id) && m.label == "Connecting");
         let width = ui.available_width();
         let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 44.0), Sense::click());
-        let response = response.on_hover_text(if connected { "" } else { "Connect" });
+        let response = if connected {
+            response
+        } else {
+            response.on_hover_text("Connect")
+        };
         response.widget_info(|| {
             egui::WidgetInfo::selected(egui::WidgetType::Button, true, active, &profile.name)
         });
         let painter = ui.painter();
+        // `.connection-item`: 6% wash on hover, 7% when active.
         if active {
-            painter.rect_filled(rect, 7, theme::CONTROL);
+            painter.rect_filled(rect, 6, Color32::from_white_alpha(18));
         } else if response.hovered() {
-            painter.rect_filled(rect, 7, Color32::from_white_alpha(8));
+            painter.rect_filled(rect, 6, Color32::from_white_alpha(15));
         }
-        let dot = egui::Pos2::new(rect.left() + 12.0, rect.top() + 15.0);
+        let dot = egui::Pos2::new(rect.left() + 13.0, rect.center().y);
         if connected {
             painter.circle_filled(dot, 4.0, color);
         } else {
@@ -1252,7 +1306,7 @@ impl Workbench {
             job.wrap = egui::text::TextWrapping::truncate_at_width(text_width);
             ui.fonts_mut(|fonts| fonts.layout_job(job))
         };
-        let name = single_line(profile.name.clone(), ui_font(13.0), theme::TEXT_STRONG);
+        let name = single_line(profile.name.clone(), theme::medium(13.0), theme::TEXT);
         let target = if profile.username.is_empty() {
             profile.host.clone()
         } else {
@@ -1266,7 +1320,7 @@ impl Workbench {
         ui.painter().galley(
             egui::Pos2::new(text_left, rect.top() + 6.0),
             name,
-            theme::TEXT_STRONG,
+            theme::TEXT,
         );
         ui.painter().galley(
             egui::Pos2::new(text_left, rect.top() + 24.0),
@@ -1295,13 +1349,13 @@ impl Workbench {
                 ui.spacing_mut().item_spacing.x = 0.0;
                 let more = icons::button(ui, Icon::More, None, "Connection actions");
                 egui::Popup::menu(&more).show(|ui| {
-                    if ui.button("Edit connection").clicked() {
+                    theme::menu_scope(ui, 200.0);
+                    if theme::menu_item(ui, "Edit connection", false).clicked() {
                         self.profile_form = Some(ProfileForm::from_profile(profile));
                         ui.close();
                     }
                     if connected
-                        && ui
-                            .add(theme::danger_button("Disconnect"))
+                        && theme::menu_item(ui, "Disconnect", true)
                             .on_hover_text("Close this connection and its tabs")
                             .clicked()
                     {
@@ -1380,18 +1434,22 @@ impl Workbench {
                     } else {
                         "Refresh"
                     };
-                    if icon_btn(
-                        ui,
-                        !refreshing,
-                        Icon::Refresh,
-                        Some(label),
-                        "Reload the schema tree",
-                    ) {
+                    let refresh = ui.add_enabled_ui(!refreshing, |ui| {
+                        icons::text_button(
+                            ui,
+                            Some(Icon::Refresh),
+                            label,
+                            11.5,
+                            "Reload the schema tree",
+                        )
+                    });
+                    if refresh.inner.clicked() {
                         self.send(Command::Schema(id), "Refreshing schema", Some(id));
                     }
                 });
             });
             let filter = self.schema_filters.entry(id).or_default();
+            // `.schema-filter`: 28 px, 12 px text after a search glyph.
             let response = ui.add(
                 egui::TextEdit::singleline(filter)
                     .hint_text(if redis {
@@ -1399,10 +1457,30 @@ impl Workbench {
                     } else {
                         "Filter tables…"
                     })
+                    .font(ui_font(12.0))
+                    .margin(Margin {
+                        left: 27,
+                        right: 9,
+                        top: 6,
+                        bottom: 6,
+                    })
                     .desired_width(f32::INFINITY),
             );
-            if response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            icons::paint(
+                ui.painter(),
+                egui::Rect::from_center_size(
+                    response.rect.left_center() + Vec2::new(14.5, 0.0),
+                    Vec2::splat(13.0),
+                ),
+                Icon::Search,
+                theme::FAINT,
+            );
+            // Escape clears the filter and keeps it focused, as in the desktop.
+            let focused =
+                response.has_focus() || theme::focused_last_frame(ui.ctx()) == Some(response.id);
+            if focused && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                 filter.clear();
+                response.request_focus();
             }
             let query = filter.clone();
             let nodes =
@@ -1449,21 +1527,27 @@ impl Workbench {
             .map(|t| t.profile_id)
             .or(self.active_profile)
             .and_then(|id| self.profile(id).cloned());
+        // `.topbar`: 44 px, padding 0 12 0 16, a bottom border only.
         egui::TopBottomPanel::top("top-bar")
-            .exact_height(40.0)
-            .frame(
-                Frame::new()
-                    .fill(theme::CHROME)
-                    .inner_margin(Margin::symmetric(14, 0))
-                    .stroke(Stroke::new(1.0, theme::BORDER)),
-            )
+            .exact_height(44.0)
+            .frame(Frame::new().fill(theme::CHROME).inner_margin(Margin {
+                left: 16,
+                right: 12,
+                top: 0,
+                bottom: 0,
+            }))
             .show(ctx, |ui| {
                 ui.horizontal_centered(|ui| {
                     if let Some(profile) = &profile {
                         let color = self.profile_color(profile.id);
-                        let (rect, _) = ui.allocate_exact_size(Vec2::splat(10.0), Sense::hover());
+                        ui.spacing_mut().item_spacing.x = 9.0;
+                        let (rect, _) = ui.allocate_exact_size(Vec2::splat(8.0), Sense::hover());
                         ui.painter().circle_filled(rect.center(), 4.0, color);
-                        ui.label(RichText::new(&profile.name).strong().color(theme::TEXT_STRONG));
+                        ui.label(
+                            RichText::new(&profile.name)
+                                .font(theme::semibold(13.0))
+                                .color(theme::TEXT_STRONG),
+                        );
                         let target = if profile.username.is_empty() {
                             format!("{}:{}/{}", profile.host, profile.port, profile.default_database)
                         } else {
@@ -1496,17 +1580,12 @@ impl Workbench {
     fn tab_strip(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::top("tab-strip")
             .exact_height(36.0)
-            .frame(
-                Frame::new()
-                    .fill(theme::CHROME)
-                    .inner_margin(Margin {
-                        left: 6,
-                        right: 6,
-                        top: 4,
-                        bottom: 0,
-                    })
-                    .stroke(Stroke::new(1.0, theme::BORDER)),
-            )
+            .frame(Frame::new().fill(theme::CHROME).inner_margin(Margin {
+                left: 6,
+                right: 6,
+                top: 4,
+                bottom: 0,
+            }))
             .show(ctx, |ui| {
                 egui::ScrollArea::horizontal()
                     .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
@@ -1589,9 +1668,31 @@ impl Workbench {
             }
             return;
         }
+        // The whole tab is the click target (select, middle-click close,
+        // double-click rename). Its area comes from the last frame so the
+        // buttons laid out on top of it still take their own clicks.
+        let rect_id = egui::Id::new(("tab-rect", tab.id));
+        let last_rect = ui.ctx().data(|d| d.get_temp::<egui::Rect>(rect_id));
+        let hovered = last_rect.is_some_and(|r| ui.rect_contains_pointer(r));
+        if let Some(rect) = last_rect {
+            let whole = ui.interact(rect, rect_id, Sense::click());
+            if whole.clicked() {
+                self.select_tab(tab.id);
+            }
+            if whole.double_clicked() && tab.kind == TabKind::Query {
+                self.renaming = Some((tab.id, tab.title.clone()));
+            }
+            if whole.middle_clicked() {
+                self.close_tab(tab.id);
+                return;
+            }
+        }
         let frame = Frame::new()
             .fill(if active {
                 theme::BG
+            } else if hovered {
+                // `.tab:hover { background: rgba(255,255,255,.04) }`
+                Color32::from_white_alpha(10)
             } else {
                 Color32::TRANSPARENT
             })
@@ -1625,7 +1726,13 @@ impl Workbench {
                     icons::show(ui, glyph, 13.0, color.gamma_multiply(0.85));
                     if let Some((_, draft)) = self.renaming.as_mut().filter(|(id, _)| *id == tab.id)
                     {
-                        let edit = ui.add(egui::TextEdit::singleline(draft).desired_width(120.0));
+                        // `.tab-title-input`: 140 px on the edit surface.
+                        let edit = ui.add(
+                            egui::TextEdit::singleline(draft)
+                                .desired_width(140.0)
+                                .font(theme::ui_font(12.5))
+                                .background_color(theme::EDIT_SURFACE),
+                        );
                         edit.request_focus();
                         if edit.lost_focus() {
                             let escape = ui.input(|i| i.key_pressed(egui::Key::Escape));
@@ -1638,38 +1745,66 @@ impl Workbench {
                             self.renaming = None;
                         }
                     } else {
-                        let title = ui.add(
-                            egui::Label::new(RichText::new(&tab.title).size(12.5).color(
-                                if active {
-                                    theme::TEXT_STRONG
+                        // `.tab-title`: 230 px at most, weight 500 when active.
+                        ui.scope(|ui| {
+                            ui.set_max_width(230.0);
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(&tab.title)
+                                        .font(if active {
+                                            theme::medium(12.5)
+                                        } else {
+                                            theme::ui_font(12.5)
+                                        })
+                                        .color(if active {
+                                            theme::TEXT_STRONG
+                                        } else if hovered {
+                                            theme::TEXT
+                                        } else {
+                                            theme::MUTED
+                                        }),
+                                )
+                                .truncate()
+                                .selectable(false),
+                            );
+                        });
+                        // `.tab-rename`: a pencil after the title on hover. Its
+                        // space is kept so the tab doesn't change width.
+                        let plate = (tab.kind == TabKind::Query)
+                            .then(|| ui.allocate_exact_size(Vec2::splat(22.0), Sense::hover()).0);
+                        if let Some(plate) = plate.filter(|_| hovered) {
+                            let pencil = ui
+                                .interact(
+                                    plate,
+                                    egui::Id::new(("tab-rename", tab.id)),
+                                    Sense::click(),
+                                )
+                                .on_hover_text(format!("Rename {}", tab.title));
+                            ui.painter().rect_filled(
+                                plate,
+                                5,
+                                if pencil.hovered() {
+                                    theme::CONTROL_HOVER
+                                } else if active {
+                                    theme::BG
                                 } else {
-                                    theme::MUTED
+                                    theme::CHROME
                                 },
-                            ))
-                            .truncate()
-                            .sense(Sense::click()),
-                        );
-                        if title.clicked() {
-                            self.select_tab(tab.id);
+                            );
+                            icons::paint(
+                                ui.painter(),
+                                plate.shrink(5.0),
+                                Icon::Pencil,
+                                if pencil.hovered() {
+                                    theme::TEXT
+                                } else {
+                                    theme::FAINT
+                                },
+                            );
+                            if pencil.clicked() {
+                                self.renaming = Some((tab.id, tab.title.clone()));
+                            }
                         }
-                        if title.double_clicked() && tab.kind == TabKind::Query {
-                            self.renaming = Some((tab.id, tab.title.clone()));
-                        }
-                        if title.middle_clicked() {
-                            self.close_tab(tab.id);
-                        }
-                    }
-                    if tab.kind == TabKind::Query
-                        && self.renaming.is_none()
-                        && icon_btn(
-                            ui,
-                            true,
-                            Icon::Pencil,
-                            None,
-                            &format!("Rename {}", tab.title),
-                        )
-                    {
-                        self.renaming = Some((tab.id, tab.title.clone()));
                     }
                     if active
                         && icon_btn(
@@ -1682,12 +1817,19 @@ impl Workbench {
                     {
                         self.collapse_tab(tab.id);
                     }
-                    if icon_btn(ui, true, Icon::Close, None, &format!("Close {}", tab.title)) {
-                        self.close_tab(tab.id);
+                    // Close shows on hover and on the active tab; its space is
+                    // kept so tabs don't shift.
+                    if hovered || active {
+                        if icon_btn(ui, true, Icon::Close, None, &format!("Close {}", tab.title)) {
+                            self.close_tab(tab.id);
+                        }
+                    } else {
+                        ui.add_space(28.0);
                     }
                 });
             })
             .response;
+        ui.ctx().data_mut(|d| d.insert_temp(rect_id, response.rect));
         if active {
             let rect = response.rect;
             ui.painter().rect_filled(
@@ -1784,72 +1926,104 @@ fn schema_branch(
         (Some(schema), Some(table)) => Some((schema.clone(), table.clone())),
         _ => None,
     };
-    let indent = 4.0 + depth as f32 * 14.0;
-    if let Some(target) = leaf {
-        let glyph = match node.kind.as_str() {
-            "key" => Icon::Key,
-            "view" => Icon::View,
-            _ => Icon::Table,
-        };
-        let is_selected = selected == Some(&target);
-        let (rect, response) =
-            ui.allocate_exact_size(Vec2::new(ui.available_width(), 26.0), Sense::click());
-        response.widget_info(|| {
-            egui::WidgetInfo::selected(egui::WidgetType::Button, true, is_selected, &node.name)
-        });
-        if is_selected {
-            ui.painter().rect_filled(rect, 6, color.gamma_multiply(0.3));
-        } else if response.hovered() {
-            ui.painter()
-                .rect_filled(rect, 6, Color32::from_white_alpha(8));
-        }
-        let icon_rect = egui::Rect::from_center_size(
-            egui::pos2(rect.left() + indent + 20.0, rect.center().y),
-            Vec2::splat(13.0),
-        );
-        let icon_color = if is_selected { color } else { theme::MUTED };
-        icons::paint(ui.painter(), icon_rect, glyph, icon_color);
-        let mut job = LayoutJob::simple_singleline(
-            node.name.clone(),
-            ui_font(13.0),
-            if is_selected {
-                theme::TEXT_STRONG
-            } else {
-                theme::SECONDARY
-            },
-        );
-        job.wrap =
-            egui::text::TextWrapping::truncate_at_width(rect.right() - icon_rect.right() - 12.0);
-        let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
-        let text_pos = egui::pos2(
-            icon_rect.right() + 8.0,
-            rect.center().y - galley.size().y / 2.0,
-        );
-        ui.painter().galley(text_pos, galley, theme::SECONDARY);
-        if response.clicked() {
-            *open = Some(target);
-        }
-        return;
+    // `.schema-node-button`: 26 px rows padded `8 + depth * 14`, a 12 px caret
+    // column, a 15 px icon, then 12.5 px text.
+    let x0 = 8.0 + depth as f32 * 14.0;
+    let (rect, response) =
+        ui.allocate_exact_size(Vec2::new(ui.available_width(), 26.0), Sense::click());
+    let is_selected = leaf.as_ref().is_some_and(|t| selected == Some(t));
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::Button, true, is_selected, &node.name)
+    });
+    let hovered = response.hovered();
+    if is_selected {
+        ui.painter()
+            .rect_filled(rect, 6, color.gamma_multiply(0.24));
+    } else if hovered {
+        ui.painter()
+            .rect_filled(rect, 6, Color32::from_white_alpha(15));
     }
     let id = ui.make_persistent_id(("schema-node", depth, &node.kind, &node.name));
-    let mut state =
-        egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, depth < 1);
-    if force_open {
-        state.set_open(true);
-    }
-    let header = ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 4.0;
-        ui.add_space(indent);
+    let mut state = (leaf.is_none()).then(|| {
+        let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(
+            ui.ctx(),
+            id,
+            depth < 1,
+        );
+        if force_open {
+            state.set_open(true);
+        }
+        state
+    });
+    if let Some(state) = &state {
         let caret = if state.is_open() {
             Icon::ChevronDown
         } else {
             Icon::ChevronRight
         };
-        icons::show(ui, caret, 12.0, theme::FAINT);
-        let text = RichText::new(&node.name).color(theme::SECONDARY);
-        ui.add(egui::Button::new(text).frame(false)).clicked()
-    });
-    if header.inner {
+        icons::paint(
+            ui.painter(),
+            egui::Rect::from_center_size(
+                egui::pos2(rect.left() + x0 + 6.0, rect.center().y),
+                Vec2::splat(11.0),
+            ),
+            caret,
+            theme::FAINT,
+        );
+    }
+    let glyph = match (leaf.is_some(), node.kind.as_str()) {
+        (false, _) => Icon::Folder,
+        (true, "key") => Icon::Key,
+        (true, "view") => Icon::View,
+        (true, _) => Icon::Table,
+    };
+    // `.schema-icon`: faint, the schema folder muted, and the selected
+    // table's icon 55% connection colour mixed with white.
+    let icon_color = if is_selected {
+        egui::lerp(egui::Rgba::from(color)..=egui::Rgba::WHITE, 0.45).into()
+    } else if node.kind == "schema" {
+        theme::MUTED
+    } else {
+        theme::FAINT
+    };
+    let icon_rect = egui::Rect::from_center_size(
+        egui::pos2(rect.left() + x0 + 18.0 + 7.5, rect.center().y),
+        Vec2::splat(13.0),
+    );
+    icons::paint(ui.painter(), icon_rect, glyph, icon_color);
+    let text_left = rect.left() + x0 + 18.0 + 15.0 + 6.0;
+    let mut job = LayoutJob::simple_singleline(
+        node.name.clone(),
+        if is_selected {
+            theme::medium(12.5)
+        } else {
+            ui_font(12.5)
+        },
+        if is_selected {
+            Color32::WHITE
+        } else if hovered {
+            theme::TEXT
+        } else {
+            theme::SECONDARY
+        },
+    );
+    job.wrap = egui::text::TextWrapping::truncate_at_width(rect.right() - text_left - 8.0);
+    let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
+    ui.painter().galley(
+        egui::pos2(text_left, rect.center().y - galley.size().y / 2.0),
+        galley,
+        theme::SECONDARY,
+    );
+    if let Some(target) = leaf {
+        if response.clicked() {
+            *open = Some(target);
+        }
+        return;
+    }
+    let Some(mut state) = state.take() else {
+        return;
+    };
+    if response.clicked() {
         state.toggle(ui);
     }
     state.show_body_unindented(ui, |ui| {
@@ -1921,8 +2095,7 @@ impl Workbench {
             ui.add_space(22.0);
             ui.label(
                 RichText::new(title)
-                    .size(20.0)
-                    .strong()
+                    .font(theme::semibold(20.0))
                     .color(theme::TEXT_STRONG),
             );
             ui.add_space(8.0);
@@ -1941,6 +2114,10 @@ impl Workbench {
             _ if redis => "Run command",
             _ => "Run statement",
         };
+        let selection_sql = target
+            .as_ref()
+            .filter(|t| t.kind == ExecutionKind::Selection)
+            .map(|t| t.sql.clone());
         let embedded_dirty = self.tab_dirty(tab_id);
         let mut run: Option<(String, bool)> = None;
 
@@ -1963,27 +2140,23 @@ impl Workbench {
                         }));
                         ui.label(
                             RichText::new(&tab.title)
-                                .font(ui_font(15.0))
-                                .strong()
+                                .font(theme::semibold(15.0))
                                 .color(theme::TEXT_STRONG),
                         );
                     });
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let label =
                             if running && self.pending_label(tab_id) == Some("Running query") {
-                                "Running…".to_owned()
+                                "Running…"
                             } else {
-                                format!("      {run_label}   Ctrl+Enter")
+                                run_label
                             };
-                        let run_button =
-                            ui.add_enabled(!running && target.is_some(), primary_button(&label));
-                        if !running {
-                            let icon_rect = egui::Rect::from_center_size(
-                                run_button.rect.left_center() + Vec2::new(16.0, 0.0),
-                                Vec2::splat(11.0),
-                            );
-                            icons::paint(ui.painter(), icon_rect, Icon::Play, Color32::WHITE);
-                        }
+                        let run_button = ui.add_enabled(
+                            !running && target.is_some(),
+                            primary_button(label)
+                                .icon(Icon::Play)
+                                .shortcut("Ctrl+Enter"),
+                        );
                         if run_button
                             .on_hover_text(if redis {
                                 "Run the selected command (Command/Ctrl+Enter)"
@@ -2000,17 +2173,19 @@ impl Workbench {
                             } else {
                                 "Refresh"
                             };
-                        if icon_btn(
-                            ui,
-                            !running && tab.last_executed.is_some() && !embedded_dirty,
-                            Icon::Refresh,
-                            Some(refresh_label),
-                            if tab.last_executed.is_some() {
-                                "Re-run the last executed statement for fresh results"
-                            } else {
-                                "Run a statement first to enable refresh"
-                            },
-                        ) {
+                        let tip = if tab.last_executed.is_some() {
+                            "Re-run the last executed statement for fresh results"
+                        } else {
+                            "Run a statement first to enable refresh"
+                        };
+                        let refresh = ui
+                            .add_enabled(
+                                !running && tab.last_executed.is_some() && !embedded_dirty,
+                                theme::secondary_button(refresh_label).icon(Icon::Refresh),
+                            )
+                            .on_hover_text(tip)
+                            .on_disabled_hover_text(tip);
+                        if refresh.clicked() {
                             run = tab.last_executed.clone().map(|sql| (sql, true));
                         }
                     });
@@ -2055,11 +2230,30 @@ impl Workbench {
                         }
                     });
                 egui::CentralPanel::default()
-                    .frame(card(theme::BG).inner_margin(Margin::symmetric(8, 6)))
+                    .frame(card(theme::BG).inner_margin(Margin::same(1)))
                     .show_inside(ui, |ui| {
+                        let card_rect = ui.max_rect();
+                        // `.editor-hint`: a chrome strip under a hairline.
                         egui::TopBottomPanel::bottom(egui::Id::new(("editor-hint", tab_id)))
-                            .frame(Frame::new().inner_margin(Margin::symmetric(4, 5)))
+                            .frame(
+                                Frame::new()
+                                    .fill(theme::CHROME)
+                                    .corner_radius(CornerRadius {
+                                        nw: 0,
+                                        ne: 0,
+                                        sw: 9,
+                                        se: 9,
+                                    })
+                                    .inner_margin(Margin::symmetric(10, 6)),
+                            )
+                            .show_separator_line(false)
                             .show_inside(ui, |ui| {
+                                let top = ui.max_rect().top() - 6.0;
+                                ui.painter().hline(
+                                    ui.max_rect().x_range().expand(10.0),
+                                    top + 0.5,
+                                    Stroke::new(1.0, theme::HAIRLINE),
+                                );
                                 ui.horizontal(|ui| {
                                     ui.label(
                                         RichText::new(if redis {
@@ -2067,13 +2261,58 @@ impl Workbench {
                                         } else {
                                             "The outlined statement or selected SQL will run · Command/Ctrl+Enter · results capped at 10,000 rows"
                                         })
-                                        .font(ui_font(11.0))
+                                        .font(ui_font(11.5))
                                         .color(theme::FAINT),
                                     );
                                 });
                             });
-                        if let Some(sql) = self.sql_editor(ui, tab_id, engine) {
+                        let editor = Frame::new()
+                            .inner_margin(Margin {
+                                left: 0,
+                                right: 6,
+                                top: 6,
+                                bottom: 0,
+                            })
+                            .show(ui, |ui| self.sql_editor(ui, tab_id, engine));
+                        if let Some(sql) = editor.inner {
                             run = Some((sql, false));
+                        }
+                        // `.editor-selection-run`: floats top-right while text
+                        // is selected.
+                        if let Some(sql) = &selection_sql {
+                            let clicked = egui::Area::new(egui::Id::new(("selection-run", tab_id)))
+                                .order(egui::Order::Middle)
+                                .fixed_pos(card_rect.right_top() + Vec2::new(-10.0, 8.0))
+                                .pivot(egui::Align2::RIGHT_TOP)
+                                .show(ui.ctx(), |ui| {
+                                    let tip = if redis {
+                                        "Run the selected command (Command/Ctrl+Enter)"
+                                    } else {
+                                        "Run the selected SQL (Command/Ctrl+Enter)"
+                                    };
+                                    let shadow = egui::Shadow {
+                                        offset: [0, 6],
+                                        blur: 18,
+                                        spread: 0,
+                                        color: Color32::from_black_alpha(90),
+                                    };
+                                    Frame::new()
+                                        .shadow(shadow)
+                                        .corner_radius(6)
+                                        .show(ui, |ui| {
+                                            ui.add_enabled(
+                                                !running,
+                                                primary_button("Run selection").icon(Icon::Play),
+                                            )
+                                            .on_hover_text(tip)
+                                            .clicked()
+                                        })
+                                        .inner
+                                })
+                                .inner;
+                            if clicked {
+                                run = Some((sql.clone(), false));
+                            }
                         }
                     });
             });
@@ -2109,6 +2348,14 @@ impl Workbench {
         egui::CentralPanel::default()
             .frame(Frame::new().fill(theme::BG))
             .show_inside(ui, |ui| self.query_result_ui(ui, tab_id, tab.profile_id));
+    }
+
+    /// A fresh table view; the inspector starts open only on windows at
+    /// least 1280 px wide, as in the desktop.
+    fn new_table_state(&self) -> TableState {
+        let mut state = TableState::default();
+        state.inspector_open = self.window_width >= 1280.0;
+        state
     }
 
     fn pending_label(&self, tab: u64) -> Option<&'static str> {
@@ -2193,12 +2440,22 @@ impl Workbench {
                         .map(|n| n.to_string())
                         .collect::<Vec<_>>()
                         .join("\n");
-                    ui.add(
+                    // `.cm-gutters`: #5c5c62 numbers left of a hairline.
+                    ui.add_space(4.0);
+                    let gutter = ui.add(
                         egui::Label::new(
-                            RichText::new(numbers).font(mono(13.0)).color(theme::FAINT),
+                            RichText::new(numbers)
+                                .font(mono(12.5))
+                                .color(Color32::from_rgb(0x5c, 0x5c, 0x62)),
                         )
                         .halign(egui::Align::RIGHT)
                         .selectable(false),
+                    );
+                    let clip = ui.clip_rect();
+                    ui.painter().vline(
+                        gutter.rect.right() + 5.5,
+                        clip.y_range().intersection(ui.max_rect().y_range()),
+                        Stroke::new(1.0, theme::HAIRLINE),
                     );
                     let highlight = ui.painter().add(egui::Shape::Noop);
                     let output = egui::TextEdit::multiline(&mut tab.sql)
@@ -2212,36 +2469,58 @@ impl Workbench {
                         .lock_focus(true)
                         .layouter(&mut layouter)
                         .show(ui);
+                    let width = ui.clip_rect().x_range();
+                    let mut shapes = Vec::new();
+                    // `.cm-activeLine`: the cursor's row.
+                    if let Some(range) = output.cursor_range {
+                        let row = output
+                            .galley
+                            .pos_from_cursor(range.primary)
+                            .translate(output.galley_pos.to_vec2());
+                        shapes.push(egui::Shape::rect_filled(
+                            egui::Rect::from_x_y_ranges(width, row.y_range()),
+                            0,
+                            Color32::from_white_alpha(6),
+                        ));
+                    }
                     if let Some(active) = &active {
-                        let width = ui.clip_rect().x_range();
-                        let mut shapes = Vec::new();
+                        // `.cm-active-sql-line`: a band, a left bar, and
+                        // hairlines above and below the statement.
+                        let mut band = egui::Rect::NOTHING;
                         let mut start = 0;
                         for row in &output.galley.rows {
                             let end = start + row.char_count_including_newline();
                             if start < active.end && end > active.start {
                                 let rect = row.rect().translate(output.galley_pos.to_vec2());
-                                let rect = egui::Rect::from_x_y_ranges(width, rect.y_range());
-                                shapes.push(egui::Shape::rect_filled(
-                                    rect,
-                                    0,
-                                    Color32::from_rgba_unmultiplied(76, 154, 255, 16),
-                                ));
-                                shapes.push(egui::Shape::rect_filled(
-                                    egui::Rect::from_min_size(
-                                        egui::Pos2::new(
-                                            output.response.rect.left() - 5.0,
-                                            rect.top(),
-                                        ),
-                                        Vec2::new(2.0, rect.height()),
-                                    ),
-                                    0,
-                                    theme::ACCENT.gamma_multiply(0.7),
-                                ));
+                                band =
+                                    band.union(egui::Rect::from_x_y_ranges(width, rect.y_range()));
                             }
                             start = end;
                         }
-                        ui.painter().set(highlight, egui::Shape::Vec(shapes));
+                        if band.is_positive() {
+                            let accent = |alpha: f32| theme::ACCENT.gamma_multiply(alpha);
+                            shapes.push(egui::Shape::rect_filled(band, 0, accent(0.05)));
+                            shapes.push(egui::Shape::hline(
+                                band.x_range(),
+                                band.top() + 0.5,
+                                Stroke::new(1.0, accent(0.2)),
+                            ));
+                            shapes.push(egui::Shape::hline(
+                                band.x_range(),
+                                band.bottom() - 0.5,
+                                Stroke::new(1.0, accent(0.2)),
+                            ));
+                            shapes.push(egui::Shape::rect_filled(
+                                egui::Rect::from_min_size(
+                                    egui::Pos2::new(output.response.rect.left() - 5.0, band.top()),
+                                    Vec2::new(2.0, band.height()),
+                                ),
+                                0,
+                                accent(0.5),
+                            ));
+                        }
                     }
+                    ui.painter().set(highlight, egui::Shape::Vec(shapes));
                     output
                 })
                 .inner
@@ -2376,11 +2655,15 @@ impl Workbench {
             .inner_margin(Margin::symmetric(12, 9))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("History").strong().color(theme::TEXT_STRONG));
+                    ui.label(
+                        RichText::new("History")
+                            .font(theme::semibold(12.0))
+                            .color(theme::SECONDARY),
+                    );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.label(
-                            RichText::new(entries.len().to_string())
-                                .font(ui_font(11.0))
+                            RichText::new(theme::count(entries.len() as u64))
+                                .font(ui_font(11.5))
                                 .color(theme::FAINT),
                         );
                     });
@@ -2401,6 +2684,8 @@ impl Workbench {
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
+                // `.history-list { padding: 4px }`, rows 6 px rounded.
+                ui.add_space(4.0);
                 ui.spacing_mut().item_spacing.y = 0.0;
                 for entry in entries.iter().take(100) {
                     let time = entry
@@ -2409,16 +2694,18 @@ impl Workbench {
                         .format("%-I:%M:%S %p")
                         .to_string();
                     let width = ui.available_width();
-                    let (rect, response) =
-                        ui.allocate_exact_size(Vec2::new(width, 50.0), Sense::click());
+                    let (outer, response) =
+                        ui.allocate_exact_size(Vec2::new(width, 48.0), Sense::click());
+                    let rect = outer.shrink2(Vec2::new(4.0, 0.0));
                     let response = response
                         .on_hover_text(format!("{} ms\n\n{}", entry.duration_ms, entry.sql));
                     response.widget_info(|| {
                         egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &entry.sql)
                     });
-                    if response.hovered() {
+                    let hovered = response.hovered();
+                    if hovered {
                         ui.painter()
-                            .rect_filled(rect, 0, Color32::from_white_alpha(8));
+                            .rect_filled(rect, 6, Color32::from_white_alpha(15));
                     }
                     let (glyph, color) = if entry.success {
                         (Icon::Check, theme::SUCCESS)
@@ -2428,17 +2715,21 @@ impl Workbench {
                     icons::paint(
                         ui.painter(),
                         egui::Rect::from_center_size(
-                            rect.left_top() + Vec2::new(20.0, 17.0),
+                            rect.left_top() + Vec2::new(16.0, 16.0),
                             Vec2::splat(12.0),
                         ),
                         glyph,
                         color,
                     );
-                    let text_left = rect.left() + 34.0;
+                    let text_left = rect.left() + 30.0;
                     let mut job = LayoutJob::simple_singleline(
                         one_line(&entry.sql),
-                        mono(12.0),
-                        theme::SECONDARY,
+                        mono(11.5),
+                        if hovered {
+                            theme::TEXT
+                        } else {
+                            theme::SECONDARY
+                        },
                     );
                     job.wrap = egui::text::TextWrapping::truncate_at_width(
                         rect.right() - text_left - 10.0,
@@ -2467,7 +2758,11 @@ impl Workbench {
     fn query_result_ui(&mut self, ui: &mut egui::Ui, tab_id: u64, profile: Uuid) {
         let Some(result) = self.query_results.get(&tab_id) else {
             ui.centered_and_justified(|ui| {
-                ui.label(RichText::new("Results will appear here.").color(theme::MUTED));
+                ui.label(
+                    RichText::new("Results will appear here.")
+                        .font(ui_font(12.5))
+                        .color(theme::FAINT),
+                );
             });
             return;
         };
@@ -2488,7 +2783,7 @@ impl Workbench {
                             ))
                             .color(theme::MUTED),
                         );
-                        chip(ui, "Editable table", theme::ACCENT_TEXT);
+                        chip(ui, "Editable table", theme::SUCCESS);
                     });
                 });
             self.table_ui(ui, tab_id, profile, true);
@@ -2500,9 +2795,12 @@ impl Workbench {
                 ui.horizontal(|ui| {
                     let affected = result
                         .affected_rows
-                        .map_or_else(String::new, |n| format!(" · {n} affected"));
+                        .map_or_else(String::new, |n| format!(" · {} affected", theme::count(n)));
                     ui.label(
-                        RichText::new(format!("{} rows{affected} · {duration} ms", result.row_count))
+                        RichText::new(format!(
+                            "{} rows{affected} · {duration} ms",
+                            theme::count(result.row_count as u64)
+                        ))
                             .color(theme::MUTED),
                     );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -2534,6 +2832,15 @@ impl Workbench {
                     ui.set_min_size(ui.available_size());
                     result_grid(ui, tab_id, &result.columns, &result.rows);
                 });
+        } else {
+            // `.query-empty`: a statement with no result set.
+            ui.centered_and_justified(|ui| {
+                ui.label(
+                    RichText::new("Statement completed without a result set.")
+                        .font(ui_font(12.5))
+                        .color(theme::FAINT),
+                );
+            });
         }
     }
 }
@@ -2552,7 +2859,7 @@ fn icon_btn(
 }
 
 fn editor_layout(engine: DatabaseEngine, text: &str) -> LayoutJob {
-    let font = mono(13.0);
+    let font = mono(12.5);
     let mut colors = vec![theme::TEXT; text.len()];
     for token in highlight(engine, text) {
         let color = match token.kind {
@@ -2649,15 +2956,18 @@ fn modal<R>(
     width: f32,
     add: impl FnOnce(&mut egui::Ui) -> R,
 ) -> Option<R> {
-    // Dim the app behind the dialog and swallow clicks on it.
-    egui::Area::new(egui::Id::new(("modal-backdrop", title)))
+    // `.modal-backdrop`: dims the app at 55% and swallows clicks on it;
+    // `backdrop_clicked` reports them.
+    let backdrop_id = egui::Id::new(("modal-backdrop", title));
+    egui::Area::new(backdrop_id)
         .order(egui::Order::Middle)
         .fixed_pos(egui::Pos2::ZERO)
         .show(ctx, |ui| {
             let screen = ctx.content_rect();
-            ui.allocate_rect(screen, Sense::click());
+            let clicked = ui.allocate_rect(screen, Sense::click()).clicked();
+            ui.data_mut(|d| d.insert_temp(backdrop_id, clicked));
             ui.painter()
-                .rect_filled(screen, 0, Color32::from_black_alpha(120));
+                .rect_filled(screen, 0, Color32::from_black_alpha(140));
         });
     egui::Window::new(title)
         .title_bar(false)
@@ -2683,14 +2993,19 @@ fn modal<R>(
         .and_then(|response| response.inner)
 }
 
+/// Whether the backdrop of `modal(title)` was clicked this frame.
+fn backdrop_clicked(ctx: &egui::Context, title: &str) -> bool {
+    ctx.data(|d| d.get_temp::<bool>(egui::Id::new(("modal-backdrop", title))))
+        .unwrap_or(false)
+}
+
 fn dialog_title(ui: &mut egui::Ui, eyebrow_text: Option<&str>, title: &str) {
     if let Some(text) = eyebrow_text {
         ui.label(eyebrow(text));
     }
     ui.label(
         RichText::new(title)
-            .size(17.0)
-            .strong()
+            .font(theme::semibold(17.0))
             .color(theme::TEXT_STRONG),
     );
     ui.add_space(10.0);
@@ -2794,7 +3109,8 @@ impl Workbench {
                 dialog_title(ui, None, "Export a large table?");
                 ui.label(
                     RichText::new(format!(
-                        "This export contains {total} rows and may take a while. Continue?"
+                        "This export contains {} rows and may take a while. Continue?",
+                        theme::count(total)
                     ))
                     .color(theme::SECONDARY),
                 );
@@ -2831,7 +3147,8 @@ impl Workbench {
         let mut test = false;
         let mut save = false;
         let mut delete = false;
-        modal(ctx, "Connection", 560.0, |ui| {
+        let mut url_enter = false;
+        modal(ctx, "Connection", 600.0, |ui| {
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
                     dialog_title(
@@ -2897,16 +3214,26 @@ impl Workbench {
                     };
                     let response = ui.add(
                         egui::TextEdit::singleline(&mut form.url)
+                            .margin(Margin::symmetric(9, 7))
                             .password(true)
                             .hint_text(placeholder)
                             .desired_width(400.0),
                     );
                     let enter =
                         response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    url_enter = enter;
+                    // Pasting a URL imports it straight away.
+                    let pasted = response.changed()
+                        && ui
+                            .input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Paste(_))));
                     if (ui
-                        .add_enabled(!form.url.trim().is_empty(), egui::Button::new("Import URL"))
+                        .add_enabled(
+                            !form.url.trim().is_empty(),
+                            theme::secondary_button("Import URL"),
+                        )
                         .clicked()
-                        || enter)
+                        || enter
+                        || pasted)
                         && !form.url.trim().is_empty()
                     {
                         form.import_url();
@@ -2916,6 +3243,7 @@ impl Workbench {
                 form_label(ui, "Name");
                 ui.add(
                     egui::TextEdit::singleline(&mut form.name)
+                        .margin(Margin::symmetric(9, 7))
                         .hint_text(engine_preset_name(form.engine))
                         .desired_width(f32::INFINITY),
                 );
@@ -2958,19 +3286,38 @@ impl Workbench {
                 let password_hint = if form.id.is_some() {
                     "Leave blank to keep saved password"
                 } else {
-                    "Stored in OS credential store"
+                    "Stored in OS keychain"
                 };
                 ui.columns(2, |cols| {
                     form_label(&mut cols[0], "Host");
                     cols[0].add(
-                        egui::TextEdit::singleline(&mut form.host).desired_width(f32::INFINITY),
+                        egui::TextEdit::singleline(&mut form.host)
+                            .margin(Margin::symmetric(9, 7))
+                            .desired_width(f32::INFINITY),
                     );
+                    // A plain text field, as in the desktop, kept in sync with
+                    // the numeric port while it isn't being edited.
                     form_label(&mut cols[1], "Port");
-                    cols[1].add(
-                        egui::DragValue::new(&mut form.port)
-                            .range(1..=65535)
-                            .speed(0.0),
+                    let port_id = egui::Id::new("profile-port-text");
+                    let mut text = cols[1]
+                        .data(|d| d.get_temp::<String>(port_id))
+                        .unwrap_or_else(|| form.port.to_string());
+                    let response = cols[1].add(
+                        egui::TextEdit::singleline(&mut text)
+                            .margin(Margin::symmetric(9, 7))
+                            .char_limit(5)
+                            .desired_width(f32::INFINITY),
                     );
+                    text.retain(|c| c.is_ascii_digit());
+                    if let Ok(port) = text.parse::<u16>() {
+                        if port > 0 {
+                            form.port = port;
+                        }
+                    }
+                    if !response.has_focus() {
+                        text = form.port.to_string();
+                    }
+                    cols[1].data_mut(|d| d.insert_temp(port_id, text));
                 });
                 ui.add_space(6.0);
                 ui.columns(2, |cols| {
@@ -2984,6 +3331,7 @@ impl Workbench {
                     );
                     cols[0].add(
                         egui::TextEdit::singleline(&mut form.username)
+                            .margin(Margin::symmetric(9, 7))
                             .hint_text(if redis { "default" } else { "" })
                             .desired_width(f32::INFINITY),
                     );
@@ -2993,6 +3341,7 @@ impl Workbench {
                     );
                     cols[1].add(
                         egui::TextEdit::singleline(&mut form.database)
+                            .margin(Margin::symmetric(9, 7))
                             .hint_text(if redis { "0" } else { "" })
                             .desired_width(f32::INFINITY),
                     );
@@ -3002,6 +3351,7 @@ impl Workbench {
                     form_label(&mut cols[0], "Password");
                     cols[0].add(
                         egui::TextEdit::singleline(&mut form.password)
+                            .margin(Margin::symmetric(9, 7))
                             .password(true)
                             .hint_text(password_hint)
                             .desired_width(f32::INFINITY),
@@ -3025,6 +3375,7 @@ impl Workbench {
                 form_label(ui, "CA certificate path (optional)");
                 ui.add(
                     egui::TextEdit::singleline(&mut form.ca_cert_path)
+                        .margin(Margin::symmetric(9, 7))
                         .hint_text("/path/to/root-ca.pem")
                         .desired_width(f32::INFINITY),
                 );
@@ -3035,16 +3386,49 @@ impl Workbench {
                 );
             });
             if let Some((kind, message)) = &form.feedback {
+                // `.modal-feedback.{info,success,error}`: a tinted box.
                 ui.add_space(8.0);
-                let color = match kind {
-                    FeedbackKind::Info => theme::ACCENT_TEXT,
-                    FeedbackKind::Success => theme::SUCCESS,
-                    FeedbackKind::Error => theme::DANGER,
+                let (fill, stroke, color) = match kind {
+                    FeedbackKind::Info => (
+                        theme::ACCENT_SOFT,
+                        Color32::from_rgba_unmultiplied(76, 154, 255, 77),
+                        theme::ACCENT_TEXT,
+                    ),
+                    FeedbackKind::Success => (
+                        Color32::from_rgba_unmultiplied(90, 211, 148, 26),
+                        Color32::from_rgba_unmultiplied(90, 211, 148, 77),
+                        Color32::from_rgb(0x9b, 0xe7, 0xbf),
+                    ),
+                    FeedbackKind::Error => (
+                        theme::DANGER_SOFT,
+                        Color32::from_rgba_unmultiplied(255, 107, 97, 77),
+                        Color32::from_rgb(0xff, 0xb3, 0xac),
+                    ),
                 };
-                ui.label(RichText::new(message).color(color));
+                Frame::new()
+                    .fill(fill)
+                    .stroke(Stroke::new(1.0, stroke))
+                    .corner_radius(7)
+                    .inner_margin(Margin::symmetric(12, 9))
+                    .show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        ui.label(RichText::new(message).font(ui_font(12.0)).color(color));
+                    });
             }
-            ui.add_space(6.0);
-            ui.label(RichText::new("Passwords are stored in your operating system credential manager and are never written to DBM's profile database.").font(ui_font(11.5)).color(theme::FAINT));
+            ui.add_space(8.0);
+            // `.modal-note`: a faint box.
+            Frame::new()
+                .fill(Color32::from_white_alpha(10))
+                .corner_radius(7)
+                .inner_margin(Margin::symmetric(12, 10))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.label(
+                        RichText::new("Passwords are stored in your operating system credential manager and are never written to DBM's profile database.")
+                            .font(ui_font(11.5))
+                            .color(theme::FAINT),
+                    );
+                });
             ui.add_space(12.0);
             ui.horizontal(|ui| {
                 if form.id.is_some()
@@ -3055,10 +3439,11 @@ impl Workbench {
                     delete = true;
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let label = if form.saving {
-                        "Saving…"
-                    } else {
-                        "Save & connect"
+                    // Save tests first, then connects.
+                    let label = match (&form.feedback, form.saving) {
+                        (Some((FeedbackKind::Info, _)), true) => "Testing…",
+                        (_, true) => "Connecting…",
+                        _ => "Save & connect",
                     };
                     if ui.add_enabled(!busy, primary_button(label)).clicked() {
                         save = true;
@@ -3067,7 +3452,7 @@ impl Workbench {
                     if ui
                         .add_enabled(
                             !busy,
-                            egui::Button::new(if testing {
+                            theme::secondary_button(if testing {
                                 "Testing…"
                             } else {
                                 "Test connection"
@@ -3083,6 +3468,15 @@ impl Workbench {
                 close = true;
             }
         });
+        close |= backdrop_clicked(ctx, "Connection");
+        // Enter in a text field saves, like submitting the desktop form.
+        if !url_enter
+            && !busy
+            && ctx.input(|i| i.key_pressed(egui::Key::Enter))
+            && theme::focused_last_frame(ctx).is_some()
+        {
+            save = true;
+        }
         if test {
             form.feedback = None;
             form.saving = false;
