@@ -294,6 +294,7 @@ final class HistoryRow: NSView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     override var isFlipped: Bool { true }
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
     override func mouseEntered(with event: NSEvent) { hovering = true; needsDisplay = true }
     override func mouseExited(with event: NSEvent) { hovering = false; needsDisplay = true }
     override func mouseDown(with event: NSEvent) {}

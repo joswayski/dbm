@@ -51,6 +51,7 @@ final class DismissButton: NSButton {
 
     override var isFlipped: Bool { true }
     @objc private func fire() { onClick?() }
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()

@@ -46,6 +46,15 @@ final class GButton: NSButton {
 
     override var isFlipped: Bool { true }
 
+    // `cursor: pointer`, and `not-allowed` while disabled, as in the desktop.
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: isEnabled ? .pointingHand : .operationNotAllowed)
+    }
+
+    override var isEnabled: Bool {
+        didSet { if isEnabled != oldValue { window?.invalidateCursorRects(for: self) } }
+    }
+
     @objc private func fire() { handler?() }
 
     private func invalidate() {
@@ -475,6 +484,10 @@ final class GPopUp: NSPopUpButton {
         setItems(items)
         target = self
         action = #selector(selected)
+    }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: isEnabled ? .pointingHand : .operationNotAllowed)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
