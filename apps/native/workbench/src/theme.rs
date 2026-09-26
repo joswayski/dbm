@@ -344,6 +344,14 @@ pub fn secondary_button(text: &str) -> ActionButton {
     }
 }
 
+/// `.update-control button.update-available`: accent text on an accent wash.
+pub fn accent_button(text: &str) -> ActionButton {
+    ActionButton {
+        kind: ButtonKind::Accent,
+        ..primary_button(text)
+    }
+}
+
 /// `.danger-button`: danger text on a soft red fill with a red outline.
 pub fn danger_button(text: &str) -> ActionButton {
     ActionButton {
@@ -367,6 +375,7 @@ pub struct ActionButton {
 enum ButtonKind {
     Primary,
     Secondary,
+    Accent,
     Danger,
 }
 
@@ -430,6 +439,15 @@ impl egui::Widget for ActionButton {
                 Color32::from_rgba_unmultiplied(255, 107, 97, if hovered { 41 } else { 23 }),
                 Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 107, 97, 77)),
                 DANGER,
+            ),
+            ButtonKind::Accent => (
+                if hovered {
+                    ACCENT_SOFT.gamma_multiply(1.6)
+                } else {
+                    ACCENT_SOFT
+                },
+                Stroke::new(1.0, ACCENT.gamma_multiply(0.55)),
+                ACCENT_TEXT,
             ),
             ButtonKind::Secondary => (
                 if pressed {

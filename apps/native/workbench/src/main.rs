@@ -7,6 +7,7 @@ mod icons;
 mod messages;
 mod table_view;
 mod theme;
+mod updates;
 mod workbench;
 
 use eframe::{Renderer, egui};

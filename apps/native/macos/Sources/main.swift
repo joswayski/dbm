@@ -34,6 +34,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, Qu
 
     private var sidebar: SidebarView!
     private var topBar: TopBar!
+    private let updater = Updater()
     private var tabStrip: TabStrip!
     private let content = FlippedView()
     private var welcome: WelcomeView!
@@ -52,8 +53,35 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, Qu
         installMenu()
         buildWindow()
         loadProfiles()
+        updater.onChange = { [weak self] in self?.updateChanged() }
+        topBar.updateButton.handler = { [weak self] in self?.updateClicked() }
+        topBar.showUpdate(updater)
+        if !demo { updater.start() }
         if let index = CommandLine.arguments.firstIndex(of: "--snapshot-dir"), CommandLine.arguments.indices.contains(index + 1) {
             SnapshotDriver(app: self, directory: CommandLine.arguments[index + 1]).start()
+        }
+    }
+
+    // MARK: Updates
+
+    private func updateChanged() {
+        topBar.showUpdate(updater)
+    }
+
+    /// Checks on demand, or installs a found build after confirming that
+    /// unsaved query text and staged edits will be discarded.
+    private func updateClicked() {
+        guard case .available(let update) = updater.state else {
+            updater.check()
+            return
+        }
+        let alert = NSAlert()
+        alert.messageText = "Install build \(int(update["build"])) and restart now?"
+        alert.informativeText = "Unsaved query text and pending table edits will be lost."
+        alert.addButton(withTitle: "Install and Restart")
+        alert.addButton(withTitle: "Later")
+        alert.beginSheetModal(for: window) { [weak self] response in
+            if response == .alertFirstButtonReturn { self?.updater.install(update) }
         }
     }
 

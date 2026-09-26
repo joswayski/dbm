@@ -231,4 +231,11 @@ fn helper_calls_need_no_session_and_reject_database_commands() {
     let request = br#"{"command":"listProfiles"}"#;
     let reply = unsafe { take(dbm_bridge_helper_call(request.as_ptr(), request.len())) };
     assert_eq!(reply["error"], "unsupported native request");
+    // Development builds have no channel number, so they never check.
+    let request = br#"{"command":"updateCurrent"}"#;
+    let reply = unsafe { take(dbm_bridge_helper_call(request.as_ptr(), request.len())) };
+    assert_eq!(reply, json!({"ok": true, "value": null}));
+    let request = br#"{"command":"updateCheck"}"#;
+    let reply = unsafe { take(dbm_bridge_helper_call(request.as_ptr(), request.len())) };
+    assert_eq!(reply, json!({"ok": true, "value": null}));
 }

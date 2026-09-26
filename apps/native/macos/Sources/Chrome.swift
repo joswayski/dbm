@@ -453,6 +453,8 @@ final class TopBar: PanelView {
     private let readOnly = Chip("Read-only", color: Graphite.muted)
     private let empty = label("No active connection", font: Graphite.ui(13), color: Graphite.muted)
     private let demoChip = Chip("Demo fixture · not a live connection", color: Graphite.modified)
+    /// `.update-control`: shown only on channel builds.
+    let updateButton = GButton("Check for updates", style: .secondary)
 
     init(demo: Bool) {
         super.init(fill: Graphite.chrome, edges: [.bottom])
@@ -461,11 +463,33 @@ final class TopBar: PanelView {
         dot.heightAnchor.constraint(equalToConstant: 8).isActive = true
         demoChip.isHidden = !demo
         demoChip.toolTip = "Isolated deterministic data; profiles and edits are not persisted."
-        pin(hstack([dot, name, target, readOnly, empty, spacer(), demoChip], spacing: 8), insets: NSEdgeInsets(top: 0, left: 16, bottom: 1, right: 14))
+        updateButton.minHeight = 26
+        updateButton.labelFont = Graphite.ui(12)
+        updateButton.isHidden = true
+        pin(hstack([dot, name, target, readOnly, empty, spacer(), demoChip, updateButton], spacing: 8), insets: NSEdgeInsets(top: 0, left: 16, bottom: 1, right: 14))
         heightAnchor.constraint(equalToConstant: 40).isActive = true
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// Mirrors the updater: accent styling when a build is available.
+    func showUpdate(_ updater: Updater) {
+        updateButton.isHidden = !updater.enabled
+        updateButton.title = updater.label
+        updateButton.invalidateIntrinsicContentSize()
+        updateButton.toolTip = updater.detail
+        var available = false
+        var busy = false
+        switch updater.state {
+        case .available: available = true
+        case .checking, .installing: busy = true
+        default: break
+        }
+        updateButton.isEnabled = !busy
+        updateButton.style = available ? .toolbar : .secondary
+        updateButton.isOn = available
+        updateButton.tint = available ? Graphite.accentText : Graphite.muted
+    }
 
     func show(_ profile: Profile?) {
         [dot, name, target].forEach { $0.isHidden = profile == nil }

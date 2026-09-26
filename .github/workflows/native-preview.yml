@@ -1,0 +1,282 @@
+name: Native preview
+
+# Every merge to main that touches the native apps builds them, signs them,
+# and replaces the assets of one rolling pre-release, `native-preview`.
+# Installed native builds read `native-latest.json` from it and update in
+# place (crates/dbm-update). It never becomes the latest release, so the Tauri
+# app's updater (releases/latest/download/latest.json) is unaffected.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/native/**"
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/native-preview.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: dbm-native-preview
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  # The channel's build number: monotonic across this workflow's runs.
+  DBM_NATIVE_BUILD: ${{ github.run_number }}
+
+jobs:
+  describe:
+    name: Describe the build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.describe.outputs.version }}
+      notes: ${{ steps.describe.outputs.notes }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - id: describe
+        shell: bash
+        run: |
+          set -euo pipefail
+          short="$(git rev-parse --short=7 HEAD)"
+          echo "version=Preview build ${DBM_NATIVE_BUILD} (${short})" >> "$GITHUB_OUTPUT"
+          {
+            echo "notes<<DBM_NOTES"
+            git log -1 --format=%s HEAD
+            echo "DBM_NOTES"
+          } >> "$GITHUB_OUTPUT"
+
+  macos:
+    name: Build, sign, and notarize (macOS)
+    needs: describe
+    environment: release
+    runs-on: macos-14
+    env:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.94.0
+      - run: npm ci
+      - name: Prepare Apple signing and notarization credentials
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD KEYCHAIN_PASSWORD \
+                      APPLE_API_ISSUER APPLE_API_KEY APPLE_API_PRIVATE_KEY \
+                      TAURI_SIGNING_PRIVATE_KEY; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "Missing release environment secret: $name" >&2
+              exit 1
+            fi
+          done
+          certificate_path="$RUNNER_TEMP/dbm-developer-id.p12"
+          api_key_path="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY}.p8"
+          keychain="$RUNNER_TEMP/dbm-signing.keychain-db"
+          printf '%s' "$APPLE_CERTIFICATE" | openssl base64 -d -A -out "$certificate_path"
+          printf '%s' "$APPLE_API_PRIVATE_KEY" > "$api_key_path"
+          chmod 600 "$certificate_path" "$api_key_path"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$keychain"
+          security default-keychain -d user -s "$keychain"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$keychain"
+          security set-keychain-settings -t 3600 -u "$keychain"
+          security import "$certificate_path" -k "$keychain" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s \
+            -k "$KEYCHAIN_PASSWORD" "$keychain"
+          identity="$(
+            security find-identity -v -p codesigning "$keychain" \
+              | awk -F\" '/Developer ID Application/{print $2; exit}'
+          )"
+          if [[ -z "$identity" ]]; then
+            echo "The imported certificate is not a Developer ID Application identity." >&2
+            exit 1
+          fi
+          {
+            printf 'DBM_SIGNING_IDENTITY=%s\n' "$identity"
+            printf 'APPLE_API_ISSUER=%s\n' "$APPLE_API_ISSUER"
+            printf 'APPLE_API_KEY=%s\n' "$APPLE_API_KEY"
+            printf 'APPLE_API_KEY_PATH=%s\n' "$api_key_path"
+          } >> "$GITHUB_ENV"
+      - name: Build and sign DBM Native.app
+        run: bash apps/native/macos/build.sh
+      - name: Notarize and staple the app, then package it
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="target/native/DBM Native.app"
+          out="target/native/release"
+          mkdir -p "$out"
+          notarize() {
+            xcrun notarytool submit "$1" \
+              --key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" \
+              --issuer "$APPLE_API_ISSUER" --wait
+          }
+          codesign --verify --deep --strict --verbose=2 "$app"
+          ditto -c -k --keepParent "$app" "$RUNNER_TEMP/notarize.zip"
+          notarize "$RUNNER_TEMP/notarize.zip"
+          xcrun stapler staple -v "$app"
+          xcrun stapler validate "$app"
+          spctl --assess --type execute --verbose=2 "$app"
+
+          # The updater archive holds the stapled app.
+          ditto -c -k --keepParent "$app" "$out/DBM-Native-macOS.zip"
+
+          # A drag-to-Applications disk image for first installs.
+          staging="$RUNNER_TEMP/dmg"
+          mkdir -p "$staging"
+          cp -R "$app" "$staging/"
+          ln -s /Applications "$staging/Applications"
+          hdiutil create -volname "DBM Native" -srcfolder "$staging" -ov \
+            -format UDZO "$out/DBM-Native-macOS.dmg"
+          codesign --force --timestamp --sign "$DBM_SIGNING_IDENTITY" "$out/DBM-Native-macOS.dmg"
+          notarize "$out/DBM-Native-macOS.dmg"
+          xcrun stapler staple -v "$out/DBM-Native-macOS.dmg"
+          spctl --assess --type open --context context:primary-signature \
+            --verbose=2 "$out/DBM-Native-macOS.dmg"
+      - name: Sign the updater archive with the release key
+        run: npx tauri signer sign target/native/release/DBM-Native-macOS.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-preview-macos
+          path: target/native/release/*
+          if-no-files-found: error
+
+  workbench:
+    name: Build and sign (${{ matrix.os }})
+    needs: describe
+    environment: release
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: windows-2025
+            binary: dbm-workbench.exe
+            asset: DBM-Native-Windows-x64.exe
+          - os: ubuntu-24.04
+            binary: dbm-workbench
+            asset: DBM-Native-Linux-x64
+    runs-on: ${{ matrix.os }}
+    env:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Native Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev pkg-config libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev libxi-dev libxrandr-dev
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.94.0
+      - run: npm ci
+      - run: cargo build --manifest-path apps/native/workbench/Cargo.toml --locked --release
+      - name: Stage and sign the executable
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          cp "apps/native/workbench/target/release/${{ matrix.binary }}" "release/${{ matrix.asset }}"
+          npx tauri signer sign "release/${{ matrix.asset }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-preview-${{ runner.os }}
+          path: release/*
+          if-no-files-found: error
+
+  publish:
+    name: Publish to the native-preview channel
+    needs: [describe, macos, workbench]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.describe.outputs.version }}
+      NOTES: ${{ needs.describe.outputs.notes }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: native-preview-*
+          path: assets
+          merge-multiple: true
+      - name: Write the channel manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://github.com/${GITHUB_REPOSITORY}/releases/download/native-preview"
+          sig() { tr -d '\n' < "assets/$1.sig"; }
+          jq -n \
+            --argjson build "$DBM_NATIVE_BUILD" \
+            --arg version "$VERSION" \
+            --arg notes "$NOTES" \
+            --arg base "$base" \
+            --arg mac "$(sig DBM-Native-macOS.zip)" \
+            --arg windows "$(sig DBM-Native-Windows-x64.exe)" \
+            --arg linux "$(sig DBM-Native-Linux-x64)" \
+            '{
+              build: $build, version: $version, notes: $notes,
+              platforms: {
+                "darwin-aarch64": {url: ($base + "/DBM-Native-macOS.zip"), signature: $mac},
+                "windows-x86_64": {url: ($base + "/DBM-Native-Windows-x64.exe"), signature: $windows},
+                "linux-x86_64": {url: ($base + "/DBM-Native-Linux-x64"), signature: $linux}
+              }
+            }' > native-latest.json
+          jq -e '[.platforms[] | (.signature | length > 0)] | all' native-latest.json > /dev/null
+          cat native-latest.json
+          (cd assets && sha256sum -- * > ../SHA256SUMS)
+      - name: Move the channel to this commit and replace its assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo="$GITHUB_REPOSITORY"
+          if gh api "repos/${repo}/git/refs/tags/native-preview" > /dev/null 2>&1; then
+            gh api --method PATCH "repos/${repo}/git/refs/tags/native-preview" \
+              -f sha="$GITHUB_SHA" -F force=true --silent
+          else
+            gh api --method POST "repos/${repo}/git/refs" \
+              -f ref=refs/tags/native-preview -f sha="$GITHUB_SHA" --silent
+          fi
+          body="Rolling preview of the native DBM apps (${VERSION}). Installed copies update themselves.
+
+          - macOS (Apple Silicon): DBM-Native-macOS.dmg
+          - Windows x64: DBM-Native-Windows-x64.exe
+          - Linux x64: DBM-Native-Linux-x64"
+          if ! gh release view native-preview --repo "$repo" > /dev/null 2>&1; then
+            gh release create native-preview --repo "$repo" --verify-tag \
+              --prerelease --latest=false \
+              --title "DBM Native Preview" --notes "$body"
+          fi
+          # Binaries first, the manifest last, so installed copies never see
+          # a manifest that points at files not uploaded yet.
+          gh release upload native-preview --repo "$repo" --clobber assets/* SHA256SUMS
+          gh release upload native-preview --repo "$repo" --clobber native-latest.json
+          gh release edit native-preview --repo "$repo" \
+            --prerelease --latest=false --title "DBM Native Preview" --notes "$body"
