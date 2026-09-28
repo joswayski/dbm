@@ -70,6 +70,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.94.0
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
       - run: npm ci
       - name: Prepare Apple signing and notarization credentials
         env:
@@ -118,8 +119,13 @@ jobs:
             printf 'APPLE_API_KEY=%s\n' "$APPLE_API_KEY"
             printf 'APPLE_API_KEY_PATH=%s\n' "$api_key_path"
           } >> "$GITHUB_ENV"
-      - name: Build and sign DBM Native.app
-        run: bash apps/native/macos/build.sh
+      - name: Build and sign DBM Native.app (Apple Silicon and Intel)
+        env:
+          DBM_UNIVERSAL: 1
+        run: |
+          bash apps/native/macos/build.sh
+          lipo -archs "target/native/DBM Native.app/Contents/MacOS/DBMNative" | grep -qw x86_64
+          lipo -archs "target/native/DBM Native.app/Contents/MacOS/DBMNative" | grep -qw arm64
       - name: Notarize and staple the app, then package it
         shell: bash
         run: |
@@ -245,6 +251,7 @@ jobs:
               build: $build, version: $version, notes: $notes,
               platforms: {
                 "darwin-aarch64": {url: ($base + "/DBM-Native-macOS.zip"), signature: $mac},
+                "darwin-x86_64": {url: ($base + "/DBM-Native-macOS.zip"), signature: $mac},
                 "windows-x86_64": {url: ($base + "/DBM-Native-Windows-x64.exe"), signature: $windows},
                 "linux-x86_64": {url: ($base + "/DBM-Native-Linux-x64"), signature: $linux}
               }
@@ -266,7 +273,7 @@ jobs:
           fi
           body="Rolling preview of the native DBM apps (${VERSION}). Installed copies update themselves.
 
-          - macOS (Apple Silicon): DBM-Native-macOS.dmg
+          - macOS (Apple Silicon and Intel): DBM-Native-macOS.dmg
           - Windows x64: DBM-Native-Windows-x64.exe
           - Linux x64: DBM-Native-Linux-x64"
           if ! gh release view native-preview --repo "$repo" > /dev/null 2>&1; then

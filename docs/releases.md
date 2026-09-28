@@ -311,8 +311,9 @@ release; no new secrets are needed.
 - **Build number:** the workflow's run number, compiled in as
   `DBM_NATIVE_BUILD` and written to the app bundle's `CFBundleVersion`.
   Development builds have none and never check for updates.
-- **macOS:** `build.sh` signs the bridge dylib and the app with the Developer
-  ID and the hardened runtime. The app is notarized and stapled, zipped for
+- **macOS:** `build.sh` (with `DBM_UNIVERSAL=1`) builds one universal app
+  for Apple Silicon and Intel, then signs the bridge dylib and the app with the
+  Developer ID and the hardened runtime. The app is notarized and stapled, zipped for
   the updater (`DBM-Native-macOS.zip`), and packaged into a signed, notarized,
   stapled `DBM-Native-macOS.dmg` for first installs. Gatekeeper opens it
   without a warning.
@@ -324,6 +325,7 @@ release; no new secrets are needed.
   against the public key from `tauri.conf.json` before installing anything.
 - **Manifest:** `native-latest.json` lists the build number, version text,
   notes (the merge commit's subject), and each platform's URL and signature.
+  `darwin-aarch64` and `darwin-x86_64` both point at the universal zip.
   The workflow uploads the binaries first and the manifest last.
 
 Installed native builds check the manifest five seconds after launch and every

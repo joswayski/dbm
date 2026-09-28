@@ -62,7 +62,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.94.0
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      # Universal, like the preview channel, so an Intel-only break fails here.
       - name: Build AppKit development preview
+        env:
+          DBM_UNIVERSAL: 1
         run: bash apps/native/macos/build.sh
       - name: Archive AppKit development preview
         run: ditto -c -k --keepParent 'target/native/DBM Native.app' target/native/DBM-Native-macos.zip
