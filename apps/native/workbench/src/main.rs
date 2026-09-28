@@ -21,10 +21,8 @@ fn main() -> eframe::Result {
             .with_inner_size([1280.0, 800.0])
             .with_min_inner_size([900.0, 600.0])
             .with_icon(std::sync::Arc::new(
-                eframe::icon_data::from_png_bytes(include_bytes!(
-                    "../../../desktop/src-tauri/icons/icon.png"
-                ))
-                .expect("bundled app icon is a valid PNG"),
+                eframe::icon_data::from_png_bytes(include_bytes!("../../icons/icon.png"))
+                    .expect("bundled app icon is a valid PNG"),
             )),
         // Layout (window size, sidebar width) persists; the demo fixture keeps
         // its layout out of the real app directory.

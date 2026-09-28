@@ -11,7 +11,7 @@ appdir="$(mktemp -d)/DBM.AppDir"
 mkdir -p "$appdir/usr/bin"
 install -m 0755 "$binary" "$appdir/usr/bin/dbm-workbench"
 ln -s usr/bin/dbm-workbench "$appdir/AppRun"
-cp "$root/apps/desktop/src-tauri/icons/icon.png" "$appdir/dbm.png"
+cp "$root/apps/native/icons/icon.png" "$appdir/dbm.png"
 cat > "$appdir/dbm.desktop" <<'DESKTOP'
 [Desktop Entry]
 Type=Application

@@ -36,6 +36,7 @@ done
 xcrun lipo -create "${dylibs[@]}" -output "$output/Contents/Frameworks/libdbm_native_bridge.dylib"
 xcrun lipo -create "${executables[@]}" -output "$output/Contents/MacOS/DBMNative"
 cp "$root/apps/native/macos/Info.plist" "$output/Contents/Info.plist"
+cp "$root/apps/native/icons/icon.icns" "$output/Contents/Resources/icon.icns"
 # Geist is bundled (OFL 1.1) and registered at launch; nothing is fetched.
 cp "$root"/apps/native/workbench/assets/geist*.ttf "$root"/apps/native/workbench/assets/*-LICENSE "$output/Contents/Resources/"
 # Channel builds carry their number in the bundle version (DBM_NATIVE_BUILD is
