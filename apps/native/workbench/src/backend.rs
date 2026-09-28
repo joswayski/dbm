@@ -165,7 +165,7 @@ async fn execute_live(state: &AppState, command: Command) -> Result<Payload, Str
         }
         Command::TestProfile(input) => {
             let profile = profile_from_input(&input).map_err(string_error)?;
-            let password = match input.password.filter(|value| !value.is_empty()) {
+            let password = match input.password {
                 Some(password) => Some(password),
                 None => input
                     .id

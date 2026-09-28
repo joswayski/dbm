@@ -260,8 +260,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, Qu
                     if case .failure(let error) = result { done(error) } else { done(nil) }
                 }
             },
-            onCopyURL: { [weak self] input, includePassword, done in
-                self?.send(["command": "connectionUrl", "input": input, "include_password": includePassword], completion: done)
+            onLoadURL: { [weak self] input, done in
+                self?.send(["command": "connectionUrl", "input": input, "include_password": true], completion: done)
             },
             onSave: { [weak self] input, done in self?.saveProfile(input, done: done) },
             onDelete: profile.map { profile in { [weak self] in self?.confirmDelete(profile) } })

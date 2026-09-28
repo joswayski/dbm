@@ -73,6 +73,22 @@ pub fn format_connection_url(
     Ok(url.into())
 }
 
+/// The editor preview masks only the password; copying uses the full URL.
+pub fn display_connection_url(
+    input: &SaveProfileInput,
+    show_password: bool,
+) -> Result<String, String> {
+    let full = format_connection_url(input, input.password.as_deref())?;
+    if show_password || input.password.as_deref().is_none_or(str::is_empty) {
+        return Ok(full);
+    }
+    let mut url =
+        Url::parse(&full).map_err(|_| "Cannot display this connection URL.".to_owned())?;
+    url.set_password(Some("*******"))
+        .map_err(|_| "Cannot display this connection URL.".to_owned())?;
+    Ok(url.into())
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportedConnection {
@@ -197,6 +213,32 @@ mod tests {
             read_only: false,
             password: Some("must not be included implicitly".into()),
         }
+    }
+
+    #[test]
+    fn preview_masks_only_password_and_reveals_the_original() {
+        let mut input = input(DatabaseEngine::Postgres);
+        input.password = Some("p@ss:/?#% é".into());
+        assert_eq!(
+            display_connection_url(&input, false).unwrap(),
+            "postgresql://a%40b:*******@[::1]:6543/app%2Fdata%20%3F%23%C3%A9?sslmode=require"
+        );
+        assert_eq!(
+            display_connection_url(&input, true).unwrap(),
+            "postgresql://a%40b:p%40ss%3A%2F%3F%23%25%20%C3%A9@[::1]:6543/app%2Fdata%20%3F%23%C3%A9?sslmode=require"
+        );
+        input.engine = DatabaseEngine::Redis;
+        input.username.clear();
+        input.default_database = "3".into();
+        assert_eq!(
+            display_connection_url(&input, false).unwrap(),
+            "rediss://:*******@[::1]:6543/3"
+        );
+        input.password = Some(String::new());
+        assert_eq!(
+            display_connection_url(&input, false).unwrap(),
+            "rediss://[::1]:6543/3"
+        );
     }
 
     #[test]

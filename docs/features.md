@@ -9,9 +9,10 @@ What the app does today, what is deliberately not built yet, and what it stores 
 - Local connection profiles and query history in an application SQLite database.
 - Passwords through the macOS Keychain, Windows Credential Manager, or Linux
   secret service via `keyring`.
-- Copy a connection URL from the connection editor's current fields. Passwords
-  are excluded by default; select **Include password** to copy the entered or
-  saved password too. Treat that clipboard content as a secret: clipboard
+- The connection editor displays the current URL with its password masked.
+  **Show password** reveals it; the password field has its own Show/Hide toggle.
+  **Copy URL** always copies the full URL, including the entered or saved
+  password, regardless of display visibility. Treat that clipboard content as a secret: clipboard
   managers and OS clipboard sync may retain or share it. URLs encode credentials,
   database names, ports, and TLS settings. MySQL TLS option names vary by client;
   Redis CA certificates must be configured separately in the destination app.
