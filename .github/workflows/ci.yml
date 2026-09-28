@@ -9,18 +9,23 @@ permissions:
   contents: read
 
 jobs:
-  frontend:
-    name: Frontend checks
+  release-scripts:
+    name: Release scripts
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: npm
-      - run: npm ci
-      - run: npm run check
-      - run: npm run build:ui
+      - run: node --test scripts/release.test.mjs
+      - name: Build the Windows installer from a stand-in executable
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nsis
+          printf 'MZ' > "$RUNNER_TEMP/dbm.exe"
+          makensis -V2 -DVERSION=0.0.0 -DEXE="$RUNNER_TEMP/dbm.exe" \
+            -DICON="$PWD/apps/native/icons/icon.ico" \
+            -DOUTFILE="$RUNNER_TEMP/DBM-setup.exe" apps/native/windows/installer.nsi
 
   rust:
     name: Rust (${{ matrix.os }})
@@ -37,12 +42,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential \
-            libayatana-appindicator3-dev \
             libssl-dev \
-            libwebkit2gtk-4.1-dev \
-            libxdo-dev \
-            libgbm-dev \
-            librsvg2-dev \
             pkg-config \
             redis-server
       - uses: dtolnay/rust-toolchain@master
@@ -63,23 +63,23 @@ jobs:
         with:
           toolchain: 1.94.0
           targets: aarch64-apple-darwin,x86_64-apple-darwin
-      # Universal, like the preview channel, so an Intel-only break fails here.
+      # Universal, like the release, so an Intel-only break fails here.
       - name: Build AppKit development preview
         env:
           DBM_UNIVERSAL: 1
         run: bash apps/native/macos/build.sh
       - name: Archive AppKit development preview
-        run: ditto -c -k --keepParent 'target/native/DBM Native.app' target/native/DBM-Native-macos.zip
+        run: ditto -c -k --keepParent target/native/DBM.app target/native/DBM-macos.zip
       - name: Render isolated AppKit fixture states
         run: |
           mkdir -p target/native/snapshots
-          python3 -c 'import subprocess; subprocess.run(["target/native/DBM Native.app/Contents/MacOS/DBMNative", "--demo", "--snapshot-dir", "target/native/snapshots"], check=True, timeout=120)'
+          python3 -c 'import subprocess; subprocess.run(["target/native/DBM.app/Contents/MacOS/dbm", "--demo", "--snapshot-dir", "target/native/snapshots"], check=True, timeout=120)'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: DBM-Native-macos-development
+          name: DBM-macos-development
           path: |
-            target/native/DBM-Native-macos.zip
+            target/native/DBM-macos.zip
             target/native/snapshots
 
   native-workbench:

@@ -5,7 +5,7 @@ if [[ "$(uname -s)" != Darwin ]]; then
   exit 1
 fi
 root="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
-output="$root/target/native/DBM Native.app"
+output="$root/target/native/DBM.app"
 export MACOSX_DEPLOYMENT_TARGET=13.0
 # DBM_UNIVERSAL=1 (release builds) produces one bundle for Apple Silicon and
 # Intel; development builds target only this Mac's architecture.
@@ -29,21 +29,28 @@ for arch in "${arches[@]}"; do
     -L "$dylib_dir" -ldbm_native_bridge \
     -Xlinker -rpath -Xlinker @executable_path/../Frameworks \
     "$root"/apps/native/macos/Sources/*.swift \
-    -o "$dylib_dir/DBMNative"
+    -o "$dylib_dir/dbm"
   dylibs+=("$dylib_dir/libdbm_native_bridge.dylib")
-  executables+=("$dylib_dir/DBMNative")
+  executables+=("$dylib_dir/dbm")
 done
 xcrun lipo -create "${dylibs[@]}" -output "$output/Contents/Frameworks/libdbm_native_bridge.dylib"
-xcrun lipo -create "${executables[@]}" -output "$output/Contents/MacOS/DBMNative"
+xcrun lipo -create "${executables[@]}" -output "$output/Contents/MacOS/dbm"
 cp "$root/apps/native/macos/Info.plist" "$output/Contents/Info.plist"
 cp "$root/apps/native/icons/icon.icns" "$output/Contents/Resources/icon.icns"
 # Geist is bundled (OFL 1.1) and registered at launch; nothing is fetched.
 cp "$root"/apps/native/workbench/assets/geist*.ttf "$root"/apps/native/workbench/assets/*-LICENSE "$output/Contents/Resources/"
-# Channel builds carry their number in the bundle version (DBM_NATIVE_BUILD is
+# Release builds carry their number in the bundle version (DBM_NATIVE_BUILD is
 # also compiled into the bridge for the updater).
 if [[ -n "${DBM_NATIVE_BUILD:-}" ]]; then
   /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${DBM_NATIVE_BUILD}" "$output/Contents/Info.plist"
-  /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 0.1.${DBM_NATIVE_BUILD}" "$output/Contents/Info.plist"
+fi
+# Release builds also carry the app version (2026.9.2802) and the release
+# name shown in the update control (2026.09.28.2).
+if [[ -n "${DBM_APP_VERSION:-}" ]]; then
+  /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${DBM_APP_VERSION}" "$output/Contents/Info.plist"
+fi
+if [[ -n "${DBM_NATIVE_VERSION:-}" ]]; then
+  /usr/libexec/PlistBuddy -c "Add :DBMVersion string ${DBM_NATIVE_VERSION}" "$output/Contents/Info.plist"
 fi
 # Release builds sign with the Developer ID and the hardened runtime, which
 # notarization requires; development builds are signed ad hoc.

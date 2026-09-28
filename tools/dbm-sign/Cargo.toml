@@ -1,0 +1,17 @@
+[package]
+name = "dbm-sign"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+base64 = "0.22"
+minisign = "0.7"
+
+[dev-dependencies]
+minisign-verify = "0.2"
+
+[lints]
+workspace = true

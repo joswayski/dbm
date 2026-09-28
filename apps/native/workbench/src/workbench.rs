@@ -3173,7 +3173,7 @@ impl Workbench {
                 dialog_title(
                     ui,
                     None,
-                    &format!("Install build {} and restart now?", update.build),
+                    &format!("Install DBM {} and restart now?", update.version),
                 );
                 ui.label(
                     RichText::new("Unsaved query text and pending table edits will be lost.")

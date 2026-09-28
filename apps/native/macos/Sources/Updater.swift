@@ -71,7 +71,7 @@ final class Updater {
     func install(_ update: [String: Any]) {
         let current = Bundle.main.bundleURL
         guard FileManager.default.isWritableFile(atPath: current.deletingLastPathComponent().path) else {
-            state = .failed("Move DBM Native into a folder you can write to, such as Applications, to update it.")
+            state = .failed("Move DBM into a folder you can write to, such as Applications, to update it.")
             return
         }
         state = .installing
@@ -150,7 +150,7 @@ final class Updater {
         case .idle: return "Check for updates"
         case .checking: return "Checking…"
         case .upToDate: return "Up to date"
-        case .available(let update): return "Update to build \(int(update["build"]))"
+        case .available(let update): return "Update to \(string(update["version"]))"
         case .installing: return "Installing…"
         case .failed: return "Retry update"
         }
@@ -160,7 +160,7 @@ final class Updater {
         switch state {
         case .available(let update): return string(update["notes"]).isEmpty ? string(update["version"]) : string(update["notes"])
         case .failed(let message): return message
-        default: return "Installed build \(currentBuild ?? 0)"
+        default: return "Installed \(Bundle.main.object(forInfoDictionaryKey: "DBMVersion") as? String ?? "build \(currentBuild ?? 0)")"
         }
     }
 }

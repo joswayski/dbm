@@ -1,9 +1,7 @@
 //! Editor text helpers shared by the native clients.
 //!
-//! These mirror `apps/desktop/ui/src/sqlSelection.ts`, the SQL-identifier
-//! matching in `App.tsx`, and the CSV encoding in `TableView.tsx` so every
-//! host runs the same statement, asks the same confirmation, and exports the
-//! same bytes. Offsets are UTF-8 byte offsets into the editor text.
+//! Every host uses them, so each one runs the same statement, asks the same
+//! confirmation, and exports the same bytes. Offsets are UTF-8 byte offsets into the editor text.
 
 use serde::Serialize;
 use serde_json::Value;

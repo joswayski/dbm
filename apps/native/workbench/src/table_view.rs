@@ -1,6 +1,5 @@
 //! Table tabs (and editable `SELECT *` results): toolbar, filters, grid, row
-//! inspector, pending-changes bar, and status bar, mirroring
-//! `apps/desktop/ui/src/TableView.tsx`.
+//! inspector, pending-changes bar, and status bar.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;

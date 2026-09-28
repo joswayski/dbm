@@ -1,5 +1,4 @@
-//! Cell editing rules shared by the native clients, mirroring
-//! `apps/desktop/ui/src/cellValues.ts`.
+//! Cell editing rules shared by the native clients.
 
 use serde_json::Value;
 

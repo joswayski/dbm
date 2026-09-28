@@ -19,7 +19,7 @@ final class Bridge {
 
     private func initialize() throws -> OpaquePointer {
         if stopped {
-            throw BridgeFailure(message: "Database bridge is closed. Reopen DBM Native.")
+            throw BridgeFailure(message: "Database bridge is closed. Reopen DBM.")
         }
         if let session { return session }
         if demo {

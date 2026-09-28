@@ -176,7 +176,7 @@ enum Request {
         next: Vec<SchemaNode>,
         kind: String,
     },
-    // Self-updates from the native preview channel. They block on the
+    // Self-updates from the latest release. They block on the
     // network, so hosts call them off the main thread.
     /// This build's channel number, or null for development builds.
     UpdateCurrent {},
