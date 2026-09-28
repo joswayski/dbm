@@ -45,6 +45,10 @@ pub fn platform() -> &'static str {
     }
 }
 
+/// The manifest key for the Linux AppImage, which replaces the whole image
+/// rather than the bare executable inside it.
+pub const LINUX_APPIMAGE: &str = "linux-x86_64-appimage";
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct Manifest {
     /// Monotonic build number; newer builds have larger numbers.
@@ -98,6 +102,11 @@ fn agent() -> ureq::Agent {
 /// Fetches the manifest and returns a newer build for this platform. Errors
 /// only describe why the check failed; callers show them as a retry state.
 pub fn check(current: u64) -> Result<Option<Available>, String> {
+    check_platform(current, platform())
+}
+
+/// [`check`] for an explicit manifest key, e.g. [`LINUX_APPIMAGE`].
+pub fn check_platform(current: u64, platform: &str) -> Result<Option<Available>, String> {
     let body = agent()
         .get(&debug_override("DBM_UPDATE_MANIFEST", MANIFEST_URL))
         .call()
@@ -106,7 +115,7 @@ pub fn check(current: u64) -> Result<Option<Available>, String> {
         .map_err(|error| format!("Couldn't read the update manifest: {error}"))?;
     let manifest: Manifest = serde_json::from_str(&body)
         .map_err(|error| format!("The update manifest is invalid: {error}"))?;
-    Ok(select(&manifest, current, platform()))
+    Ok(select(&manifest, current, platform))
 }
 
 /// Verifies `data` against a `tauri signer` signature and [`PUBLIC_KEY`].
