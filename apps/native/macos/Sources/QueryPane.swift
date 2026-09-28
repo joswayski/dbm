@@ -607,6 +607,7 @@ final class QueryPane: NSView, NSTextViewDelegate, NSSplitViewDelegate {
         errorView.show(tab.queryError)
         defer { layoutError() }
         guard let result = tab.result else {
+            resultGrid.show(columns: [], rows: [])
             [resultMeta, editableChip, readOnlyChip, truncatedChip, resultCard].forEach { $0.isHidden = true }
             embeddedPane?.removeFromSuperview()
             embeddedPane = nil
@@ -619,6 +620,10 @@ final class QueryPane: NSView, NSTextViewDelegate, NSSplitViewDelegate {
         resultMeta.isHidden = false
         let duration = int(result["durationMs"])
         if let host, tab.embedded != nil {
+            if shownResult != nil {
+                resultGrid.show(columns: [], rows: [])
+                shownResult = nil
+            }
             resultMeta.stringValue = "Table viewer · query completed in \(duration) ms"
             editableChip.isHidden = false
             readOnlyChip.isHidden = true

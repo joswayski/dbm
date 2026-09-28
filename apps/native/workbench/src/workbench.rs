@@ -109,6 +109,7 @@ struct ProfileForm {
     password: String,
     read_only: bool,
     url: String,
+    include_password: bool,
     feedback: Option<(FeedbackKind, String)>,
     /// Save & connect tests first, then saves once the test succeeds.
     saving: bool,
@@ -133,6 +134,7 @@ impl ProfileForm {
             password: String::new(),
             read_only: false,
             url: String::new(),
+            include_password: false,
             feedback: None,
             saving: false,
         }
@@ -157,6 +159,7 @@ impl ProfileForm {
             password: String::new(),
             read_only: p.read_only,
             url: String::new(),
+            include_password: false,
             feedback: None,
             saving: false,
         }
@@ -289,6 +292,7 @@ struct Toast {
 }
 
 pub struct Workbench {
+    context: egui::Context,
     worker: Worker,
     demo: bool,
     profiles: Vec<ConnectionProfile>,
@@ -340,8 +344,9 @@ impl Workbench {
 
     fn with_context(context: egui::Context, demo: bool) -> Self {
         theme::configure(&context);
-        let worker = Worker::start(context, demo);
+        let worker = Worker::start(context.clone(), demo);
         let mut app = Self {
+            context,
             worker,
             demo,
             profiles: vec![],
@@ -508,6 +513,14 @@ impl Workbench {
     fn apply(&mut self, payload: Payload, meta: &RequestMeta) {
         let target = meta.tab;
         match payload {
+            Payload::ConnectionUrl(url) => {
+                if let Some(form) = &mut self.profile_form {
+                    self.context.copy_text(url);
+                    form.feedback = Some((FeedbackKind::Success, if form.include_password {
+                        "URL copied. Treat the clipboard as a secret; it may contain your password."
+                    } else { "URL copied without password." }.into()));
+                }
+            }
             Payload::Profiles(profiles) => self.profiles = profiles,
             Payload::Tested => {
                 let Some(form) = &mut self.profile_form else {
@@ -559,9 +572,25 @@ impl Workbench {
                 self.histories.insert((id, database), entries);
             }
             Payload::Table(page) => {
+                let embedded = target.is_some_and(|tab| {
+                    self.tabs
+                        .iter()
+                        .any(|item| item.id == tab && item.embedded.is_some())
+                });
                 if let Some(state) = target.and_then(|tab| self.tables.get_mut(&tab)) {
                     if let Some(request) = state.requested.take() {
                         state.loaded(page, request);
+                        // The paged table now owns the displayed rows. Retain
+                        // query metadata for its completion label, but release
+                        // the redundant full result only after this succeeds so
+                        // a table-load error keeps the original result intact.
+                        if embedded {
+                            if let Some(result) =
+                                target.and_then(|tab| self.query_results.get_mut(&tab))
+                            {
+                                result.rows = Vec::new();
+                            }
+                        }
                     }
                 }
             }
@@ -871,6 +900,7 @@ impl Workbench {
         for tab in self.tabs.iter_mut().filter(|t| t.profile_id == profile) {
             if tab.embedded.take().is_some() {
                 self.tables.remove(&tab.id);
+                self.query_results.remove(&tab.id);
             }
         }
         if self.active_tab.is_some_and(|id| removed.contains(&id)) {
@@ -897,10 +927,13 @@ impl Workbench {
         for tab in removed {
             self.tables.remove(&tab);
             self.query_errors.remove(&tab);
-            self.tables.remove(&tab);
+            self.query_results.remove(&tab);
         }
         self.workspaces.remove(&id);
         self.schemas.remove(&id);
+        self.schema_filters.remove(&id);
+        self.histories.retain(|(profile, _), _| *profile != id);
+        self.collapsed_profiles.remove(&id);
         self.tabs.retain(|t| t.profile_id != id);
         self.mark_stale(id);
         if self.active_profile == Some(id) {
@@ -1395,7 +1428,8 @@ impl Workbench {
                 egui::Popup::menu(&more).show(|ui| {
                     theme::menu_scope(ui, 200.0);
                     if theme::menu_item(ui, "Edit connection", false).clicked() {
-                        self.profile_form = Some(ProfileForm::from_profile(profile));
+                        let current = self.workspaces.get(&id).map_or(profile, |w| &w.profile);
+                        self.profile_form = Some(ProfileForm::from_profile(current));
                         ui.close();
                     }
                     if connected
@@ -3250,6 +3284,7 @@ impl Workbench {
         let mut test = false;
         let mut save = false;
         let mut delete = false;
+        let mut copy_url = false;
         let mut url_enter = false;
         modal(ctx, "Connection", 600.0, |ui| {
             ui.horizontal(|ui| {
@@ -3341,6 +3376,12 @@ impl Workbench {
                     {
                         form.import_url();
                     }
+                });
+                ui.horizontal(|ui| {
+                    copy_url = ui.add(theme::secondary_button("Copy URL"))
+                        .on_hover_text("Copy the current connection fields as a URL").clicked();
+                    ui.checkbox(&mut form.include_password, "Include password")
+                        .on_hover_text("Includes the entered or saved password. Clipboard managers and other apps may read it.");
                 });
                 ui.add_space(8.0);
                 form_label(ui, "Name");
@@ -3580,6 +3621,16 @@ impl Workbench {
         {
             save = true;
         }
+        if copy_url {
+            form.saving = false;
+            self.dispatch(
+                Command::ConnectionUrl(form.input(), form.include_password),
+                "Copying connection URL",
+                None,
+                None,
+                RequestKind::Form,
+            );
+        }
         if test {
             form.feedback = None;
             form.saving = false;
@@ -3691,6 +3742,22 @@ mod tests {
         let mut app = app();
         let a = Uuid::from_u128(1);
         let b = Uuid::from_u128(2);
+        app.open_query(a);
+        let tab = app.active_tab.unwrap();
+        app.query_results.insert(
+            tab,
+            QueryResponse {
+                columns: vec![],
+                rows: vec![vec![json!("large result")]],
+                row_count: 1,
+                affected_rows: None,
+                duration_ms: 1,
+                truncated: false,
+                notices: vec![],
+            },
+        );
+        app.histories.insert((a, "postgres".into()), vec![]);
+        app.schema_filters.insert(a, "customer".into());
         app.pending_requests.insert(
             RequestId(900),
             RequestMeta {
@@ -3708,6 +3775,9 @@ mod tests {
         app.close_profile(a);
         assert!(app.pending_requests[&RequestId(900)].stale);
         assert!(!app.pending_requests[&RequestId(901)].stale);
+        assert!(!app.query_results.contains_key(&tab));
+        assert!(!app.histories.keys().any(|(profile, _)| *profile == a));
+        assert!(!app.schema_filters.contains_key(&a));
     }
 
     #[test]
@@ -3735,8 +3805,8 @@ mod tests {
         app.tabs[0].last_executed = Some("select * from customers;".into());
         let response = QueryResponse {
             columns: vec![],
-            rows: vec![],
-            row_count: 0,
+            rows: vec![vec![json!("retained until table succeeds")]],
+            row_count: 1,
             affected_rows: None,
             duration_ms: 1,
             truncated: false,
@@ -3751,10 +3821,18 @@ mod tests {
             Some(("public".into(), "customers".into()))
         );
         assert!(app.tables[&tab].loading);
+        assert_eq!(app.query_results[&tab].rows.len(), 1);
         assert_eq!(
             app.table_target(tab),
             Some((id, "public".into(), "customers".into()))
         );
+        app.apply(Payload::Table(page()), &meta(Some(tab), RequestKind::Table));
+        assert!(app.query_results[&tab].rows.is_empty());
+        assert_eq!(app.query_results[&tab].row_count, 1);
+        assert_eq!(app.query_results[&tab].duration_ms, 1);
+        app.close_table_tabs(id);
+        assert!(!app.query_results.contains_key(&tab));
+        assert!(app.tabs[0].embedded.is_none());
     }
 
     #[test]

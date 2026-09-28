@@ -78,6 +78,7 @@ final class ProfileSheet: NSWindowController {
     private var color: String
     private let onTest: ([String: Any], @escaping (Error?) -> Void) -> Void
     private let onSave: ([String: Any], @escaping (Error?) -> Void) -> Void
+    private let onCopyURL: ([String: Any], Bool, @escaping (Result<Any, Error>) -> Void) -> Void
     private let onDelete: (() -> Void)?
 
     private let eyebrowLabel = eyebrow("")
@@ -89,6 +90,7 @@ final class ProfileSheet: NSWindowController {
     private let usernameField = GTextField("")
     private let databaseField = GTextField("")
     private let passwordField = GSecureField("", placeholder: "")
+    private let includePassword = NSButton(checkboxWithTitle: "Include password", target: nil, action: nil)
     private let tlsPopup = GPopUp(items: ["Preferred", "Required", "Disabled"])
     private let caField = GTextField("", placeholder: "/path/to/root-ca.pem")
     private let readOnlyBox = NSButton(checkboxWithTitle: "Read-only profile (blocks GUI edits and mutations)", target: nil, action: nil)
@@ -104,11 +106,13 @@ final class ProfileSheet: NSWindowController {
     private var deleteButton: GButton?
 
     init(profile: Profile?, onTest: @escaping ([String: Any], @escaping (Error?) -> Void) -> Void,
+         onCopyURL: @escaping ([String: Any], Bool, @escaping (Result<Any, Error>) -> Void) -> Void,
          onSave: @escaping ([String: Any], @escaping (Error?) -> Void) -> Void, onDelete: (() -> Void)?) {
         original = profile
         engine = profile?.engine ?? .postgres
         color = profile?.colorHex ?? Graphite.defaultConnectionColor
         self.onTest = onTest
+        self.onCopyURL = onCopyURL
         self.onSave = onSave
         self.onDelete = onDelete
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 640), styleMask: [.titled], backing: .buffered, defer: false)
@@ -171,6 +175,11 @@ final class ProfileSheet: NSWindowController {
         passwordField.behavior.onCancel = { [weak self] in self?.dismiss() }
         urlField.behavior.onCancel = { [weak self] in self?.dismiss() }
         let urlRow = hstack([urlField, importButton], spacing: 8)
+        let copyButton = GButton("Copy URL", style: .secondary) { [weak self] in self?.copyURL() }
+        copyButton.toolTip = "Copy the current connection fields as a URL"
+        includePassword.toolTip = "Includes the entered or saved password. Clipboard managers and other apps may read it."
+        includePassword.attributedTitle = NSAttributedString(string: includePassword.title, attributes: [.font: Graphite.ui(11.5), .foregroundColor: Graphite.muted])
+        let copyRow = hstack([copyButton, includePassword, spacer()], spacing: 8)
 
         let colorRow = hstack([], spacing: 0)
         for hex in Graphite.connectionColors {
@@ -214,7 +223,7 @@ final class ProfileSheet: NSWindowController {
         let form = vstack([
             header,
             field("Database engine", engineSegment, fill: false),
-            field("Connection URL", urlRow),
+            field("Connection URL", vstack([urlRow, copyRow], spacing: 6)),
             field("Name", nameField),
             field("Connection color", colorRow, fill: false),
             pair(field("Host", hostField), field("Port", portField)),
@@ -304,6 +313,25 @@ final class ProfileSheet: NSWindowController {
             show("Connection URL imported. Review the details, then save and connect.", color: Graphite.accentText)
         case .failure(let error):
             show(error.localizedDescription, color: Graphite.danger)
+        }
+    }
+
+    private func copyURL() {
+        guard !busy else { return }
+        setBusy(true)
+        let includesPassword = includePassword.state == .on
+        onCopyURL(input, includesPassword) { [weak self] result in
+            guard let self else { return }
+            self.setBusy(false)
+            switch result {
+            case .success(let value):
+                guard let url = value as? String else { return }
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(url, forType: .string)
+                self.show(includesPassword ? "URL copied. Treat the clipboard as a secret; it may contain your password." : "URL copied without password.", color: Graphite.success)
+            case .failure(let error):
+                self.show(error.localizedDescription, color: Graphite.danger)
+            }
         }
     }
 

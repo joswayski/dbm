@@ -9,6 +9,15 @@ What the app does today, what is deliberately not built yet, and what it stores 
 - Local connection profiles and query history in an application SQLite database.
 - Passwords through the macOS Keychain, Windows Credential Manager, or Linux
   secret service via `keyring`.
+- Copy a connection URL from the connection editor's current fields. Passwords
+  are excluded by default; select **Include password** to copy the entered or
+  saved password too. Treat that clipboard content as a secret: clipboard
+  managers and OS clipboard sync may retain or share it. URLs encode credentials,
+  database names, ports, and TLS settings. MySQL TLS option names vary by client;
+  Redis CA certificates must be configured separately in the destination app.
+  Redis Preferred TLS exports as `rediss://` (no plaintext fallback). DBM's
+  read-only profile setting is not a URL option; use a restricted database user
+  when connecting from another app.
 - Native apps: AppKit on macOS (Apple Silicon and Intel), egui on Windows and
   Linux.
 - Signed in-app updates from the GitHub Release published for each merge to

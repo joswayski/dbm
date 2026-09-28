@@ -88,6 +88,10 @@ enum Request {
     TestProfile {
         input: SaveProfileInput,
     },
+    ConnectionUrl {
+        input: SaveProfileInput,
+        include_password: bool,
+    },
     Connect {
         profile_id: Uuid,
     },
@@ -206,6 +210,14 @@ pub struct DbmBridgeSession {
 
 async fn dispatch(state: &AppState, request: Request) -> Result<Value, String> {
     match request {
+        Request::ConnectionUrl {
+            input,
+            include_password,
+        } => Ok(Value::String(
+            state
+                .connection_url(&input, include_password)
+                .map_err(message)?,
+        )),
         Request::ListProfiles {} => {
             serde_json::to_value(state.profile_summaries().map_err(message)?)
         }
@@ -433,6 +445,19 @@ fn helper_value(request: Request) -> Result<Value, String> {
 /// Answers from the in-memory fixture. Exports and saves are refused.
 fn dispatch_demo(store: &mut DemoStore, request: Request) -> Result<Value, String> {
     match request {
+        Request::ConnectionUrl {
+            input,
+            include_password,
+        } => Ok(Value::String(
+            dbm_core::connection_url::format_connection_url(
+                &input,
+                if include_password {
+                    input.password.as_deref()
+                } else {
+                    None
+                },
+            )?,
+        )),
         Request::ListProfiles {} => serde_json::to_value(store.profile_summaries()),
         Request::SaveProfile { input } => {
             serde_json::to_value(store.save_profile(&input).map_err(message)?)

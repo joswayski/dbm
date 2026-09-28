@@ -247,7 +247,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, Qu
     func newProfile() { presentProfileSheet(nil) }
 
     func editProfile(_ id: String) {
-        guard let profile = profiles.first(where: { $0.id == id }) else { return }
+        guard let profile = workspaces[id]?.profile ?? profiles.first(where: { $0.id == id }) else { return }
         presentProfileSheet(profile)
     }
 
@@ -259,6 +259,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, Qu
                 self?.send(["command": "testProfile", "input": input]) { result in
                     if case .failure(let error) = result { done(error) } else { done(nil) }
                 }
+            },
+            onCopyURL: { [weak self] input, includePassword, done in
+                self?.send(["command": "connectionUrl", "input": input, "include_password": includePassword], completion: done)
             },
             onSave: { [weak self] input, done in self?.saveProfile(input, done: done) },
             onDelete: profile.map { profile in { [weak self] in self?.confirmDelete(profile) } })
@@ -434,10 +437,19 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, Qu
     private func closeProfile(_ id: String) {
         generations[id, default: 0] += 1
         let removed = tabs.filter { $0.profileID == id }
-        removed.forEach { panes[$0.id] = nil; running[$0.id] = nil; saving.remove($0.id); exporting.remove($0.id) }
+        removed.forEach {
+            panes[$0.id] = nil
+            running[$0.id] = nil
+            tableTokens[$0.id] = nil
+            exportRows[$0.id] = nil
+            saving.remove($0.id)
+            exporting.remove($0.id)
+        }
         tabs.removeAll { $0.profileID == id }
         workspaces[id] = nil
         schemas[id] = nil
+        schemaFilters[id] = nil
+        histories = histories.filter { !$0.key.hasPrefix("\(id)|") }
         connecting.remove(id)
         refreshingSchema.remove(id)
         if activeProfileID == id { activeProfileID = nil }
@@ -452,6 +464,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, Qu
         for tab in tabs where tab.profileID == id && tab.embedded != nil {
             tab.embedded = nil
             tab.tableState = nil
+            tab.result = nil
         }
         if let activeTab, removed.contains(where: { $0 === activeTab }) { self.activeTab = nil }
     }
@@ -625,6 +638,13 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, Qu
             switch result {
             case .success(let value):
                 state.loaded(TablePage(dictionary(value)))
+                // Once the independently paged table has loaded, its original
+                // query rows are redundant. Keep result metadata for the
+                // completion-time label, and retain rows if table loading fails.
+                if tab.embedded != nil, var metadata = tab.result {
+                    metadata["rows"] = [[Any]]()
+                    tab.result = metadata
+                }
             case .failure(let error):
                 state.restoreLoaded()
                 state.message = .error(error.localizedDescription)

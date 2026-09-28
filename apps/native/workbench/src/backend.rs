@@ -23,6 +23,7 @@ pub enum Command {
     LoadProfiles,
     SaveProfile(SaveProfileInput),
     TestProfile(SaveProfileInput),
+    ConnectionUrl(SaveProfileInput, bool),
     DeleteProfile(Uuid),
     Connect(Uuid),
     SwitchDatabase(Uuid, String),
@@ -48,6 +49,7 @@ pub enum Payload {
     Profiles(Vec<ConnectionProfile>),
     Profile(ConnectionProfile),
     Tested,
+    ConnectionUrl(String),
     Deleted(Uuid),
     Workspace(WorkspaceInfo),
     Disconnected(Uuid),
@@ -134,6 +136,11 @@ impl Backend {
 
 async fn execute_live(state: &AppState, command: Command) -> Result<Payload, String> {
     let result = match command {
+        Command::ConnectionUrl(input, include_password) => Payload::ConnectionUrl(
+            state
+                .connection_url(&input, include_password)
+                .map_err(string_error)?,
+        ),
         Command::LoadProfiles => Payload::Profiles(
             state
                 .profile_summaries()
@@ -305,6 +312,16 @@ impl DemoBackend {
     async fn execute(&mut self, command: Command) -> Result<Payload, String> {
         let store = &mut self.store;
         Ok(match command {
+            Command::ConnectionUrl(input, include_password) => {
+                Payload::ConnectionUrl(dbm_core::connection_url::format_connection_url(
+                    &input,
+                    if include_password {
+                        input.password.as_deref()
+                    } else {
+                        None
+                    },
+                )?)
+            }
             Command::LoadProfiles => Payload::Profiles(store.profiles()),
             Command::SaveProfile(input) => {
                 Payload::Profile(store.save_profile(&input).map_err(string_error)?)
