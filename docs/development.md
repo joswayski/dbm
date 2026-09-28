@@ -1,18 +1,73 @@
 # Developing DBM
 
+DBM is two native clients over one Rust core:
+
+- **macOS:** a Swift/AppKit app in `apps/native/macos`, calling the Rust core
+  through the C ABI bridge in `apps/native/bridge`.
+- **Windows and Linux:** a Rust egui app in `apps/native/workbench`, its own
+  Cargo workspace.
+
+The database adapters, models, session state, credentials, and SQLite store
+live in `crates/dbm-core`; the updater lives in `crates/dbm-update`. See
+[native architecture](native.md) for how the pieces fit together.
+
 ## Setup
 
 Prerequisites:
 
-- Node.js 24 and npm 11
-- Rust 1.94 with `rustfmt` and `clippy`
-- Tauri's native dependencies for the operating system
+- Rust 1.94 with `rustfmt` and `clippy` (pinned in `rust-toolchain.toml`)
+- macOS: macOS 13+ with Xcode Command Line Tools
+- Linux: the packages CI installs for the native workbench:
+
+  ```sh
+  sudo apt-get install -y build-essential libssl-dev pkg-config \
+    libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev libxi-dev \
+    libxrandr-dev libvulkan1 mesa-vulkan-drivers
+  ```
+
+  Running the app needs a display server and a Vulkan driver.
+- Node.js 24, only to run the release-script tests.
+
+## Build and run
+
+On macOS:
 
 ```sh
-npm install
+bash apps/native/macos/build.sh
+open target/native/DBM.app
+# Isolated fixture, without loading local profiles or connecting to databases:
+target/native/DBM.app/Contents/MacOS/dbm --demo
+```
+
+`build.sh` builds for the current Mac's architecture and signs ad hoc.
+`DBM_UNIVERSAL=1` builds one app for Apple Silicon and Intel;
+`DBM_SIGNING_IDENTITY` signs with a Developer ID and the hardened runtime
+instead, as the release workflow does.
+
+On Windows or Linux:
+
+```sh
+cargo run --manifest-path apps/native/workbench/Cargo.toml --locked --release
+# Isolated in-memory fixture:
+cargo run --manifest-path apps/native/workbench/Cargo.toml --locked --release -- --demo
+```
+
+`bash apps/native/workbench/demo.sh` is a shortcut for the debug `--demo` build.
+
+Outside `--demo`, development builds use the same saved profiles, passwords,
+and query history as an installed DBM. Use disposable databases or read-only
+profiles when testing writes.
+
+## Tests and checks
+
+```sh
+cargo fmt --all -- --check
 cargo test --workspace
-npm run check
-npm run dev
+cargo clippy --workspace --all-targets -- -D warnings
+cargo fmt --manifest-path apps/native/workbench/Cargo.toml --all -- --check
+cargo test --manifest-path apps/native/workbench/Cargo.toml --locked
+cargo clippy --manifest-path apps/native/workbench/Cargo.toml --locked --all-targets -- -D warnings
+node --test scripts/release.test.mjs
 ```
 
 The Redis tests start a throwaway `redis-server` when one is installed and skip
@@ -21,92 +76,56 @@ otherwise. The PostgreSQL and MySQL tests that need a live server run only when
 `DBM_TEST_MYSQL_PORT` (a local MySQL or MariaDB allowing passwordless `root` on
 127.0.0.1) is set.
 
-The database adapters, models, session state, credentials, and SQLite store live
-in `crates/dbm-core`, shared by Tauri and the experimental native clients. They can
-be tested without WebKit/Tauri using `cargo test -p dbm-core -p dbm-native-bridge`.
-See [native development](native.md) for the macOS AppKit/C ABI build and the
-separate Windows/Linux egui Cargo workspace and checks. These do not replace
-`npm run dev`, installers, or the shipping updater until parity is verified.
+CI (`.github/workflows/ci.yml`) runs these on macOS, Windows, and Linux, builds
+the universal AppKit app with fixture snapshots, and builds the Windows NSIS
+installer from a stand-in executable.
 
 ## Amp orbs
 
-Amp orbs run [`.agents/setup`](../.agents/setup) to prepare a fresh machine: it installs Tauri's
-Linux build dependencies, `redis-server` (the live Redis tests skip themselves without it),
-Node.js 24 with npm 11, the Rust toolchain pinned in `rust-toolchain.toml`, and the locked npm and
-Cargo dependencies. [`.agents/resume`](../.agents/resume) only checks that the environment is still
-intact when an orb wakes.
+Amp orbs run [`.agents/setup`](../.agents/setup) to prepare a fresh machine: it
+installs the native workbench's Linux build dependencies, `redis-server` (the
+live Redis tests skip themselves without it), the Rust toolchain pinned in
+`rust-toolchain.toml`, and the locked Cargo dependencies.
+[`.agents/resume`](../.agents/resume) only checks that the environment is still
+intact when an orb wakes. No long-running services are declared in
+[`.amp/services.yaml`](../.amp/services.yaml).
 
-The Vite browser preview is declared in [`.amp/services.yaml`](../.amp/services.yaml). Inside an orb,
-`amp orb services ensure` starts it supervised and prints its portal URL.
+## Local installs
 
-## Build and install
+Local builds are not installed automatically. On macOS, copy
+`target/native/DBM.app` into `/Applications` yourself if you want to run it
+from there. On Windows and Linux, the release binary is
+`apps/native/workbench/target/release/dbm-workbench` (`.exe` on Windows).
 
-`npm run build` creates a native build for the operating system where the
-command runs. It prints the absolute paths to the unpackaged executable and
-every installer or app bundle it creates.
+Development builds have no build number, so they never check for updates.
 
-On macOS, a successful build also:
+An ad-hoc signature changes whenever the macOS app is rebuilt. Because DBM
+keeps database passwords in the macOS Keychain, macOS may ask for the login
+keychain password when a newly built copy first reads an existing password.
+This is a macOS system prompt; DBM never receives the login keychain password.
+Signing with a stable identity (`DBM_SIGNING_IDENTITY`) avoids the repeated
+approval.
 
-1. Quits any running DBM instance.
-2. Replaces `/Applications/DBM.app` with the new build.
-3. Launches the newly installed app.
+## Releases
 
-The generated app bundle and DMG remain under `target/release/bundle`.
-Local builds use an installed Apple Development signing identity when one is
-available and otherwise use an ad-hoc signature.
-
-An ad-hoc signature changes whenever DBM is rebuilt. Because DBM keeps database
-passwords in macOS Keychain, macOS may ask for the login keychain password when
-a newly built copy first reads an existing password. This is a macOS system
-prompt—DBM never receives the login keychain password. A stable Apple
-Development signing identity avoids that repeated approval.
-
-```sh
-# Build + install + launch (default on macOS)
-npm run build
-
-# Build only, without changing /Applications
-DBM_SKIP_INSTALL=1 npm run build
-
-# Install without launching
-DBM_OPEN_AFTER_INSTALL=0 npm run build
-```
-
-On Windows, the build creates an NSIS installer under
-`target/release/bundle/nsis` and an unpackaged executable at
-`target/release/dbm.exe`. If that exact unpackaged executable is already
-running, the build stops it first so it can be replaced.
-
-On Linux, the build creates `.deb` and AppImage packages under
-`target/release/bundle`, plus the unpackaged executable at
-`target/release/dbm`.
-
-One local build only targets the current operating system. Every merge to
-`main` that changes the app runs the release workflow on macOS, Windows, and
-Linux and publishes a GitHub release with all three platforms' installers,
-signed updater artifacts, `SHA256SUMS`, and a validated `latest.json`
-manifest. Install DBM once from the
-[latest release](https://github.com/joswayski/dbm/releases/latest); after that,
-official builds check for updates at launch and every 4 hours (or on demand
-from the top bar's **Check for updates** button) and install authenticated
-updates in place where the platform supports it. `.deb` installs open the
-release page instead.
-
-These per-merge releases are meant for the maintainer's own machines: the
-macOS build is signed and notarized, but Windows installers are not yet
-Authenticode-signed. Versioning, the workflow's steps, required secrets, and
-the remaining gates for a wider public release are documented in
+Every merge to `main` that changes the app runs the release workflow and
+publishes a GitHub release for macOS, Windows, and Linux. Install DBM once from
+the [latest release](https://github.com/joswayski/dbm/releases/latest); after
+that, release builds update themselves. The macOS app is signed and notarized;
+Windows builds are not Authenticode-signed. Versioning, the workflow's steps,
+required secrets, and the update flow are documented in
 [docs/releases.md](releases.md).
 
 DBM never uploads connection profiles, query history, or database results.
 Passwords are stored in the operating system credential store when available.
 
-## Browser preview and screenshots
+## Screenshots
 
-The browser preview used by Vite has a small in-memory mock so the layout can be
-worked on without launching Tauri. The real desktop app uses the Rust commands.
-Add `?demo` to the preview URL to load a larger sample dataset (four
-connections, a `public` schema with several tables, query results, and
-history). `node scripts/screenshots.mjs` uses that dataset to regenerate
-`docs/screenshots/`. It needs Playwright with Chromium installed
-(`npm install --global playwright && npx playwright install chromium`).
+The README screenshots in `docs/screenshots/` are captured from the native
+apps' `--demo` fixture. The AppKit app can also render the fixture's main
+states to PNG files without interaction:
+
+```sh
+mkdir -p target/native/snapshots
+target/native/DBM.app/Contents/MacOS/dbm --demo --snapshot-dir target/native/snapshots
+```

@@ -1,8 +1,16 @@
 name: Release
 
-# Every merge to main that touches the app builds signed installers for macOS,
-# Windows, and Linux and publishes them as the latest GitHub release. Installed
-# official builds poll releases/latest/download/latest.json and update in place.
+# Every merge to main that touches the app builds the native apps (AppKit on
+# macOS, egui on Windows and Linux), signs them, and publishes them as the
+# latest GitHub release. Installed copies read two manifests from
+# releases/latest/download and update in place:
+#
+#   native-latest.json  the native apps' own updater (crates/dbm-update)
+#   latest.json         installs of the former Tauri app, whose updater swaps
+#                       in DBM.app.tar.gz, the Windows setup, or the AppImage
+#
+# Every updater artifact is signed with the release updater key
+# (tools/dbm-sign); both updaters verify it before installing anything.
 on:
   push:
     branches: [main]
@@ -35,6 +43,7 @@ jobs:
       tag: ${{ steps.version.outputs.tag }}
       display_version: ${{ steps.version.outputs.display_version }}
       app_version: ${{ steps.version.outputs.app_version }}
+      build: ${{ steps.build.outputs.build }}
       notes: ${{ steps.notes.outputs.notes }}
       release_id: ${{ steps.draft.outputs.release_id }}
     steps:
@@ -50,6 +59,17 @@ jobs:
         env:
           DBM_RELEASE_SHA: ${{ github.sha }}
         run: node scripts/release.mjs version
+      - name: Derive the build number
+        id: build
+        env:
+          APP_VERSION: ${{ steps.version.outputs.app_version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # 2026.9.2802 -> 2026092802: increases with every release, and is
+          # far above the preview channel's run numbers.
+          IFS=. read -r year month patch <<<"$APP_VERSION"
+          printf 'build=%d%02d%04d\n' "$year" "$month" "$patch" >> "$GITHUB_OUTPUT"
       - name: Collect release notes
         id: notes
         env:
@@ -81,56 +101,26 @@ jobs:
           )"
           echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
 
-  build:
-    name: Build (${{ matrix.os }})
+  macos:
+    name: Build, sign, and notarize (macOS)
     needs: prepare
     environment: release
-    strategy:
-      fail-fast: true
-      matrix:
-        include:
-          - os: macos-14
-            args: "--bundles app,dmg"
-          - os: windows-2025
-            args: "--bundles nsis"
-          - os: ubuntu-24.04
-            args: "--bundles deb,appimage"
-    runs-on: ${{ matrix.os }}
-    permissions:
-      contents: write
+    runs-on: macos-14
     env:
-      DBM_OFFICIAL_RELEASE: "1"
-      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      DBM_NATIVE_BUILD: ${{ needs.prepare.outputs.build }}
+      DBM_NATIVE_VERSION: ${{ needs.prepare.outputs.display_version }}
+      DBM_APP_VERSION: ${{ needs.prepare.outputs.app_version }}
+      DBM_UPDATE_SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      DBM_UPDATE_SIGNING_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.94.0
-      - name: Install Linux dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            libayatana-appindicator3-dev \
-            libssl-dev \
-            libwebkit2gtk-4.1-dev \
-            libxdo-dev \
-            libgbm-dev \
-            librsvg2-dev \
-            pkg-config
-      - run: npm ci
-      - name: Prepare the release version and updater credentials
-        run: node scripts/prepare-release-build.mjs "${{ needs.prepare.outputs.app_version }}"
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
       - name: Prepare Apple signing and notarization credentials
-        if: runner.os == 'macOS'
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -141,45 +131,28 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
-          required=(
-            APPLE_CERTIFICATE
-            APPLE_CERTIFICATE_PASSWORD
-            KEYCHAIN_PASSWORD
-            APPLE_API_ISSUER
-            APPLE_API_KEY
-            APPLE_API_PRIVATE_KEY
-          )
-          for name in "${required[@]}"; do
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD KEYCHAIN_PASSWORD \
+                      APPLE_API_ISSUER APPLE_API_KEY APPLE_API_PRIVATE_KEY \
+                      DBM_UPDATE_SIGNING_KEY; do
             if [[ -z "${!name:-}" ]]; then
               echo "Missing release environment secret: $name" >&2
               exit 1
             fi
           done
-
           certificate_path="$RUNNER_TEMP/dbm-developer-id.p12"
           api_key_path="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY}.p8"
           keychain="$RUNNER_TEMP/dbm-signing.keychain-db"
-
-          printf '%s' "$APPLE_CERTIFICATE" \
-            | openssl base64 -d -A -out "$certificate_path"
+          printf '%s' "$APPLE_CERTIFICATE" | openssl base64 -d -A -out "$certificate_path"
           printf '%s' "$APPLE_API_PRIVATE_KEY" > "$api_key_path"
           chmod 600 "$certificate_path" "$api_key_path"
-
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$keychain"
           security default-keychain -d user -s "$keychain"
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$keychain"
           security set-keychain-settings -t 3600 -u "$keychain"
-          security import "$certificate_path" \
-            -k "$keychain" \
-            -P "$APPLE_CERTIFICATE_PASSWORD" \
-            -T /usr/bin/codesign
-          security set-key-partition-list \
-            -S apple-tool:,apple:,codesign: \
-            -s \
-            -k "$KEYCHAIN_PASSWORD" \
-            "$keychain"
-
+          security import "$certificate_path" -k "$keychain" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s \
+            -k "$KEYCHAIN_PASSWORD" "$keychain"
           identity="$(
             security find-identity -v -p codesigning "$keychain" \
               | awk -F\" '/Developer ID Application/{print $2; exit}'
@@ -188,68 +161,169 @@ jobs:
             echo "The imported certificate is not a Developer ID Application identity." >&2
             exit 1
           fi
-
           {
-            printf 'APPLE_SIGNING_IDENTITY=%s\n' "$identity"
+            printf 'DBM_SIGNING_IDENTITY=%s\n' "$identity"
             printf 'APPLE_API_ISSUER=%s\n' "$APPLE_API_ISSUER"
             printf 'APPLE_API_KEY=%s\n' "$APPLE_API_KEY"
             printf 'APPLE_API_KEY_PATH=%s\n' "$api_key_path"
           } >> "$GITHUB_ENV"
-
-      - uses: tauri-apps/tauri-action@v1
+      - name: Build and sign DBM.app (Apple Silicon and Intel)
         env:
-          GITHUB_TOKEN: ${{ github.token }}
-        with:
-          projectPath: apps/desktop
-          tagName: ${{ needs.prepare.outputs.tag }}
-          releaseId: ${{ needs.prepare.outputs.release_id }}
-          releaseBody: ${{ needs.prepare.outputs.notes }}
-          releaseDraft: true
-          prerelease: false
-          retryAttempts: 5
-          uploadUpdaterJson: true
-          updaterJsonPreferNsis: true
-          args: ${{ matrix.args }} --config src-tauri/tauri.release.conf.json
-      - name: Notarize, staple, and validate the macOS release
-        if: runner.os == 'macOS'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ needs.prepare.outputs.tag }}
+          DBM_UNIVERSAL: 1
+        run: |
+          bash apps/native/macos/build.sh
+          lipo -archs target/native/DBM.app/Contents/MacOS/dbm | grep -qw x86_64
+          lipo -archs target/native/DBM.app/Contents/MacOS/dbm | grep -qw arm64
+      - name: Notarize and staple the app, then package it
         shell: bash
         run: |
           set -euo pipefail
-
-          app="$(find target -type d -path '*/release/bundle/macos/DBM.app' -print -quit)"
-          dmg="$(find target -type f -path '*/release/bundle/dmg/*.dmg' -print -quit)"
-          if [[ -z "$app" || -z "$dmg" ]]; then
-            echo "Could not find the packaged DBM.app and DMG." >&2
-            exit 1
-          fi
-
+          app="target/native/DBM.app"
+          out="target/native/release"
+          mkdir -p "$out"
+          notarize() {
+            xcrun notarytool submit "$1" \
+              --key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" \
+              --issuer "$APPLE_API_ISSUER" --wait
+          }
           codesign --verify --deep --strict --verbose=2 "$app"
-          spctl --assess --type execute --verbose=2 "$app"
+          ditto -c -k --keepParent "$app" "$RUNNER_TEMP/notarize.zip"
+          notarize "$RUNNER_TEMP/notarize.zip"
+          xcrun stapler staple -v "$app"
           xcrun stapler validate "$app"
+          spctl --assess --type execute --verbose=2 "$app"
 
-          xcrun notarytool submit "$dmg" \
-            --key "$APPLE_API_KEY_PATH" \
-            --key-id "$APPLE_API_KEY" \
-            --issuer "$APPLE_API_ISSUER" \
-            --wait
-          xcrun stapler staple -v "$dmg"
+          # The native updater's archive, and the one the Tauri updater
+          # extracts over an installed DBM.app.
+          ditto -c -k --keepParent "$app" "$out/DBM-macOS.zip"
+          COPYFILE_DISABLE=1 tar --no-mac-metadata -C target/native -czf "$out/DBM.app.tar.gz" DBM.app
 
-          codesign --verify --strict --verbose=2 "$dmg"
-          spctl --assess \
-            --type open \
-            --context context:primary-signature \
-            --verbose=2 \
-            "$dmg"
-          xcrun stapler validate "$dmg"
+          # A drag-to-Applications disk image for first installs.
+          staging="$RUNNER_TEMP/dmg"
+          mkdir -p "$staging"
+          cp -R "$app" "$staging/"
+          ln -s /Applications "$staging/Applications"
+          hdiutil create -volname "DBM" -srcfolder "$staging" -ov \
+            -format UDZO "$out/DBM-macOS.dmg"
+          codesign --force --timestamp --sign "$DBM_SIGNING_IDENTITY" "$out/DBM-macOS.dmg"
+          notarize "$out/DBM-macOS.dmg"
+          xcrun stapler staple -v "$out/DBM-macOS.dmg"
+          spctl --assess --type open --context context:primary-signature \
+            --verbose=2 "$out/DBM-macOS.dmg"
+      - name: Sign the updater archives with the release key
+        run: |
+          cargo build --locked --release -p dbm-sign
+          target/release/dbm-sign target/native/release/DBM-macOS.zip target/native/release/DBM.app.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-macos
+          path: target/native/release/*
+          if-no-files-found: error
 
-          gh release upload "$TAG" "$dmg" --clobber
+  workbench:
+    name: Build and sign (${{ matrix.os }})
+    needs: prepare
+    environment: release
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: windows-2025
+            binary: dbm-workbench.exe
+            asset: DBM-Windows-x64.exe
+            signer: target/release/dbm-sign.exe
+          - os: ubuntu-24.04
+            binary: dbm-workbench
+            asset: DBM-Linux-x64
+            signer: target/release/dbm-sign
+    runs-on: ${{ matrix.os }}
+    env:
+      DBM_NATIVE_BUILD: ${{ needs.prepare.outputs.build }}
+      DBM_NATIVE_VERSION: ${{ needs.prepare.outputs.display_version }}
+      DBM_UPDATE_SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      DBM_UPDATE_SIGNING_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Native Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev pkg-config libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev libxi-dev libxrandr-dev
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.94.0
+      - run: cargo build --manifest-path apps/native/workbench/Cargo.toml --locked --release
+      - run: cargo build --locked --release -p dbm-sign
+      - name: Stage and sign the executable
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          cp "apps/native/workbench/target/release/${{ matrix.binary }}" "release/${{ matrix.asset }}"
+          "${{ matrix.signer }}" "release/${{ matrix.asset }}"
+      - name: Package and sign the AppImage
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL -o "$RUNNER_TEMP/appimagetool" \
+            https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x "$RUNNER_TEMP/appimagetool"
+          APPIMAGETOOL="$RUNNER_TEMP/appimagetool" bash apps/native/workbench/appimage.sh \
+            "apps/native/workbench/target/release/${{ matrix.binary }}" release/DBM-Linux-x86_64.AppImage
+          "${{ matrix.signer }}" release/DBM-Linux-x86_64.AppImage
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ runner.os }}
+          path: release/*
+          if-no-files-found: error
+
+  windows-installer:
+    name: Package the Windows installer
+    needs: [prepare, workbench]
+    environment: release
+    runs-on: ubuntu-24.04
+    env:
+      APP_VERSION: ${{ needs.prepare.outputs.app_version }}
+      DBM_UPDATE_SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      DBM_UPDATE_SIGNING_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-Windows
+          path: windows
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.94.0
+      - name: Build and sign DBM-Windows-x64-setup.exe
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y nsis
+          mkdir -p release
+          makensis -V2 \
+            -DVERSION="$APP_VERSION" \
+            -DEXE="$PWD/windows/DBM-Windows-x64.exe" \
+            -DICON="$PWD/apps/native/icons/icon.ico" \
+            -DOUTFILE="$PWD/release/DBM-Windows-x64-setup.exe" \
+            apps/native/windows/installer.nsi
+          cargo build --locked --release -p dbm-sign
+          target/release/dbm-sign release/DBM-Windows-x64-setup.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-windows-installer
+          path: release/*
+          if-no-files-found: error
 
   publish:
     name: Validate and publish
-    needs: [prepare, build]
+    needs: [prepare, macos, workbench, windows-installer]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -259,56 +333,58 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       TAG: ${{ needs.prepare.outputs.tag }}
       APP_VERSION: ${{ needs.prepare.outputs.app_version }}
+      DISPLAY_VERSION: ${{ needs.prepare.outputs.display_version }}
+      BUILD: ${{ needs.prepare.outputs.build }}
+      NOTES: ${{ needs.prepare.outputs.notes }}
       RELEASE_ID: ${{ needs.prepare.outputs.release_id }}
     steps:
-      - name: Download the draft's assets
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: assets
+          merge-multiple: true
+      - name: Write the updater manifests
         shell: bash
         run: |
           set -euo pipefail
-          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir assets
-          gh api --paginate "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets" \
-            --jq '.[] | {id, name}' | jq -s . > asset-names.json
-      - name: Point the updater manifest at public download URLs
-        shell: bash
-        run: |
-          set -euo pipefail
-          # Uploaded manifests can reference rate-limited API asset URLs or a
-          # draft's untagged download path, neither of which installed apps can
-          # use once the release is public.
-          base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/"
-          jq --slurpfile assets asset-names.json --arg base "$base" '
-            ($assets[0] | map({key: (.id | tostring), value: .name}) | from_entries) as $names
-            | .platforms |= map_values(.url |= (
-                if test("/releases/assets/[0-9]+$")
-                then $base + ($names[capture("/assets/(?<id>[0-9]+)$").id] // "missing-asset" | @uri)
-                else $base + (split("/") | last)
-                end
-              ))
-          ' assets/latest.json > latest.json
-          jq -e \
-            --arg version "$APP_VERSION" \
-            --arg base "$base" \
-            --slurpfile assets asset-names.json \
-            '
-              ($assets[0] | map(.name | @uri)) as $files
-              | .version == $version
-              and (.notes | type == "string" and length > 0)
-              and (
-                [
-                  .platforms["darwin-aarch64"],
-                  .platforms["windows-x86_64"],
-                  .platforms["linux-x86_64"]
-                ]
-                | all(
-                    type == "object"
-                    and (.signature | type == "string" and length > 0)
-                    and (.url | type == "string" and startswith($base))
-                    and ((.url | ltrimstr($base)) as $file | $files | index($file) != null)
-                  )
-              )
-            ' \
-            latest.json > /dev/null
-          cp latest.json assets/latest.json
+          base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}"
+          sig() { tr -d '\n' < "assets/$1.sig"; }
+          artifact() { jq -n --arg url "$base/$1" --arg signature "$(sig "$1")" '{url: $url, signature: $signature}'; }
+          mac_zip="$(artifact DBM-macOS.zip)"
+          mac_tar="$(artifact DBM.app.tar.gz)"
+          windows_exe="$(artifact DBM-Windows-x64.exe)"
+          windows_setup="$(artifact DBM-Windows-x64-setup.exe)"
+          linux_bin="$(artifact DBM-Linux-x64)"
+          appimage="$(artifact DBM-Linux-x86_64.AppImage)"
+
+          jq -n \
+            --argjson build "$BUILD" --arg version "$DISPLAY_VERSION" --arg notes "$NOTES" \
+            --argjson mac "$mac_zip" --argjson windows "$windows_exe" \
+            --argjson linux "$linux_bin" --argjson appimage "$appimage" \
+            '{build: $build, version: $version, notes: $notes, platforms: {
+                "darwin-aarch64": $mac, "darwin-x86_64": $mac,
+                "windows-x86_64": $windows,
+                "linux-x86_64": $linux, "linux-x86_64-appimage": $appimage}}' \
+            > native-latest.json
+
+          # The Tauri updater's format. Its version must be newer than the
+          # last Tauri release (2026.9.2801), which the CalVer tags ensure.
+          jq -n \
+            --arg version "$APP_VERSION" --arg notes "$NOTES" \
+            --arg pub_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --argjson mac "$mac_tar" --argjson windows "$windows_setup" --argjson appimage "$appimage" \
+            '{version: $version, notes: $notes, pub_date: $pub_date, platforms: {
+                "darwin-aarch64": $mac, "darwin-x86_64": $mac,
+                "darwin-aarch64-app": $mac, "darwin-x86_64-app": $mac,
+                "windows-x86_64": $windows, "windows-x86_64-nsis": $windows,
+                "linux-x86_64": $appimage, "linux-x86_64-appimage": $appimage}}' \
+            > latest.json
+
+          for manifest in native-latest.json latest.json; do
+            jq -e '[.platforms[] | (.signature | length > 0) and (.url | length > 0)] | all' "$manifest" > /dev/null
+            cat "$manifest"
+          done
+          cp native-latest.json latest.json assets/
       - name: Write checksums
         working-directory: assets
         run: |
@@ -319,7 +395,7 @@ jobs:
       - uses: actions/attest-build-provenance@v2
         with:
           subject-path: assets/*
-      - name: Upload the manifest and checksums, then publish
+      - name: Upload the assets, then publish
         shell: bash
         run: |
           set -euo pipefail
@@ -327,7 +403,11 @@ jobs:
             echo "Release $TAG is no longer a draft; refusing to modify it." >&2
             exit 1
           fi
-          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber latest.json SHA256SUMS
+          # Manifests last, so nothing points at a file that is not up yet.
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber \
+            $(ls assets/* | grep -v -e 'latest.json$')
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber \
+            assets/native-latest.json assets/latest.json
           gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
             -f tag_name="$TAG" \
             -F draft=false \
@@ -335,10 +415,19 @@ jobs:
             -f make_latest=true \
             --silent
           echo "Published https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
+      - name: Move native preview installs onto releases
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Copies from the old native-preview channel read its manifest; point
+          # it here once so they update to a build that reads releases/latest.
+          if gh release view native-preview --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload native-preview --repo "$GITHUB_REPOSITORY" --clobber assets/native-latest.json
+          fi
 
   cleanup:
     name: Remove the unpublished draft
-    needs: [prepare, build, publish]
+    needs: [prepare, macos, workbench, windows-installer, publish]
     if: (failure() || cancelled()) && needs.prepare.outputs.release_id != ''
     runs-on: ubuntu-24.04
     permissions:

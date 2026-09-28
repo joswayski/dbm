@@ -76,7 +76,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, Qu
             return
         }
         let alert = NSAlert()
-        alert.messageText = "Install build \(int(update["build"])) and restart now?"
+        alert.messageText = "Install DBM \(string(update["version"])) and restart now?"
         alert.informativeText = "Unsaved query text and pending table edits will be lost."
         alert.addButton(withTitle: "Install and Restart")
         alert.addButton(withTitle: "Later")
@@ -88,7 +88,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, Qu
     private func buildWindow() {
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 800),
                           styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
-        window.title = demo ? "DBM Native — DEMO" : "DBM Native"
+        window.title = demo ? "DBM — DEMO" : "DBM"
         window.minSize = NSSize(width: 900, height: 600)
         window.backgroundColor = Graphite.bg
         window.delegate = self
@@ -737,10 +737,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, Qu
         let appItem = NSMenuItem()
         menu.addItem(appItem)
         let appMenu = NSMenu()
-        appMenu.addItem(withTitle: "About DBM Native", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(withTitle: "About DBM", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "Hide DBM Native", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
-        appMenu.addItem(withTitle: "Quit DBM Native", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenu.addItem(withTitle: "Hide DBM", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        appMenu.addItem(withTitle: "Quit DBM", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appItem.submenu = appMenu
 
         let fileItem = NSMenuItem()

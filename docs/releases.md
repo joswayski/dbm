@@ -1,71 +1,148 @@
 # DBM releases
 
-DBM distributes installers directly through GitHub Releases:
+DBM distributes the native apps directly through GitHub Releases:
 
-- a DMG for macOS;
-- an NSIS `.exe` installer for Windows; and
-- `.deb` and AppImage packages for Linux.
+- macOS: the AppKit app as a DMG (Apple Silicon and Intel in one app);
+- Windows: the egui app as an NSIS `.exe` installer; and
+- Linux: the egui app as an AppImage.
 
 Every merge to `main` that changes the app runs `.github/workflows/release.yml`,
 which builds all three platforms and publishes the result as the latest GitHub
-Release. Installed official builds find it through the updater manifest and
-update in place. Changes that only touch Markdown, `docs/`, or agent tooling do
-not release. Run the workflow manually from the Actions tab (**Release → Run
-workflow** on `main`) to release without a new merge.
+Release. Installed release builds find it through the updater manifest and
+update in place. Changes that only touch Markdown, `docs/`, agent tooling, or
+the CI workflow do not release. Run the workflow manually from the Actions tab
+(**Release → Run workflow** on `main`) to release without a new merge.
 
-These automatic releases are for the maintainer's own machines. Windows
-installers are not Authenticode-signed yet, so the gates below still apply
-before DBM is promoted to a wider audience.
+These automatic releases are for the maintainer's own machines. Windows builds
+are not Authenticode-signed yet, so the gates below still apply before DBM is
+promoted to a wider audience.
 
 ## How a release is built
 
-1. **prepare** picks the next version, pushes its tag, and creates a draft
-   release whose notes list the pull requests merged since the previous
-   release (Dependabot bumps are omitted).
-2. **build** packages macOS (signed and notarized DMG), Windows (NSIS), and
-   Linux (`.deb` and AppImage) into the draft with Tauri updater signatures
-   and a merged `latest.json`. If any platform fails, the others stop.
-3. **publish** rewrites `latest.json` so every download URL points at the
-   public `releases/download/<tag>/` path, rejects a manifest whose version,
-   notes, signatures, or assets do not match, writes `SHA256SUMS`, attests
-   build provenance for every asset, and then publishes the draft as the
+1. **prepare** picks the next version and build number, pushes the tag, and
+   creates a draft release whose notes list the pull requests merged since the
+   previous release (Dependabot bumps are omitted).
+2. **macOS** builds the universal app with `apps/native/macos/build.sh`
+   (`DBM_UNIVERSAL=1`), signs it with the Developer ID and the hardened
+   runtime, notarizes and staples it, and packages it three ways. The DMG is
+   signed, notarized, and stapled too.
+3. **workbench** builds the egui app on Windows and Linux. Linux is also
+   packaged as an AppImage (`apps/native/workbench/appimage.sh`).
+4. **windows-installer** wraps the Windows executable in an NSIS installer
+   (`apps/native/windows/installer.nsi`).
+5. Each build job signs its updater artifacts with the release updater key
+   (`tools/dbm-sign`), writing a `.sig` beside each file. If any platform
+   fails, the others stop.
+6. **publish** writes both updater manifests and rejects one with a missing
+   URL or signature, writes `SHA256SUMS`, attests build provenance for every
+   asset, uploads the files (manifests last), and publishes the draft as the
    latest release.
-4. **cleanup** deletes the draft and its tag if anything failed or was
+7. **cleanup** deletes the draft and its tag if anything failed or was
    cancelled before publishing.
 
 Only one release runs at a time; a merge that lands during a release waits
 for it and then releases everything merged since.
 
+### Release assets
+
+| Asset | Use |
+| --- | --- |
+| `DBM-macOS.dmg` | First install on macOS (signed, notarized, stapled) |
+| `DBM-macOS.zip` | Native updater on macOS |
+| `DBM.app.tar.gz` | Updates for installs of the former Tauri app on macOS |
+| `DBM-Windows-x64-setup.exe` | First install on Windows; also what former Tauri installs run to update |
+| `DBM-Windows-x64.exe` | Native updater on Windows (bare executable) |
+| `DBM-Linux-x86_64.AppImage` | Install on Linux, and updates for AppImage copies (native and former Tauri) |
+| `DBM-Linux-x64` | Native updater for a bare Linux executable |
+| `*.sig` | Updater signature for each updater artifact |
+| `native-latest.json` | Native updater manifest |
+| `latest.json` | Tauri-updater-format manifest, for installs of the former Tauri app |
+| `SHA256SUMS` | Checksums of every asset |
+
+The Windows installer needs no administrator rights: it installs to
+`%LOCALAPPDATA%\DBM\dbm.exe`, adds a Start menu shortcut, and registers an
+uninstaller. There is no `.deb` package.
+
 ### Versions
 
 Tags use the release date in New York time plus a daily revision:
-`v2026.09.24.1`, `v2026.09.24.2`, and so on. The packaged app version packs
-that into SemVer as `YEAR.MONTH.DAY×100+REVISION` (`2026.9.2401`), so versions
-always increase for the updater. `scripts/release.mjs` computes both and is
-covered by `npm run test:release`, which `npm run check` includes.
+`v2026.09.24.1`, `v2026.09.24.2`, and so on. `scripts/release.mjs` computes the
+tag, the display version (`2026.09.24.2`), and an app version that packs the
+date into SemVer as `YEAR.MONTH.DAY×100+REVISION` (`2026.9.2402`), so versions
+always increase for the updaters. It is covered by
+`node --test scripts/release.test.mjs`.
 
-### In-app updates
+The build number spreads the app version into one integer, `YYYYMMDDNN`
+(`2026092402`). It is compiled in as `DBM_NATIVE_BUILD` and, on macOS, written
+to `CFBundleVersion`; the display version is compiled in as
+`DBM_NATIVE_VERSION`. Development builds have neither.
 
-Official builds (compiled with `DBM_OFFICIAL_RELEASE=1`) check
-`https://github.com/joswayski/dbm/releases/latest/download/latest.json` 15
-seconds after launch and every 4 hours, and the top bar's **Check for
-updates** button checks on demand. When a newer release exists the button
-becomes **Update to …**; installing downloads the signed update and restarts.
-The macOS app, Windows installer, and AppImage update in place; `.deb` installs
-open the release page to download the new package. Local and development
-builds never check for updates.
+## In-app updates
+
+Release builds check
+`https://github.com/joswayski/dbm/releases/latest/download/native-latest.json`
+five seconds after launch and every 30 minutes, and the top bar's **Check for
+updates** button checks on demand. When the manifest lists a higher build
+number, the button becomes **Update to <version>**. Installing asks for
+confirmation, because unsaved query text and staged edits are discarded. It
+then downloads the platform's artifact, verifies its minisign signature
+against the public key in `crates/dbm-update`, swaps it in, and restarts.
+
+- **macOS:** the new bundle must also pass `codesign --verify`, and is swapped
+  in after DBM quits. The app must sit in a folder the user can write to, such
+  as `/Applications`.
+- **Windows:** the running executable is renamed aside and removed on the next
+  launch.
+- **Linux:** the running executable is replaced; a copy running from an
+  AppImage replaces the AppImage at `$APPIMAGE` instead, through the
+  `linux-x86_64-appimage` manifest entry.
+
+`native-latest.json` lists the build number, version text, notes, and each
+platform's URL and signature. `darwin-aarch64` and `darwin-x86_64` both point
+at the universal zip.
+
+Development builds never check for updates. Debug builds can test the updater
+against a local manifest by setting `DBM_UPDATE_MANIFEST` and
+`DBM_UPDATE_PUBLIC_KEY`; release builds ignore both.
+
+The update endpoint uses GitHub's latest release URL. Drafts are absent from
+it, so installed apps only see a release once the publish job has validated
+the manifests and made it the latest release.
+
+## Migrating from the Tauri app
+
+DBM previously shipped as a Tauri app, while the native apps were published on
+a separate `native-preview` channel. Installs from either move onto the native
+releases without reinstalling:
+
+- **Tauri installs** read `releases/latest/download/latest.json`. The release
+  workflow still writes that manifest in the Tauri updater's format, pointing
+  at `DBM.app.tar.gz` (macOS), `DBM-Windows-x64-setup.exe` (Windows), and the
+  AppImage (Linux), signed with the same updater key. Its version is always
+  newer than the last Tauri release (`2026.9.2801`). The Windows installer
+  installs into the Tauri app's folder with the same executable name and
+  uninstall key, and honors the Tauri updater's `/P` (silent) and `/R`
+  (reopen) arguments. Tauri `.deb` installs are not updated automatically;
+  switch them to the AppImage by hand.
+- **Native preview installs** read the `native-preview` release's manifest.
+  Each release run uploads its `native-latest.json` there too, so those copies
+  update to a release build, which reads `releases/latest` from then on.
+
+Both apps use `dbm-core`'s data directory and the keychain service
+`io.github.joswayski.dbm`, so saved connections, query history, and passwords
+carry over.
 
 ## Public-release gates
 
 | Platform or concern | Required before publishing | Current state |
 | --- | --- | --- |
 | macOS | Sign with a Developer ID Application certificate, notarize with Apple, staple the notarization ticket, and validate the DMG on a clean Mac | CI signs and notarizes the app, notarizes and staples the DMG, and verifies both; clean-Mac validation remains manual |
-| Windows | Authenticode-sign and RFC 3161-timestamp both `dbm.exe` and the NSIS installer with a publicly trusted code-signing identity | Not configured in CI |
-| Linux | Publish the `.deb` and AppImage with `SHA256SUMS` and GitHub build-provenance attestations | CI publishes `SHA256SUMS` and attests every asset |
-| All platforms | Tie every artifact to the tagged commit, reject an incomplete draft, and test installation on clean supported systems | CI builds from the merged commit, validates the updater manifest for all three platforms, and deletes incomplete drafts; clean-machine testing remains manual |
+| Windows | Authenticode-sign and RFC 3161-timestamp both `dbm.exe` and the NSIS installer with a publicly trusted code-signing identity | Not configured in CI; SmartScreen may warn on first run |
+| Linux | Publish the AppImage with `SHA256SUMS` and GitHub build-provenance attestations | CI publishes `SHA256SUMS` and attests every asset |
+| All platforms | Tie every artifact to the tagged commit, reject an incomplete draft, and test installation on clean supported systems | CI builds from the merged commit, validates both updater manifests, and deletes incomplete drafts; clean-machine testing remains manual |
 
-Tauri updater signatures, Apple signatures, Windows Authenticode signatures,
-and GitHub attestations solve different problems. One does not replace another:
+Updater signatures, Apple signatures, Windows Authenticode signatures, and
+GitHub attestations solve different problems. One does not replace another:
 
 - Apple and Authenticode signatures establish the operating-system publisher.
 - An updater signature lets an installed application authenticate an update.
@@ -77,7 +154,7 @@ and GitHub attestations solve different problems. One does not replace another:
 
 Create a GitHub environment named `release`. Release builds run from the `main`
 branch, so the environment's deployment branch rule must allow `main` (a rule
-limited to `v*` tags blocks every release). The build job references this
+limited to `v*` tags blocks every release). The build jobs reference this
 environment to access signing credentials.
 
 Keep private keys and passwords in environment secrets. Store non-secret Azure
@@ -86,9 +163,13 @@ exported certificates, or temporary signing files.
 
 ## Updater signing
 
-DBM uses a dedicated Tauri updater keypair; it does not reuse Captures' key.
-The updater public key is committed in `tauri.conf.json`. Add these private
-values to the `release` environment:
+DBM uses a dedicated updater keypair (a minisign key, the format the Tauri
+updater used); it does not reuse Captures' key. The public key is committed in
+`crates/dbm-update/src/lib.rs`. It is the key the Tauri app shipped with, so
+Tauri installs accept these updates too. The secrets keep their Tauri-era
+names; the workflow passes them to
+`tools/dbm-sign` as `DBM_UPDATE_SIGNING_KEY` and
+`DBM_UPDATE_SIGNING_KEY_PASSWORD`.
 
 | Secret | Value |
 | --- | --- |
@@ -99,18 +180,6 @@ Back up the private key and its password separately in encrypted storage.
 Losing the private key prevents every installed DBM release from authenticating
 future updates. Do not replace the public key after shipping unless an existing
 trusted release first implements a deliberate key rotation.
-
-The workflow injects the release version into the packaged app, creates and signs updater artifacts for macOS, Windows,
-and AppImage, and generates `latest.json`. A final job rejects a manifest that
-does not contain matching signed entries for all three platforms. Local builds
-use `tauri.local.conf.json` and omit updater artifacts unless an updater private
-key is explicitly supplied.
-
-The update endpoint uses GitHub's latest release URL. Drafts are absent from
-it, so installed apps only see a release once the publish job has validated
-the manifest and made it the latest release. AppImage installations can update
-in place; `.deb` installations open the matching GitHub Release for a manual
-package update.
 
 ## macOS signing and notarization
 
@@ -147,21 +216,20 @@ its output.
 
 The workflow decodes the certificate and API key only into the runner's
 temporary directory, imports the certificate into a temporary keychain,
-selects the `Developer ID Application` identity, and lets Tauri sign, notarize,
-and staple the app. It then separately notarizes and staples the final DMG,
-replaces the initially uploaded DMG with that final artifact, and fails when
-any credential or validation is missing.
+selects the `Developer ID Application` identity, and passes it to `build.sh`
+as `DBM_SIGNING_IDENTITY`. It then notarizes and staples the app, builds the
+DMG, and signs, notarizes, and staples that too. The job fails when any
+credential or validation is missing.
 
-Before publishing, verify the signature, Gatekeeper assessment, and stapled
-ticket:
+To check a downloaded release by hand:
 
 ```sh
 codesign --verify --deep --strict --verbose=2 DBM.app
 spctl --assess --type execute --verbose=2 DBM.app
 xcrun stapler validate DBM.app
-codesign --verify --strict --verbose=2 DBM.dmg
-spctl --assess --type open --context context:primary-signature --verbose=2 DBM.dmg
-xcrun stapler validate DBM.dmg
+codesign --verify --strict --verbose=2 DBM-macOS.dmg
+spctl --assess --type open --context context:primary-signature --verbose=2 DBM-macOS.dmg
+xcrun stapler validate DBM-macOS.dmg
 ```
 
 Also install the DMG on a clean supported Mac and launch the installed copy
@@ -210,26 +278,25 @@ profile can serve both DBM and Captures.
 | `AZURE_ARTIFACT_SIGNING_ACCOUNT` | Artifact Signing account name |
 | `AZURE_ARTIFACT_SIGNING_PROFILE` | Public Trust certificate profile name |
 
-The Windows release job must request `id-token: write`, authenticate to Azure
-with OIDC, and integrate Artifact Signing with Tauri so that both the
-application executable and the final NSIS installer are signed. Sign with
-SHA-256 and use the Microsoft RFC 3161 timestamp service. Timestamping is a
-release requirement because Artifact Signing certificates are intentionally
-short-lived.
+The Windows jobs must request `id-token: write`, authenticate to Azure with
+OIDC, and sign both the executable (before it is packaged into the installer
+and before its updater signature is written) and the final NSIS installer.
+Sign with SHA-256 and use the Microsoft RFC 3161 timestamp service.
+Timestamping is a release requirement because Artifact Signing certificates are
+intentionally short-lived.
 
 Validate both files before upload:
 
 ```powershell
-Get-AuthenticodeSignature .\dbm.exe |
+Get-AuthenticodeSignature .\DBM-Windows-x64.exe |
   Format-List Status, StatusMessage, SignerCertificate, TimeStamperCertificate
 
-Get-AuthenticodeSignature .\DBM_*_x64-setup.exe |
+Get-AuthenticodeSignature .\DBM-Windows-x64-setup.exe |
   Format-List Status, StatusMessage, SignerCertificate, TimeStamperCertificate
 ```
 
 Both results must report `Valid`, include the expected publisher, and include a
-timestamp. Test the installer on a clean Windows 11 system and confirm the UAC
-dialog displays the expected verified publisher.
+timestamp. Test the installer on a clean Windows 11 system.
 
 If Microsoft Artifact Signing is unavailable, use a publicly trusted
 OV/EV code-signing certificate from a certificate authority. Follow that
@@ -240,46 +307,30 @@ exportable `.pfx` is permitted.
 
 Linux has no single platform-wide publisher certificate comparable to Apple
 Developer ID or Windows Authenticode. For DBM's direct GitHub Release downloads,
-the publication gate is verifiable integrity and provenance. GitHub
-attestations apply to every platform, so generate them for the macOS and
-Windows artifacts as well:
+the publication gate is verifiable integrity and provenance. The release
+workflow builds every artifact from the tagged commit, writes `SHA256SUMS`
+over the final assets, and attests build provenance for all of them with
+`actions/attest-build-provenance` (the publish job grants `id-token: write`
+and `attestations: write`).
 
-1. Build every release artifact only in the release workflow for the tagged
-   commit.
-2. Generate `SHA256SUMS` over the final artifacts selected for upload.
-3. Generate a GitHub artifact attestation for the DMG, NSIS installer, `.deb`,
-   AppImage, and checksum manifest.
-4. Upload the packages and checksum manifest, then confirm GitHub can retrieve
-   and verify each artifact's attestation before making the draft public.
-5. Verify the packages from a clean Ubuntu system:
+Verify a download on a clean Ubuntu system:
 
-   ```sh
-   sha256sum --check SHA256SUMS
-   gh attestation verify ./DBM_VERSION_amd64.deb --repo joswayski/dbm
-   gh attestation verify ./DBM_VERSION_amd64.AppImage --repo joswayski/dbm
-   sudo apt install ./DBM_VERSION_amd64.deb
-   chmod +x ./DBM_VERSION_amd64.AppImage
-   ./DBM_VERSION_amd64.AppImage
-   ```
-
-The attestation job must grant `id-token: write` and `attestations: write` and
-use GitHub's official attestation action (`actions/attest-build-provenance`).
+```sh
+sha256sum --check --ignore-missing SHA256SUMS
+gh attestation verify ./DBM-Linux-x86_64.AppImage --repo joswayski/dbm
+chmod +x ./DBM-Linux-x86_64.AppImage
+./DBM-Linux-x86_64.AppImage
+```
 
 An embedded GPG signature may also be added to the AppImage, but AppImage does
 not automatically verify it. Do not use an embedded AppImage signature as a
 replacement for checksums and build provenance.
 
-If DBM later operates an APT repository, that repository must publish signed
-`InRelease` metadata or `Release` plus `Release.gpg`. Distribute the repository
-public key through an authenticated channel and configure users with a
-repository-specific keyring and `signed-by=`. Signing a standalone `.deb` is
-not a substitute for signing APT repository metadata.
-
 ## Promoting to a public release
 
 Automatic releases skip the checks below. Before recommending DBM to others:
 
-1. Configure Windows Authenticode signing in the build job.
+1. Configure Windows Authenticode signing in the build jobs.
 2. Perform the clean-machine installation checks for macOS, Windows, and
    Ubuntu against a published release.
 3. Verify `SHA256SUMS` and `gh attestation verify` for each downloaded
@@ -289,62 +340,8 @@ Automatic releases skip the checks below. Before recommending DBM to others:
 
 - [Apple: Developer ID certificates](https://developer.apple.com/help/account/certificates/create-developer-id-certificates)
 - [Apple: notarizing macOS software](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution)
-- [Tauri: macOS code signing](https://v2.tauri.app/distribute/sign/macos/)
-- [Tauri: updater](https://v2.tauri.app/plugin/updater/)
 - [Microsoft: set up Artifact Signing](https://learn.microsoft.com/azure/artifact-signing/quickstart)
 - [Microsoft: Artifact Signing integrations](https://learn.microsoft.com/azure/artifact-signing/how-to-signing-integrations)
 - [Azure: Artifact Signing GitHub Action](https://github.com/Azure/artifact-signing-action)
-- [Tauri: Windows code signing](https://v2.tauri.app/distribute/sign/windows/)
 - [GitHub: artifact attestations](https://docs.github.com/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations)
-- [Tauri: Linux code signing](https://v2.tauri.app/distribute/sign/linux/)
-- [Debian: package and repository signing](https://www.debian.org/doc/manuals/securing-debian-manual/deb-pack-sign.en.html)
-
-## Native preview channel
-
-The native apps (AppKit on macOS, egui on Windows and Linux) ship separately
-from the Tauri release, through one rolling pre-release tagged
-`native-preview`. `.github/workflows/native-preview.yml` runs on every merge to
-`main` that touches `apps/native/`, `crates/`, or the Cargo manifests, and on
-manual dispatch. It uses the same `release` environment secrets as the Tauri
-release; no new secrets are needed.
-
-- **Build number:** the workflow's run number, compiled in as
-  `DBM_NATIVE_BUILD` and written to the app bundle's `CFBundleVersion`.
-  Development builds have none and never check for updates.
-- **macOS:** `build.sh` (with `DBM_UNIVERSAL=1`) builds one universal app
-  for Apple Silicon and Intel, then signs the bridge dylib and the app with the
-  Developer ID and the hardened runtime. The app is notarized and stapled, zipped for
-  the updater (`DBM-Native-macOS.zip`), and packaged into a signed, notarized,
-  stapled `DBM-Native-macOS.dmg` for first installs. Gatekeeper opens it
-  without a warning.
-- **Windows and Linux:** the release `dbm-workbench` executables, published as
-  `DBM-Native-Windows-x64.exe` and `DBM-Native-Linux-x64`. Linux is also
-  packaged as `DBM-Native-x86_64.AppImage` (`apps/native/workbench/appimage.sh`);
-  a copy running from the AppImage updates the image itself, through the
-  `linux-x86_64-appimage` manifest entry. The Windows build is
-  not Authenticode-signed yet, so SmartScreen may still warn on first run.
-- **Updater signatures:** every updater artifact is signed with the Tauri
-  updater key (`npx tauri signer sign`). `crates/dbm-update` verifies it
-  against the public key from `tauri.conf.json` before installing anything.
-- **Manifest:** `native-latest.json` lists the build number, version text,
-  notes (the merge commit's subject), and each platform's URL and signature.
-  `darwin-aarch64` and `darwin-x86_64` both point at the universal zip.
-  The workflow uploads the binaries first and the manifest last.
-
-Installed native builds check the manifest five seconds after launch and every
-30 minutes. The top bar then offers **Update to build N**. Installing asks for
-confirmation, because unsaved query text and staged edits are discarded. It
-then downloads and verifies the build, swaps it in, and restarts.
-
-- On macOS the new bundle must also pass `codesign --verify`. The app must sit
-  in a folder the user can write to, such as `/Applications`.
-- On Windows the running executable is renamed aside and removed on the next
-  launch.
-
-The channel never becomes the latest release, so the Tauri app's updater, which
-reads `releases/latest/download/latest.json`, is unaffected.
-
-The first native preview must be installed by hand from the `native-preview`
-release page; later builds arrive automatically. Debug builds can test the
-updater against a local channel by setting `DBM_UPDATE_MANIFEST` and
-`DBM_UPDATE_PUBLIC_KEY`; release builds ignore both.
+- [Minisign](https://jedisct1.github.io/minisign/)

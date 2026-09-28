@@ -9,14 +9,12 @@
 
 ## Repository map
 
-- `apps/desktop` contains the Tauri desktop application (`@dbm/desktop`) and its React UI.
-- `apps/desktop/ui/src` is the React frontend (Vite, Zustand, CodeMirror SQL editor).
-- `apps/desktop/src-tauri/src` contains the Tauri command shell and updates; `crates/dbm-core` owns database adapters, sessions, keyring, and local SQLite storage.
-- `apps/native` contains development-only Swift/AppKit + Rust C ABI (macOS) and Rust egui/wgpu (Windows/Linux) hosts. The egui host has its own Cargo workspace. Tauri remains shipping on all platforms; see `docs/native.md` for required parity and acceptance gaps.
-- `docs/` holds features, development setup, releases (signing, notarization, publishing), the design system, and screenshots.
-- `scripts` contains build and install helpers.
-- There is no separate monorepo package for the React UI; it lives under `apps/desktop`.
-- UI calls Tauri through `commands.ts`. The Vite browser preview uses in-memory mocks in that module so layout work does not require Tauri.
+- `apps/native/macos` is the macOS app (Swift/AppKit), built by `build.sh`; it calls Rust through the C ABI in `apps/native/bridge`.
+- `apps/native/workbench` is the Windows and Linux app (Rust egui/wgpu) with its own Cargo workspace; `apps/native/windows` holds its installer, `apps/native/icons` the app icons.
+- `crates/dbm-core` owns database adapters, sessions, keyring, and local SQLite storage; `crates/dbm-update` is the self-updater; `tools/dbm-sign` signs release artifacts.
+- `docs/` holds features, development setup, releases (signing, notarization, publishing), the native architecture, the design system, and screenshots.
+- `scripts/release.mjs` picks release versions and notes for the release workflow.
+- The Tauri/React app was removed; its installs update onto the native apps through `latest.json` (see `docs/releases.md`). Keep that path working.
 
 ## Working conventions
 
@@ -31,7 +29,7 @@
 
 ## Visual design
 
-- DBM uses the Graphite design system (`docs/design-system.md`): neutral graphite surfaces (`--bg`, `--chrome`, `--sidebar`, `--control`), hairline borders, Geist / Geist Mono (bundled, never fetched at runtime), and a system-blue accent (`--accent`, filled as `--accent-strong`) for focus, selection, and the single primary action. Keep `styles.css` tokens and the doc in sync.
+- DBM uses the Graphite design system (`docs/design-system.md`): neutral graphite surfaces, hairline borders, Geist / Geist Mono (bundled, never fetched at runtime), and a system-blue accent for focus, selection, and the single primary action. Keep the AppKit and egui themes and the doc in sync.
 - Connection identity is multi-color: each profile has its own color for sidebar, tabs, and main-pane theming. Do not force a single accent across all connections.
 - Establish hierarchy with typography, spacing, and dense-but-readable layout before adding color. Prefer restrained shadows, small corner radii, and concise UI copy.
 - Preserve accessible contrast on dark surfaces. State colors keep stable meanings: `--modified` for staged edits, `--danger` for staged deletes and destructive actions, `--success` for success (and future inserts).
@@ -54,20 +52,17 @@
 
 ## Validation
 
-- Run `npm run check` for the default desktop UI gate (typecheck, lint, Vitest).
-- For Rust changes, also run `cargo fmt --all -- --check`, `cargo test --workspace`, and `cargo clippy --workspace --all-targets -- -D warnings` when practical.
+- For Rust changes, run `cargo fmt --all -- --check`, `cargo test --workspace`, and `cargo clippy --workspace --all-targets -- -D warnings`, and the same three with `--manifest-path apps/native/workbench/Cargo.toml` for the egui app.
 - Common local commands:
 
   ```sh
-  npm install
   cargo test --workspace
-  npm run check          # typecheck + lint + unit tests (desktop UI)
-  npm run test           # UI tests only
-  npm run dev            # Tauri dev
-  npm run build          # native build (+ install/launch on macOS by default)
+  cargo run --manifest-path apps/native/workbench/Cargo.toml --release -- --demo   # Windows/Linux app, fixture data
+  bash apps/native/macos/build.sh && open target/native/DBM.app                    # macOS app
+  node --test scripts/release.test.mjs                                             # release versioning
   ```
 
-- UI tests use Vitest + Testing Library under `apps/desktop/ui/src/*.test.tsx`.
+- The AppKit app can only be built on macOS; say so when a change to it was not built.
 - Report exactly which checks ran and any checks that could not run. Do not wait on CI unless asked; the maintainer will report failures.
 
 ## Pull requests

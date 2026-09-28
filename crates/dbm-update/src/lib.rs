@@ -1,11 +1,11 @@
-//! Self-updates for the native DBM preview apps.
+//! Self-updates for the native DBM apps.
 //!
-//! The release workflow publishes every native build to one rolling GitHub
-//! pre-release, `native-preview`, with a `native-latest.json` manifest. Each
-//! artifact is signed with the same minisign key as the Tauri app's updater
-//! (`tauri signer sign`), so installed copies only accept files produced by the
-//! release workflow. The manifest itself is not trusted: an artifact whose
-//! signature does not verify against [`PUBLIC_KEY`] is rejected.
+//! The release workflow publishes every build as the latest GitHub release,
+//! with a `native-latest.json` manifest. Each artifact is signed with the
+//! release updater key (`tools/dbm-sign`), so installed copies only accept
+//! files produced by the release workflow. The manifest itself is not trusted:
+//! an artifact whose signature does not verify against [`PUBLIC_KEY`] is
+//! rejected.
 
 use std::collections::BTreeMap;
 use std::io::Read;
@@ -15,21 +15,30 @@ use std::time::Duration;
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 
-/// The channel's manifest. The rolling tag keeps this URL stable.
+/// The latest release's manifest.
 pub const MANIFEST_URL: &str =
-    "https://github.com/joswayski/dbm/releases/download/native-preview/native-latest.json";
+    "https://github.com/joswayski/dbm/releases/latest/download/native-latest.json";
 
-/// The Tauri updater's public key (`plugins.updater.pubkey` in
-/// `apps/desktop/src-tauri/tauri.conf.json`): base64 of a minisign public key.
+/// The release updater public key: base64 of a minisign public key. It is the
+/// key the former Tauri app shipped with, so its installs accept native builds.
 pub const PUBLIC_KEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDc4QkFEMUU0MTIxREI1NjcKUldSbnRSMFM1Tkc2ZUNGYnNSRVhka2hIUTE3ak1BVVJyZTFxaVBTZ0UrWFk0c2VhVFpiWFdHenUK";
 
 /// Downloads larger than this are refused.
 const MAX_DOWNLOAD_BYTES: u64 = 512 * 1024 * 1024;
 
-/// This build's number on the preview channel, set by the release workflow
-/// through `DBM_NATIVE_BUILD`. Development builds have none and never update.
+/// This build's number, set by the release workflow through `DBM_NATIVE_BUILD`
+/// (the release date and revision, e.g. 2026092802). Development builds have
+/// none and never update.
 pub fn current_build() -> Option<u64> {
     option_env!("DBM_NATIVE_BUILD").and_then(|build| build.trim().parse().ok())
+}
+
+/// This build's release name (e.g. "2026.09.28.2"), set through
+/// `DBM_NATIVE_VERSION`; falls back to the build number.
+pub fn current_version() -> Option<String> {
+    option_env!("DBM_NATIVE_VERSION")
+        .map(str::to_owned)
+        .or_else(|| current_build().map(|build| format!("build {build}")))
 }
 
 /// The manifest key for this operating system and architecture.
@@ -53,7 +62,7 @@ pub const LINUX_APPIMAGE: &str = "linux-x86_64-appimage";
 pub struct Manifest {
     /// Monotonic build number; newer builds have larger numbers.
     pub build: u64,
-    /// Human-readable version, e.g. "Preview build 42 (abc1234)".
+    /// Human-readable version, e.g. "2026.09.28.2".
     pub version: String,
     pub notes: String,
     pub platforms: BTreeMap<String, Artifact>,
@@ -62,7 +71,7 @@ pub struct Manifest {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct Artifact {
     pub url: String,
-    /// `tauri signer sign` output: base64 of a minisign signature file.
+    /// `tools/dbm-sign` output: base64 of a minisign signature file.
     pub signature: String,
 }
 
@@ -118,7 +127,7 @@ pub fn check_platform(current: u64, platform: &str) -> Result<Option<Available>,
     Ok(select(&manifest, current, platform))
 }
 
-/// Verifies `data` against a `tauri signer` signature and [`PUBLIC_KEY`].
+/// Verifies `data` against a `tools/dbm-sign` signature and [`PUBLIC_KEY`].
 pub fn verify(data: &[u8], signature: &str) -> Result<(), String> {
     verify_with(
         data,
@@ -228,7 +237,7 @@ mod tests {
         assert!(minisign_verify::PublicKey::decode(&text).is_ok());
     }
 
-    /// Signs like `tauri signer sign`: base64 of the minisign files.
+    /// Signs like `tools/dbm-sign`: base64 of the minisign files.
     fn signed(data: &[u8]) -> (String, String) {
         let pair = minisign::KeyPair::generate_unencrypted_keypair().unwrap();
         let public = pair.pk.to_box().unwrap().to_string();

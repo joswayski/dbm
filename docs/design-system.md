@@ -2,9 +2,11 @@
 
 Graphite is DBM's visual language: neutral graphite surfaces, a system-blue
 accent, dense but readable data, and native desktop idioms (source-list
-sidebar, segmented controls, a row inspector). It is the reference for the
-current Tauri UI (`apps/desktop/ui/src/styles.css`) and for future native
-clients. When a token changes, update both this file and `styles.css`.
+sidebar, segmented controls, a row inspector). It is the reference for both
+native apps. The tokens are defined in `enum Graphite` in
+`apps/native/macos/Sources/Theme.swift` (AppKit) and in
+`apps/native/workbench/src/theme.rs` (egui). When a token changes, update this
+file and both theme files.
 
 ## Principles
 
@@ -18,9 +20,13 @@ clients. When a token changes, update both this file and `styles.css`.
   accent.
 - **Safe by default.** Writes are staged, visible in the grid, summarized in the
   pending-changes bar, and applied only on an explicit Save.
-- **Quiet motion.** 90–180 ms fades; honor `prefers-reduced-motion`.
+- **Quiet motion.** 90–180 ms fades; honor the system's reduce-motion setting.
 
 ## Color tokens
+
+Token names below are the design names; the theme files use the same names in
+each language's case (`--accent-strong` is `accentStrong` in Swift and
+`ACCENT_STRONG` in Rust).
 
 | Token | Value | Use |
 | --- | --- | --- |
@@ -52,11 +58,11 @@ Connection palette offered in the profile editor: `#4c9aff`, `#ff9f43`,
 
 ## Typography
 
-- UI: **Geist** (bundled via `@fontsource-variable/geist`, OFL 1.1), falling back
-  to the platform system font.
-- Data and code: **Geist Mono** (`@fontsource-variable/geist-mono`), tabular
-  numerals in grids.
-- Fonts ship inside the app bundle; nothing is fetched at runtime.
+- UI: **Geist** (OFL 1.1), falling back to the platform system font.
+- Data and code: **Geist Mono**, tabular numerals in grids.
+- The font files live in `apps/native/workbench/assets` and ship inside both
+  apps (`build.sh` copies them into the macOS bundle); nothing is fetched at
+  runtime.
 
 | Role | Size / weight |
 | --- | --- |
@@ -67,7 +73,7 @@ Connection palette offered in the profile editor: `#4c9aff`, `#ff9f43`,
 | Grid cells, inspector values | 12 mono |
 | Column type, metadata | 11 mono |
 
-Native clients may substitute SF Pro / SF Mono (macOS) and Segoe UI Variable /
+A host may substitute SF Pro / SF Mono (macOS) or Segoe UI Variable /
 Cascadia Mono (Windows) if matching Geist is impractical; keep the size scale.
 
 ## Spacing, radius, elevation
@@ -122,8 +128,9 @@ Cascadia Mono (Windows) if matching Geist is impractical; keep the size scale.
   Toggle it from the toolbar.
 - **Pending-changes bar:** amber dot, count, per-kind chips, Discard (secondary)
   and Save changes (primary).
-- **Icons:** 24-px-grid stroke glyphs at 1.6 px (`Icon.tsx`). Native clients map
-  them to SF Symbols / Segoe Fluent Icons.
+- **Icons:** stroke glyphs on a 16-pt grid at a 1.5 pt line, drawn by
+  `apps/native/macos/Sources/Icons.swift` and
+  `apps/native/workbench/src/icons.rs`.
 
 ## Designed but not implemented yet
 

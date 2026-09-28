@@ -131,7 +131,7 @@ impl Updates {
             State::Idle => "Check for updates".into(),
             State::Checking => "Checking…".into(),
             State::UpToDate => "Up to date".into(),
-            State::Available(update) => format!("Update to build {}", update.build),
+            State::Available(update) => format!("Update to {}", update.version),
             State::Installing => "Installing…".into(),
             State::Failed(_) => "Retry update".into(),
         }
@@ -142,7 +142,10 @@ impl Updates {
             State::Available(update) if !update.notes.is_empty() => update.notes.clone(),
             State::Available(update) => update.version.clone(),
             State::Failed(message) => message.clone(),
-            _ => format!("Installed build {}", self.current.unwrap_or(0)),
+            _ => format!(
+                "Installed {}",
+                dbm_update::current_version().unwrap_or_default()
+            ),
         }
     }
 }

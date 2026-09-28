@@ -1,18 +1,20 @@
 # Bundled Geist fonts
 
-These TTF files are the existing frontend's Latin variable Geist/Geist Mono
-fonts, decompressed from WOFF2 without changing glyphs or names. OFL licenses
-are included alongside them. No fonts are fetched at runtime.
+These TTF files are the Latin variable Geist/Geist Mono fonts from
+`@fontsource-variable/geist` and `@fontsource-variable/geist-mono`, decompressed
+from WOFF2 without changing glyphs or names. OFL licenses are included
+alongside them. No fonts are fetched at runtime.
 
-Regenerate from the repository root after `npm ci`:
+To regenerate, download those packages' `files/<name>-latin-wght-normal.woff2`
+into this folder, then:
 
 ```sh
 uv run --with fonttools --with brotli python -c '
 from fontTools.ttLib import TTFont
 for name in ("geist", "geist-mono"):
-    font = TTFont(f"node_modules/@fontsource-variable/{name}/files/{name}-latin-wght-normal.woff2")
+    font = TTFont(f"{name}-latin-wght-normal.woff2")
     font.flavor = None
-    font.save(f"apps/native/workbench/assets/{name}.ttf")
+    font.save(f"{name}.ttf")
 '
 ```
 

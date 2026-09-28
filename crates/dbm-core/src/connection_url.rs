@@ -1,5 +1,4 @@
-//! Connection URL import shared by the native profile editors, mirroring
-//! `apps/desktop/ui/src/connectionUrl.ts`.
+//! Connection URL import shared by the native profile editors.
 
 use percent_encoding::percent_decode_str;
 use serde::Serialize;

@@ -1,5 +1,5 @@
 //! Stroke icons painted on a 16 px grid, matching the 1.6 px glyphs in the
-//! desktop app's `Icon.tsx` without depending on font coverage.
+//! AppKit app's `Icons.swift` without depending on font coverage.
 
 use eframe::egui::{self, Color32, Pos2, Rect, Response, Sense, Shape, Stroke, Vec2};
 
