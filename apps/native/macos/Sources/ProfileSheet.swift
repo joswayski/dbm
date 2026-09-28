@@ -78,17 +78,22 @@ final class ProfileSheet: NSWindowController {
     private var color: String
     private let onTest: ([String: Any], @escaping (Error?) -> Void) -> Void
     private let onSave: ([String: Any], @escaping (Error?) -> Void) -> Void
+    private let onLoadURL: ([String: Any], @escaping (Result<Any, Error>) -> Void) -> Void
     private let onDelete: (() -> Void)?
 
     private let eyebrowLabel = eyebrow("")
     private let engineSegment = EngineSegment()
-    private let urlField = GSecureField("", placeholder: "")
+    private let urlField = GTextField("", mono: true)
+    private let importURLField = GTextField("", placeholder: "Paste a connection URL", mono: true)
     private let nameField = GTextField("")
     private let hostField = GTextField("")
     private let portField = GTextField("")
     private let usernameField = GTextField("")
     private let databaseField = GTextField("")
     private let passwordField = GSecureField("", placeholder: "")
+    private let plainPasswordField = GTextField("")
+    private let showURLPassword = NSButton(checkboxWithTitle: "Show password", target: nil, action: nil)
+    private lazy var passwordButton = GButton("Show", style: .secondary) { [weak self] in self?.togglePassword() }
     private let tlsPopup = GPopUp(items: ["Preferred", "Required", "Disabled"])
     private let caField = GTextField("", placeholder: "/path/to/root-ca.pem")
     private let readOnlyBox = NSButton(checkboxWithTitle: "Read-only profile (blocks GUI edits and mutations)", target: nil, action: nil)
@@ -102,13 +107,19 @@ final class ProfileSheet: NSWindowController {
     private lazy var saveButton = GButton("Save & connect", style: .primary) { [weak self] in self?.save() }
     private var busy = false
     private var deleteButton: GButton?
+    private var importRow: NSStackView?
+    private var passwordWasEdited = false
+    private var passwordWasLoaded = false
+    private var passwordLoadError: Error?
 
     init(profile: Profile?, onTest: @escaping ([String: Any], @escaping (Error?) -> Void) -> Void,
+         onLoadURL: @escaping ([String: Any], @escaping (Result<Any, Error>) -> Void) -> Void,
          onSave: @escaping ([String: Any], @escaping (Error?) -> Void) -> Void, onDelete: (() -> Void)?) {
         original = profile
         engine = profile?.engine ?? .postgres
         color = profile?.colorHex ?? Graphite.defaultConnectionColor
         self.onTest = onTest
+        self.onLoadURL = onLoadURL
         self.onSave = onSave
         self.onDelete = onDelete
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 640), styleMask: [.titled], backing: .buffered, defer: false)
@@ -119,6 +130,7 @@ final class ProfileSheet: NSWindowController {
         super.init(window: window)
         build()
         fill()
+        loadSavedPassword()
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -150,13 +162,16 @@ final class ProfileSheet: NSWindowController {
         header.alignment = .top
 
         engineSegment.onSelect = { [weak self] engine in self?.setEngine(engine) }
-        let importButton = GButton("Import URL", style: .secondary) { [weak self] in self?.importURL() }
-        importButton.isEnabled = false
+        let importButton = GButton("Import URL", style: .secondary) { [weak self] in self?.toggleImportURL() }
+        let applyImportButton = GButton("Apply", style: .secondary) { [weak self] in self?.importURL() }
+        applyImportButton.isEnabled = false
+        urlField.isEditable = false
+        urlField.isSelectable = true
         // Return imports; pasting a URL imports it straight away.
-        urlField.behavior.onReturn = { [weak self] in self?.importURL() }
+        importURLField.behavior.onReturn = { [weak self] in self?.importURL() }
         var previousURL = ""
-        urlField.onChange = { [weak self, weak importButton] text in
-            importButton?.isEnabled = !text.trimmingCharacters(in: .whitespaces).isEmpty
+        importURLField.onChange = { [weak self, weak applyImportButton] text in
+            applyImportButton?.isEnabled = !text.trimmingCharacters(in: .whitespaces).isEmpty
             let pasted = NSApp.currentEvent?.modifierFlags.contains(.command) == true
                 && NSApp.currentEvent?.charactersIgnoringModifiers == "v"
             if pasted || (text.count - previousURL.count > 1 && text.contains("://")) { self?.importURL() }
@@ -167,10 +182,37 @@ final class ProfileSheet: NSWindowController {
             field.behavior.onReturn = { [weak self] in self?.save() }
             field.onCancel = { [weak self] in self?.dismiss() }
         }
-        passwordField.behavior.onReturn = { [weak self] in self?.save() }
+        for field in [passwordField as NSTextField, plainPasswordField as NSTextField] {
+            (field as? GSecureField)?.behavior.onReturn = { [weak self] in self?.save() }
+            (field as? GTextField)?.behavior.onReturn = { [weak self] in self?.save() }
+        }
         passwordField.behavior.onCancel = { [weak self] in self?.dismiss() }
-        urlField.behavior.onCancel = { [weak self] in self?.dismiss() }
+        plainPasswordField.onCancel = { [weak self] in self?.dismiss() }
+        importURLField.onCancel = { [weak self] in self?.dismiss() }
         let urlRow = hstack([urlField, importButton], spacing: 8)
+        let importEntry = hstack([importURLField, applyImportButton], spacing: 8)
+        importEntry.isHidden = true
+        importRow = importEntry
+        let copyButton = GButton("Copy URL", style: .secondary) { [weak self] in self?.copyURL() }
+        copyButton.toolTip = "Copy the current connection fields as a URL"
+        showURLPassword.target = self
+        showURLPassword.action = #selector(showURLPasswordChanged)
+        showURLPassword.attributedTitle = NSAttributedString(string: showURLPassword.title, attributes: [.font: Graphite.ui(11.5), .foregroundColor: Graphite.muted])
+        let copyRow = hstack([copyButton, showURLPassword, spacer()], spacing: 8)
+        let urlSection = vstack([urlRow, importEntry, copyRow], spacing: 6)
+        for row in [urlRow, importEntry, copyRow] {
+            row.widthAnchor.constraint(equalTo: urlSection.widthAnchor).isActive = true
+        }
+
+        plainPasswordField.isHidden = true
+        passwordField.onChange = { [weak self] text in self?.passwordChanged(text, source: self?.passwordField) }
+        plainPasswordField.onChange = { [weak self] text in self?.passwordChanged(text, source: self?.plainPasswordField) }
+        let passwordRow = hstack([passwordField, plainPasswordField, passwordButton], spacing: 8)
+
+        for field in [nameField, hostField, portField, usernameField, databaseField, caField] {
+            field.onChange = { [weak self] _ in self?.updateURLPreview() }
+        }
+        tlsPopup.onSelect = { [weak self] _ in self?.updateURLPreview() }
 
         let colorRow = hstack([], spacing: 0)
         for hex in Graphite.connectionColors {
@@ -214,12 +256,12 @@ final class ProfileSheet: NSWindowController {
         let form = vstack([
             header,
             field("Database engine", engineSegment, fill: false),
-            field("Connection URL", urlRow),
+            field("Connection URL", urlSection),
             field("Name", nameField),
             field("Connection color", colorRow, fill: false),
             pair(field("Host", hostField), field("Port", portField)),
             pair(labeledField(usernameLabel, usernameField), labeledField(databaseLabel, databaseField)),
-            pair(field("Password", passwordField), field("TLS", tlsPopup)),
+            pair(field("Password", passwordRow), field("TLS", tlsPopup)),
             field("CA certificate path (optional)", caField),
             readOnlyBox, feedbackBox, note, hstack(actions, spacing: 8),
         ], spacing: 12)
@@ -244,13 +286,14 @@ final class ProfileSheet: NSWindowController {
         usernameField.stringValue = original?.username ?? engine.presetUser
         databaseField.stringValue = original?.database ?? engine.defaults.database
         passwordField.placeholderAttributedString = NSAttributedString(
-            string: original == nil ? "Stored in OS keychain" : "Leave blank to keep saved password",
+            string: original == nil ? "Stored in OS keychain" : "Loading saved password…",
             attributes: [.font: Graphite.ui(12.5), .foregroundColor: Graphite.faint])
         tlsPopup.selectItem(withTitle: (original?.tlsMode ?? "preferred").capitalized)
         caField.stringValue = original?.caCertPath ?? ""
         readOnlyBox.state = original?.readOnly == true ? .on : .off
         updateEngineLabels()
         setColor(color)
+        updateURLPreview()
     }
 
     private func updateEngineLabels() {
@@ -273,6 +316,7 @@ final class ProfileSheet: NSWindowController {
         engine = next
         engineSegment.selectedEngine = next
         updateEngineLabels()
+        updateURLPreview()
     }
 
     private func setColor(_ hex: String) {
@@ -285,8 +329,99 @@ final class ProfileSheet: NSWindowController {
         setColor(customWell.color.cssHex)
     }
 
+    private func toggleImportURL() {
+        guard let importRow else { return }
+        importRow.isHidden.toggle()
+        if !importRow.isHidden { window?.makeFirstResponder(importURLField) }
+    }
+
+    private func togglePassword() {
+        let revealPlainText = plainPasswordField.isHidden
+        setPassword(passwordField.stringValue)
+        passwordField.isHidden.toggle()
+        plainPasswordField.isHidden = !revealPlainText
+        if revealPlainText { passwordButton.title = "Hide" } else { passwordButton.title = "Show" }
+        window?.makeFirstResponder(revealPlainText ? plainPasswordField : passwordField)
+    }
+
+    private func passwordChanged(_ text: String, source: NSTextField?) {
+        passwordWasEdited = true
+        if source === passwordField {
+            plainPasswordField.stringValue = text
+        } else {
+            passwordField.stringValue = text
+        }
+        updateURLPreview()
+    }
+
+    private func setPassword(_ password: String) {
+        passwordField.stringValue = password
+        plainPasswordField.stringValue = password
+    }
+
+    @objc private func showURLPasswordChanged() {
+        updateURLPreview()
+    }
+
+    private func formatURL(showPassword: Bool) -> Result<String, Error> {
+        Bridge.helper(["command": "formatConnectionUrl", "input": input, "show_password": showPassword]).flatMap { value in
+            guard let url = value as? String else {
+                return .failure(BridgeFailure(message: "Could not format the connection URL."))
+            }
+            return .success(url)
+        }
+    }
+
+    private func updateURLPreview() {
+        if original != nil && !passwordWasLoaded && !passwordWasEdited {
+            urlField.stringValue = passwordLoadError == nil ? "Loading connection URL…" : "Saved password could not be loaded."
+            return
+        }
+        switch formatURL(showPassword: showURLPassword.state == .on) {
+        case .success(let url): urlField.stringValue = url
+        case .failure(let error): urlField.stringValue = error.localizedDescription
+        }
+    }
+
+    /// The existing asynchronous URL command is intentionally used exactly once
+    /// for an editor: it is the only operation here that reads the keychain.
+    private func loadSavedPassword() {
+        guard original != nil else { return }
+        onLoadURL(input) { [weak self] result in
+            guard let self else { return }
+            defer {
+                self.passwordField.placeholderAttributedString = NSAttributedString(
+                    string: "Stored in OS keychain", attributes: [.font: Graphite.ui(12.5), .foregroundColor: Graphite.faint])
+                self.updateURLPreview()
+                if let error = self.passwordLoadError, !self.passwordWasEdited {
+                    self.show(error.localizedDescription, color: Graphite.danger)
+                }
+            }
+            switch result {
+            case .success(let value):
+                guard let url = value as? String else {
+                    self.passwordLoadError = BridgeFailure(message: "Could not load the saved password.")
+                    return
+                }
+                switch Helpers.parseConnectionURL(url) {
+                case .success(let parsed):
+                    self.passwordWasLoaded = true
+                    self.passwordLoadError = nil
+                    if !self.passwordWasEdited {
+                        self.setPassword(parsed["password"] as? String ?? "")
+                    }
+                    self.updateURLPreview()
+                case .failure(let error):
+                    self.passwordLoadError = error
+                }
+            case .failure(let error):
+                self.passwordLoadError = error
+            }
+        }
+    }
+
     private func importURL() {
-        let text = urlField.stringValue.trimmingCharacters(in: .whitespaces)
+        let text = importURLField.stringValue.trimmingCharacters(in: .whitespaces)
         guard !text.isEmpty else { return }
         switch Helpers.parseConnectionURL(text) {
         case .success(let imported):
@@ -299,9 +434,29 @@ final class ProfileSheet: NSWindowController {
             usernameField.stringValue = string(imported["username"])
             databaseField.stringValue = string(imported["defaultDatabase"])
             tlsPopup.selectItem(withTitle: string(imported["tlsMode"]).capitalized)
-            if let password = imported["password"] as? String { passwordField.stringValue = password }
+            setPassword(imported["password"] as? String ?? "")
+            passwordWasEdited = true
+            importRow?.isHidden = true
+            importURLField.stringValue = ""
             updateEngineLabels()
+            updateURLPreview()
             show("Connection URL imported. Review the details, then save and connect.", color: Graphite.accentText)
+        case .failure(let error):
+            show(error.localizedDescription, color: Graphite.danger)
+        }
+    }
+
+    private func copyURL() {
+        guard !busy else { return }
+        if original != nil && !passwordWasLoaded && !passwordWasEdited {
+            show(passwordLoadError?.localizedDescription ?? "The saved password is still loading.", color: Graphite.danger)
+            return
+        }
+        switch formatURL(showPassword: true) {
+        case .success(let url):
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(url, forType: .string)
+            show("URL copied.", color: Graphite.success)
         case .failure(let error):
             show(error.localizedDescription, color: Graphite.danger)
         }
@@ -317,7 +472,7 @@ final class ProfileSheet: NSWindowController {
             "ssh": original?.raw["ssh"] ?? NSNull(), "readOnly": readOnlyBox.state == .on,
         ]
         if let original { input["id"] = original.id }
-        if original == nil || !passwordField.stringValue.isEmpty { input["password"] = passwordField.stringValue }
+        if original == nil || passwordWasLoaded || passwordWasEdited { input["password"] = passwordField.stringValue }
         return input
     }
 

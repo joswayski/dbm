@@ -1,10 +1,93 @@
-//! Connection URL import shared by the native profile editors.
+//! Connection URL import and export shared by the native profile editors.
 
-use percent_encoding::percent_decode_str;
+use percent_encoding::{NON_ALPHANUMERIC, percent_decode_str, utf8_percent_encode};
 use serde::Serialize;
 use url::Url;
 
-use crate::models::{DatabaseEngine, TlsMode};
+use crate::models::{DatabaseEngine, SaveProfileInput, TlsMode};
+
+/// Formats editor settings without persisting or logging credentials. Passwords
+/// are supplied explicitly by the caller, never implicitly taken from the form.
+pub fn format_connection_url(
+    input: &SaveProfileInput,
+    password: Option<&str>,
+) -> Result<String, String> {
+    let profile = crate::demo::profile_from_input(input).map_err(|error| error.to_string())?;
+    let scheme = match profile.engine {
+        DatabaseEngine::Postgres => "postgresql",
+        DatabaseEngine::Mysql => "mysql",
+        DatabaseEngine::Redis if profile.tls_mode != TlsMode::Disabled => "rediss",
+        DatabaseEngine::Redis => "redis",
+    };
+    let encode = |value: &str| utf8_percent_encode(value, NON_ALPHANUMERIC).to_string();
+    let host = profile.host.trim_start_matches('[').trim_end_matches(']');
+    let host = if host.contains(':') {
+        format!("[{host}]")
+    } else {
+        host.to_owned()
+    };
+    let host = url::Host::parse(&host).map_err(|_| "Enter a valid connection host.".to_owned())?;
+    let mut authority = encode(&profile.username);
+    if let Some(password) = password.filter(|value| !value.is_empty()) {
+        authority.push(':');
+        authority.push_str(&encode(password));
+    }
+    if !authority.is_empty() {
+        authority.push('@');
+    }
+    let mut url = Url::parse(&format!(
+        "{scheme}://{authority}{host}:{}/{}",
+        profile.port,
+        encode(&profile.default_database)
+    ))
+    .map_err(|_| "Cannot create a URL from these connection settings.".to_owned())?;
+    match profile.engine {
+        DatabaseEngine::Postgres => {
+            url.query_pairs_mut().append_pair(
+                "sslmode",
+                match profile.tls_mode {
+                    TlsMode::Disabled => "disable",
+                    TlsMode::Preferred => "prefer",
+                    TlsMode::Required => "require",
+                },
+            );
+            if let Some(ca) = profile.ca_cert_path.as_deref() {
+                url.query_pairs_mut().append_pair("sslrootcert", ca);
+            }
+        }
+        DatabaseEngine::Mysql => {
+            url.query_pairs_mut().append_pair(
+                "ssl-mode",
+                match profile.tls_mode {
+                    TlsMode::Disabled => "DISABLED",
+                    TlsMode::Preferred => "PREFERRED",
+                    TlsMode::Required => "REQUIRED",
+                },
+            );
+            if let Some(ca) = profile.ca_cert_path.as_deref() {
+                url.query_pairs_mut().append_pair("ssl-ca", ca);
+            }
+        }
+        DatabaseEngine::Redis => {}
+    }
+    Ok(url.into())
+}
+
+/// The editor preview masks only the password; copying uses the full URL.
+pub fn display_connection_url(
+    input: &SaveProfileInput,
+    show_password: bool,
+) -> Result<String, String> {
+    let full = format_connection_url(input, input.password.as_deref())?;
+    if show_password || input.password.as_deref().is_none_or(str::is_empty) {
+        return Ok(full);
+    }
+    let mut url =
+        Url::parse(&full).map_err(|_| "Cannot display this connection URL.".to_owned())?;
+    url.set_password(Some("*******"))
+        .map_err(|_| "Cannot display this connection URL.".to_owned())?;
+    Ok(url.into())
+}
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -113,6 +196,101 @@ fn decode(value: &str, field: &str) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn input(engine: DatabaseEngine) -> SaveProfileInput {
+        SaveProfileInput {
+            id: None,
+            name: "Test".into(),
+            color: None,
+            engine,
+            host: "::1".into(),
+            port: 6543,
+            username: "a@b".into(),
+            default_database: "app/data ?#é".into(),
+            tls_mode: TlsMode::Required,
+            ca_cert_path: None,
+            ssh: None,
+            read_only: false,
+            password: Some("must not be included implicitly".into()),
+        }
+    }
+
+    #[test]
+    fn preview_masks_only_password_and_reveals_the_original() {
+        let mut input = input(DatabaseEngine::Postgres);
+        input.password = Some("p@ss:/?#% é".into());
+        assert_eq!(
+            display_connection_url(&input, false).unwrap(),
+            "postgresql://a%40b:*******@[::1]:6543/app%2Fdata%20%3F%23%C3%A9?sslmode=require"
+        );
+        assert_eq!(
+            display_connection_url(&input, true).unwrap(),
+            "postgresql://a%40b:p%40ss%3A%2F%3F%23%25%20%C3%A9@[::1]:6543/app%2Fdata%20%3F%23%C3%A9?sslmode=require"
+        );
+        input.engine = DatabaseEngine::Redis;
+        input.username.clear();
+        input.default_database = "3".into();
+        assert_eq!(
+            display_connection_url(&input, false).unwrap(),
+            "rediss://:*******@[::1]:6543/3"
+        );
+        input.password = Some(String::new());
+        assert_eq!(
+            display_connection_url(&input, false).unwrap(),
+            "rediss://[::1]:6543/3"
+        );
+    }
+
+    #[test]
+    fn exports_encoded_credentials_database_ipv6_and_tls() {
+        let input = input(DatabaseEngine::Postgres);
+        let url = format_connection_url(&input, Some("p@ss:/?#% é")).unwrap();
+        assert_eq!(
+            url,
+            "postgresql://a%40b:p%40ss%3A%2F%3F%23%25%20%C3%A9@[::1]:6543/app%2Fdata%20%3F%23%C3%A9?sslmode=require"
+        );
+        let imported = parse_connection_url(&url).unwrap();
+        assert_eq!(imported.password.as_deref(), Some("p@ss:/?#% é"));
+        assert_eq!(imported.default_database, "app/data ?#é");
+        assert_eq!(imported.host, "::1");
+        assert_eq!(
+            format_connection_url(&input, None).unwrap(),
+            "postgresql://a%40b@[::1]:6543/app%2Fdata%20%3F%23%C3%A9?sslmode=require"
+        );
+    }
+
+    #[test]
+    fn exports_engine_tls_options_and_rejects_invalid_hosts() {
+        let mut input = input(DatabaseEngine::Mysql);
+        input.host = "db.example.com".into();
+        input.username = "root".into();
+        input.default_database = "app".into();
+        for (mode, expected) in [
+            (TlsMode::Disabled, "DISABLED"),
+            (TlsMode::Preferred, "PREFERRED"),
+            (TlsMode::Required, "REQUIRED"),
+        ] {
+            input.tls_mode = mode;
+            assert_eq!(
+                format_connection_url(&input, None).unwrap(),
+                format!("mysql://root@db.example.com:6543/app?ssl-mode={expected}")
+            );
+        }
+        input.engine = DatabaseEngine::Redis;
+        input.username.clear();
+        input.default_database = "3".into();
+        assert_eq!(
+            format_connection_url(&input, Some("secret")).unwrap(),
+            "rediss://:secret@db.example.com:6543/3"
+        );
+        input.tls_mode = TlsMode::Disabled;
+        assert_eq!(
+            format_connection_url(&input, None).unwrap(),
+            "redis://db.example.com:6543/3"
+        );
+        input.host = "db.example.com/other".into();
+        assert!(format_connection_url(&input, None).is_err());
+    }
 
     #[test]
     fn imports_postgres_mysql_and_redis_urls() {

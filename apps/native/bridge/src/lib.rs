@@ -88,6 +88,10 @@ enum Request {
     TestProfile {
         input: SaveProfileInput,
     },
+    ConnectionUrl {
+        input: SaveProfileInput,
+        include_password: bool,
+    },
     Connect {
         profile_id: Uuid,
     },
@@ -163,6 +167,10 @@ enum Request {
     ParseConnectionUrl {
         url: String,
     },
+    FormatConnectionUrl {
+        input: SaveProfileInput,
+        show_password: bool,
+    },
     InlineDiff {
         before: String,
         after: String,
@@ -206,6 +214,14 @@ pub struct DbmBridgeSession {
 
 async fn dispatch(state: &AppState, request: Request) -> Result<Value, String> {
     match request {
+        Request::ConnectionUrl {
+            input,
+            include_password,
+        } => Ok(Value::String(
+            state
+                .connection_url(&input, include_password)
+                .map_err(message)?,
+        )),
         Request::ListProfiles {} => {
             serde_json::to_value(state.profile_summaries().map_err(message)?)
         }
@@ -229,7 +245,7 @@ async fn dispatch(state: &AppState, request: Request) -> Result<Value, String> {
         }
         Request::TestProfile { input } => {
             let profile = profile_from_input(&input).map_err(message)?;
-            let password = match input.password.filter(|value| !value.is_empty()) {
+            let password = match input.password {
                 Some(password) => Some(password),
                 None => input
                     .id
@@ -395,6 +411,12 @@ fn helper_value(request: Request) -> Result<Value, String> {
         Request::EditableText { value } => Ok(Value::String(editable_text(&value))),
         Request::Csv { columns, rows } => Ok(Value::String(csv_document(&columns, &rows))),
         Request::ParseConnectionUrl { url } => serde_json::to_value(parse_connection_url(&url)?),
+        Request::FormatConnectionUrl {
+            input,
+            show_password,
+        } => Ok(Value::String(
+            dbm_core::connection_url::display_connection_url(&input, show_password)?,
+        )),
         Request::ExportProgress { path } => Ok(EXPORT_PROGRESS
             .lock()
             .ok()
@@ -433,6 +455,19 @@ fn helper_value(request: Request) -> Result<Value, String> {
 /// Answers from the in-memory fixture. Exports and saves are refused.
 fn dispatch_demo(store: &mut DemoStore, request: Request) -> Result<Value, String> {
     match request {
+        Request::ConnectionUrl {
+            input,
+            include_password,
+        } => Ok(Value::String(
+            dbm_core::connection_url::format_connection_url(
+                &input,
+                if include_password {
+                    input.password.as_deref()
+                } else {
+                    None
+                },
+            )?,
+        )),
         Request::ListProfiles {} => serde_json::to_value(store.profile_summaries()),
         Request::SaveProfile { input } => {
             serde_json::to_value(store.save_profile(&input).map_err(message)?)
@@ -685,6 +720,32 @@ fn response_json(pointer: *mut c_char) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn connection_url_helper_separates_masked_preview_from_full_copy() {
+        for (show_password, expected) in [
+            (
+                false,
+                "postgresql://me:*******@db.local:5432/app?sslmode=require",
+            ),
+            (
+                true,
+                "postgresql://me:p%40ss@db.local:5432/app?sslmode=require",
+            ),
+        ] {
+            let request: Request = serde_json::from_value(json!({
+                "command": "formatConnectionUrl", "show_password": show_password,
+                "input": { "name": "Test", "host": "db.local", "port": 5432,
+                    "username": "me", "defaultDatabase": "app", "password": "p@ss",
+                    "tlsMode": "required" }
+            }))
+            .unwrap();
+            assert_eq!(
+                helper_value(request).unwrap(),
+                Value::String(expected.into())
+            );
+        }
+    }
 
     #[test]
     fn null_arguments_return_owned_errors_and_null_frees_are_safe() {

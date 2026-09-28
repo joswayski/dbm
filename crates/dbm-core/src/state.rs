@@ -44,6 +44,27 @@ impl AppState {
             .ok_or(AppError::ProfileNotFound)
     }
 
+    pub fn connection_url(
+        &self,
+        input: &SaveProfileInput,
+        include_password: bool,
+    ) -> AppResult<String> {
+        let password = if include_password {
+            match &input.password {
+                Some(password) => Some(password.clone()),
+                None => input
+                    .id
+                    .map(|id| self.credentials.get_password(id))
+                    .transpose()?
+                    .flatten(),
+            }
+        } else {
+            None
+        };
+        crate::connection_url::format_connection_url(input, password.as_deref())
+            .map_err(AppError::InvalidInput)
+    }
+
     pub fn profile_summaries(&self) -> AppResult<Vec<ProfileSummary>> {
         Ok(self
             .store

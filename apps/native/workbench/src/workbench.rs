@@ -4,7 +4,9 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use dbm_core::connection_url::{engine_defaults, parse_connection_url};
+use dbm_core::connection_url::{
+    display_connection_url, engine_defaults, format_connection_url, parse_connection_url,
+};
 use dbm_core::models::{
     ConnectionProfile, DatabaseEngine, MutationBatch, QueryHistoryEntry, QueryRequest,
     QueryResponse, RowMutation, SaveProfileInput, SchemaNode, TablePageRequest, TlsMode,
@@ -109,6 +111,12 @@ struct ProfileForm {
     password: String,
     read_only: bool,
     url: String,
+    importing_url: bool,
+    show_url_password: bool,
+    show_password: bool,
+    password_loaded: bool,
+    password_edited: bool,
+    password_load_failed: bool,
     feedback: Option<(FeedbackKind, String)>,
     /// Save & connect tests first, then saves once the test succeeds.
     saving: bool,
@@ -133,6 +141,12 @@ impl ProfileForm {
             password: String::new(),
             read_only: false,
             url: String::new(),
+            importing_url: false,
+            show_url_password: false,
+            show_password: false,
+            password_loaded: true,
+            password_edited: false,
+            password_load_failed: false,
             feedback: None,
             saving: false,
         }
@@ -157,6 +171,12 @@ impl ProfileForm {
             password: String::new(),
             read_only: p.read_only,
             url: String::new(),
+            importing_url: false,
+            show_url_password: false,
+            show_password: false,
+            password_loaded: false,
+            password_edited: false,
+            password_load_failed: false,
             feedback: None,
             saving: false,
         }
@@ -197,9 +217,12 @@ impl ProfileForm {
                 self.username = imported.username;
                 self.database = imported.default_database;
                 self.tls = imported.tls_mode;
-                if let Some(password) = imported.password {
-                    self.password = password;
-                }
+                self.password = imported.password.unwrap_or_default();
+                self.password_loaded = true;
+                self.password_edited = true;
+                self.password_load_failed = false;
+                self.importing_url = false;
+                self.url.clear();
                 self.feedback = Some((
                     FeedbackKind::Info,
                     "Connection URL imported. Review the details, then save and connect.".into(),
@@ -224,7 +247,7 @@ impl ProfileForm {
             ca_cert_path: (!ca.is_empty()).then(|| ca.to_owned()),
             ssh: self.ssh.clone(),
             read_only: self.read_only,
-            password: if self.password.is_empty() && self.id.is_some() {
+            password: if self.id.is_some() && !self.password_loaded {
                 None
             } else {
                 Some(self.password.clone())
@@ -289,6 +312,7 @@ struct Toast {
 }
 
 pub struct Workbench {
+    context: egui::Context,
     worker: Worker,
     demo: bool,
     profiles: Vec<ConnectionProfile>,
@@ -340,8 +364,9 @@ impl Workbench {
 
     fn with_context(context: egui::Context, demo: bool) -> Self {
         theme::configure(&context);
-        let worker = Worker::start(context, demo);
+        let worker = Worker::start(context.clone(), demo);
         let mut app = Self {
+            context,
             worker,
             demo,
             profiles: vec![],
@@ -451,6 +476,13 @@ impl Workbench {
             RequestKind::Form => {
                 if let Some(form) = &mut self.profile_form {
                     form.saving = false;
+                    if meta.label == "Loading saved password" {
+                        if form.id == meta.profile && !form.password_edited {
+                            form.password_load_failed = true;
+                            form.feedback = Some((FeedbackKind::Error, error));
+                        }
+                        return;
+                    }
                     form.feedback = Some((FeedbackKind::Error, error));
                     return;
                 }
@@ -508,6 +540,26 @@ impl Workbench {
     fn apply(&mut self, payload: Payload, meta: &RequestMeta) {
         let target = meta.tab;
         match payload {
+            Payload::ConnectionUrl(url) => {
+                if let Some(form) = &mut self.profile_form {
+                    if meta.label == "Loading saved password"
+                        && form.id == meta.profile
+                        && !form.password_edited
+                    {
+                        match parse_connection_url(&url) {
+                            Ok(imported) => {
+                                form.password = imported.password.unwrap_or_default();
+                                form.password_loaded = true;
+                                form.password_load_failed = false;
+                            }
+                            Err(error) => {
+                                form.password_load_failed = true;
+                                form.feedback = Some((FeedbackKind::Error, error));
+                            }
+                        }
+                    }
+                }
+            }
             Payload::Profiles(profiles) => self.profiles = profiles,
             Payload::Tested => {
                 let Some(form) = &mut self.profile_form else {
@@ -559,9 +611,25 @@ impl Workbench {
                 self.histories.insert((id, database), entries);
             }
             Payload::Table(page) => {
+                let embedded = target.is_some_and(|tab| {
+                    self.tabs
+                        .iter()
+                        .any(|item| item.id == tab && item.embedded.is_some())
+                });
                 if let Some(state) = target.and_then(|tab| self.tables.get_mut(&tab)) {
                     if let Some(request) = state.requested.take() {
                         state.loaded(page, request);
+                        // The paged table now owns the displayed rows. Retain
+                        // query metadata for its completion label, but release
+                        // the redundant full result only after this succeeds so
+                        // a table-load error keeps the original result intact.
+                        if embedded {
+                            if let Some(result) =
+                                target.and_then(|tab| self.query_results.get_mut(&tab))
+                            {
+                                result.rows = Vec::new();
+                            }
+                        }
                     }
                 }
             }
@@ -871,6 +939,7 @@ impl Workbench {
         for tab in self.tabs.iter_mut().filter(|t| t.profile_id == profile) {
             if tab.embedded.take().is_some() {
                 self.tables.remove(&tab.id);
+                self.query_results.remove(&tab.id);
             }
         }
         if self.active_tab.is_some_and(|id| removed.contains(&id)) {
@@ -897,10 +966,13 @@ impl Workbench {
         for tab in removed {
             self.tables.remove(&tab);
             self.query_errors.remove(&tab);
-            self.tables.remove(&tab);
+            self.query_results.remove(&tab);
         }
         self.workspaces.remove(&id);
         self.schemas.remove(&id);
+        self.schema_filters.remove(&id);
+        self.histories.retain(|(profile, _), _| *profile != id);
+        self.collapsed_profiles.remove(&id);
         self.tabs.retain(|t| t.profile_id != id);
         self.mark_stale(id);
         if self.active_profile == Some(id) {
@@ -1395,7 +1467,17 @@ impl Workbench {
                 egui::Popup::menu(&more).show(|ui| {
                     theme::menu_scope(ui, 200.0);
                     if theme::menu_item(ui, "Edit connection", false).clicked() {
-                        self.profile_form = Some(ProfileForm::from_profile(profile));
+                        let current = self.workspaces.get(&id).map_or(profile, |w| &w.profile);
+                        let form = ProfileForm::from_profile(current);
+                        let input = form.input();
+                        self.profile_form = Some(form);
+                        self.dispatch(
+                            Command::ConnectionUrl(input, true),
+                            "Loading saved password",
+                            None,
+                            Some(id),
+                            RequestKind::Form,
+                        );
                         ui.close();
                     }
                     if connected
@@ -3250,6 +3332,7 @@ impl Workbench {
         let mut test = false;
         let mut save = false;
         let mut delete = false;
+        let mut copy_url = false;
         let mut url_enter = false;
         modal(ctx, "Connection", 600.0, |ui| {
             ui.horizontal(|ui| {
@@ -3310,38 +3393,70 @@ impl Workbench {
                 ui.add_space(8.0);
                 form_label(ui, "Connection URL");
                 ui.horizontal(|ui| {
-                    let placeholder = match form.engine {
-                        DatabaseEngine::Postgres => "postgresql://user:password@host:5432/database",
-                        DatabaseEngine::Mysql => "mysql://user:password@host:3306/database",
-                        DatabaseEngine::Redis => "redis://default:password@host:6379/0",
+                    let preview = if form.password_loaded {
+                        display_connection_url(&form.input(), form.show_url_password)
+                            .unwrap_or_else(|error| error)
+                    } else if form.password_load_failed {
+                        "Saved password could not be loaded.".into()
+                    } else {
+                        "Loading connection URL…".into()
                     };
-                    let response = ui.add(
-                        egui::TextEdit::singleline(&mut form.url)
+                    // An immutable text buffer stays selectable and horizontally
+                    // scrollable without allowing edits to the generated URL.
+                    let mut preview_text = preview.as_str();
+                    ui.add(
+                        egui::TextEdit::singleline(&mut preview_text)
                             .margin(Margin::symmetric(9, 7))
-                            .password(true)
-                            .hint_text(placeholder)
-                            .desired_width(400.0),
-                    );
-                    let enter =
-                        response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                    url_enter = enter;
-                    // Pasting a URL imports it straight away.
-                    let pasted = response.changed()
-                        && ui
-                            .input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Paste(_))));
-                    if (ui
-                        .add_enabled(
-                            !form.url.trim().is_empty(),
-                            theme::secondary_button("Import URL"),
-                        )
-                        .clicked()
-                        || enter
-                        || pasted)
-                        && !form.url.trim().is_empty()
-                    {
-                        form.import_url();
+                            .desired_width((ui.available_width() - 120.0).max(1.0)),
+                    )
+                    .on_hover_text(&preview);
+                    if ui.add(theme::secondary_button("Copy URL")).clicked() {
+                        copy_url = true;
                     }
                 });
+                ui.horizontal(|ui| {
+                    ui.checkbox(&mut form.show_url_password, "Show password");
+                    if ui
+                        .add(theme::secondary_button(if form.importing_url {
+                            "Cancel import"
+                        } else {
+                            "Import URL"
+                        }))
+                        .clicked()
+                    {
+                        form.importing_url = !form.importing_url;
+                    }
+                });
+                if form.importing_url {
+                    ui.horizontal(|ui| {
+                        let response = ui.add(
+                            egui::TextEdit::singleline(&mut form.url)
+                                .margin(Margin::symmetric(9, 7))
+                                .password(true)
+                                .hint_text("Paste a connection URL")
+                                .desired_width(400.0),
+                        );
+                        let enter =
+                            response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                        url_enter = enter;
+                        let pasted = response.changed()
+                            && ui.input(|i| {
+                                i.events.iter().any(|e| matches!(e, egui::Event::Paste(_)))
+                            });
+                        if (ui
+                            .add_enabled(
+                                !form.url.trim().is_empty(),
+                                theme::secondary_button("Import"),
+                            )
+                            .clicked()
+                            || enter
+                            || pasted)
+                            && !form.url.trim().is_empty()
+                        {
+                            form.import_url();
+                        }
+                    });
+                }
                 ui.add_space(8.0);
                 form_label(ui, "Name");
                 ui.add(
@@ -3386,8 +3501,10 @@ impl Workbench {
                 });
                 ui.add_space(8.0);
                 let redis = form.engine == DatabaseEngine::Redis;
-                let password_hint = if form.id.is_some() {
-                    "Leave blank to keep saved password"
+                let password_hint = if form.password_load_failed {
+                    "Enter password"
+                } else if form.id.is_some() && !form.password_loaded {
+                    "Loading saved password…"
                 } else {
                     "Stored in OS keychain"
                 };
@@ -3411,10 +3528,12 @@ impl Workbench {
                             .char_limit(5)
                             .desired_width(f32::INFINITY),
                     );
-                    text.retain(|c| c.is_ascii_digit());
-                    if let Ok(port) = text.parse::<u16>() {
-                        if port > 0 {
-                            form.port = port;
+                    if response.changed() {
+                        text.retain(|c| c.is_ascii_digit());
+                        if let Ok(port) = text.parse::<u16>() {
+                            if port > 0 {
+                                form.port = port;
+                            }
                         }
                     }
                     if !response.has_focus() {
@@ -3452,13 +3571,30 @@ impl Workbench {
                 ui.add_space(6.0);
                 ui.columns(2, |cols| {
                     form_label(&mut cols[0], "Password");
-                    cols[0].add(
-                        egui::TextEdit::singleline(&mut form.password)
-                            .margin(Margin::symmetric(9, 7))
-                            .password(true)
-                            .hint_text(password_hint)
-                            .desired_width(f32::INFINITY),
-                    );
+                    cols[0].horizontal(|ui| {
+                        let response = ui.add(
+                            egui::TextEdit::singleline(&mut form.password)
+                                .margin(Margin::symmetric(9, 7))
+                                .password(!form.show_password)
+                                .hint_text(password_hint)
+                                .desired_width((ui.available_width() - 80.0).max(1.0)),
+                        );
+                        if response.changed() {
+                            form.password_edited = true;
+                            form.password_loaded = true;
+                            form.password_load_failed = false;
+                        }
+                        if ui
+                            .add(theme::secondary_button(if form.show_password {
+                                "Hide"
+                            } else {
+                                "Show"
+                            }))
+                            .clicked()
+                        {
+                            form.show_password = !form.show_password;
+                        }
+                    });
                     form_label(&mut cols[1], "TLS");
                     let width = cols[1].available_width();
                     egui::ComboBox::from_id_salt("tls")
@@ -3580,6 +3716,23 @@ impl Workbench {
         {
             save = true;
         }
+        if copy_url {
+            form.saving = false;
+            if form.password_loaded && !form.password_load_failed {
+                match format_connection_url(&form.input(), Some(&form.password)) {
+                    Ok(url) => {
+                        self.context.copy_text(url);
+                        form.feedback = Some((FeedbackKind::Success, "URL copied.".into()));
+                    }
+                    Err(error) => form.feedback = Some((FeedbackKind::Error, error)),
+                }
+            } else {
+                form.feedback = Some((
+                    FeedbackKind::Error,
+                    "Cannot copy the full URL because the saved password did not load.".into(),
+                ));
+            }
+        }
         if test {
             form.feedback = None;
             form.saving = false;
@@ -3691,6 +3844,22 @@ mod tests {
         let mut app = app();
         let a = Uuid::from_u128(1);
         let b = Uuid::from_u128(2);
+        app.open_query(a);
+        let tab = app.active_tab.unwrap();
+        app.query_results.insert(
+            tab,
+            QueryResponse {
+                columns: vec![],
+                rows: vec![vec![json!("large result")]],
+                row_count: 1,
+                affected_rows: None,
+                duration_ms: 1,
+                truncated: false,
+                notices: vec![],
+            },
+        );
+        app.histories.insert((a, "postgres".into()), vec![]);
+        app.schema_filters.insert(a, "customer".into());
         app.pending_requests.insert(
             RequestId(900),
             RequestMeta {
@@ -3708,6 +3877,9 @@ mod tests {
         app.close_profile(a);
         assert!(app.pending_requests[&RequestId(900)].stale);
         assert!(!app.pending_requests[&RequestId(901)].stale);
+        assert!(!app.query_results.contains_key(&tab));
+        assert!(!app.histories.keys().any(|(profile, _)| *profile == a));
+        assert!(!app.schema_filters.contains_key(&a));
     }
 
     #[test]
@@ -3735,8 +3907,8 @@ mod tests {
         app.tabs[0].last_executed = Some("select * from customers;".into());
         let response = QueryResponse {
             columns: vec![],
-            rows: vec![],
-            row_count: 0,
+            rows: vec![vec![json!("retained until table succeeds")]],
+            row_count: 1,
             affected_rows: None,
             duration_ms: 1,
             truncated: false,
@@ -3751,10 +3923,18 @@ mod tests {
             Some(("public".into(), "customers".into()))
         );
         assert!(app.tables[&tab].loading);
+        assert_eq!(app.query_results[&tab].rows.len(), 1);
         assert_eq!(
             app.table_target(tab),
             Some((id, "public".into(), "customers".into()))
         );
+        app.apply(Payload::Table(page()), &meta(Some(tab), RequestKind::Table));
+        assert!(app.query_results[&tab].rows.is_empty());
+        assert_eq!(app.query_results[&tab].row_count, 1);
+        assert_eq!(app.query_results[&tab].duration_ms, 1);
+        app.close_table_tabs(id);
+        assert!(!app.query_results.contains_key(&tab));
+        assert!(app.tabs[0].embedded.is_none());
     }
 
     #[test]
@@ -3782,10 +3962,89 @@ mod tests {
     fn literal_null_text_and_tls_profile_settings_survive_edits() {
         let mut profile = DemoStore::new().profiles().remove(0);
         profile.ca_cert_path = Some("/tmp/test-ca.pem".into());
-        let input = ProfileForm::from_profile(&profile).input();
+        let mut form = ProfileForm::from_profile(&profile);
+        let input = form.input();
         assert_eq!(input.tls_mode, TlsMode::Required);
         assert_eq!(input.ca_cert_path, profile.ca_cert_path);
         assert!(input.password.is_none());
+
+        form.password = "loaded secret".into();
+        form.password_loaded = true;
+        assert_eq!(form.input().password.as_deref(), Some("loaded secret"));
+        form.password.clear();
+        assert_eq!(form.input().password.as_deref(), Some(""));
+    }
+
+    #[test]
+    fn imported_port_survives_rendering_with_previous_port_text() {
+        let mut app = app();
+        let mut form = ProfileForm::fresh();
+        form.url = "postgresql://me:p%40ss@localhost:6543/another".into();
+        form.import_url();
+        app.profile_form = Some(form);
+        let context = app.context.clone();
+        context.data_mut(|data| {
+            data.insert_temp(egui::Id::new("profile-port-text"), "5432".to_owned())
+        });
+        let _ = context.run(egui::RawInput::default(), |ctx| app.profile_dialog(ctx));
+        assert_eq!(app.profile_form.as_ref().unwrap().port, 6543);
+        assert_eq!(app.profile_form.as_ref().unwrap().password, "p@ss");
+    }
+
+    #[test]
+    fn saved_password_loading_preserves_edits_and_never_copies_on_open() {
+        let mut app = app();
+        let profile = DemoStore::new().profiles().remove(0);
+        let request = RequestMeta {
+            label: "Loading saved password",
+            tab: None,
+            profile: Some(profile.id),
+            kind: RequestKind::Form,
+            stale: false,
+        };
+        app.profile_form = Some(ProfileForm::from_profile(&profile));
+        app.fail("Keychain locked".into(), &request);
+        let form = app.profile_form.as_ref().unwrap();
+        assert!(!form.password_loaded);
+        assert!(form.password_load_failed);
+        assert_eq!(form.input().password, None);
+
+        let loaded = "postgresql://user:saved%40secret@host:5432/db?sslmode=require";
+        app.apply(Payload::ConnectionUrl(loaded.into()), &request);
+        let form = app.profile_form.as_ref().unwrap();
+        assert_eq!(form.password, "saved@secret");
+        assert!(form.password_loaded);
+        assert!(!form.show_password && !form.show_url_password);
+        assert!(app.context.output(|output| output.commands.is_empty()));
+
+        let form = app.profile_form.as_mut().unwrap();
+        form.password = "new password".into();
+        form.password_edited = true;
+        app.apply(Payload::ConnectionUrl(loaded.into()), &request);
+        assert_eq!(app.profile_form.as_ref().unwrap().password, "new password");
+    }
+
+    #[test]
+    fn url_preview_masks_password_while_copy_and_password_reveal_are_independent() {
+        let mut form = ProfileForm::fresh();
+        form.password = "real secret".into();
+        let input = form.input();
+
+        let masked = display_connection_url(&input, false).unwrap();
+        let revealed = display_connection_url(&input, true).unwrap();
+        let copied = format_connection_url(&input, Some(&form.password)).unwrap();
+        assert!(masked.contains(":*******@"));
+        assert!(!masked.contains("real%20secret"));
+        assert!(revealed.contains("real%20secret"));
+        assert_eq!(copied, revealed);
+
+        form.show_password = true;
+        assert!(
+            !form.show_url_password,
+            "field reveal must not reveal the URL"
+        );
+        form.show_url_password = true;
+        assert!(form.show_password, "URL reveal must not hide the field");
     }
 
     #[test]

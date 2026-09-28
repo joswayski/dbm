@@ -246,6 +246,8 @@ final class GTextFieldCell: NSTextFieldCell {
         return NSRect(x: inset.minX, y: rect.minY + (rect.height - height) / 2, width: inset.width, height: height)
     }
 
+    // AppKit's drawInterior asks for drawingRect itself. Passing an already
+    // inset frame to it applies padding twice, unlike the focused field editor.
     override func drawingRect(forBounds rect: NSRect) -> NSRect { titleRect(forBounds: rect) }
 
     override func draw(withFrame cellFrame: NSRect, in controlView: NSView) {
@@ -261,10 +263,6 @@ final class GTextFieldCell: NSTextFieldCell {
                            fill: focused && fillOverride != nil ? Graphite.editSurface : fillOverride, stroke: strokeOverride)
         }
         drawInterior(withFrame: cellFrame, in: controlView)
-    }
-
-    override func drawInterior(withFrame cellFrame: NSRect, in controlView: NSView) {
-        super.drawInterior(withFrame: titleRect(forBounds: cellFrame), in: controlView)
     }
 
     override func edit(withFrame rect: NSRect, in controlView: NSView, editor textObj: NSText, delegate: Any?, event: NSEvent?) {
@@ -290,10 +288,6 @@ final class GSecureTextFieldCell: NSSecureTextFieldCell {
     override func draw(withFrame cellFrame: NSRect, in controlView: NSView) {
         drawFieldBezel(cellFrame, focused: focused, enabled: isEnabled)
         drawInterior(withFrame: cellFrame, in: controlView)
-    }
-
-    override func drawInterior(withFrame cellFrame: NSRect, in controlView: NSView) {
-        super.drawInterior(withFrame: titleRect(forBounds: cellFrame), in: controlView)
     }
 
     override func edit(withFrame rect: NSRect, in controlView: NSView, editor textObj: NSText, delegate: Any?, event: NSEvent?) {
