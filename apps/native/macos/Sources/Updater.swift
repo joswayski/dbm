@@ -1,9 +1,9 @@
 import AppKit
 
-/// Self-updates from the native preview channel (`crates/dbm-update`). The
+/// Self-updates from the latest release (`crates/dbm-update`). The
 /// bridge downloads a build and verifies its minisign signature; this class
 /// also checks Apple's code signature, then swaps the app bundle once DBM
-/// quits and reopens it. Development builds have no channel number and never
+/// quits and reopens it. Development builds have no build number and never
 /// check.
 final class Updater {
     enum State {

@@ -9,6 +9,8 @@ What the app does today, what is deliberately not built yet, and what it stores 
 - Local connection profiles and query history in an application SQLite database.
 - Passwords through the macOS Keychain, Windows Credential Manager, or Linux
   secret service via `keyring`.
+- Native apps: AppKit on macOS (Apple Silicon and Intel), egui on Windows and
+  Linux.
 - Signed in-app updates from the GitHub Release published for each merge to
   `main`.
 - Database list, schemas, tables/views, a sidebar filter for tables and keys,
@@ -33,10 +35,9 @@ What the app does today, what is deliberately not built yet, and what it stores 
   read-only profiles are also marked read-only on the server, so writes the
   app cannot recognize are rejected too.
 - PostgreSQL values of any type display, including `numeric`, `uuid`, enums,
-  and arrays. Integers too large for JavaScript are shown and edited as exact
-  text.
-- SQL tabs using CodeMirror, query result grids, a 10,000-row safety cap, and
-  per-profile history. Connecting a profile opens a query tab so you can run
+  and arrays. Integers beyond ±2^53 are shown and edited as exact text.
+- SQL tabs with syntax highlighting and keyword completion, query result
+  grids, a 10,000-row safety cap, and per-profile history. Connecting a profile opens a query tab so you can run
   SQL immediately. Redis connections open a command workbench (`PING` by
   default) instead of SQL. Scripts with several statements show the last
   result set. The MySQL workbench keeps one connection, so `USE`, session

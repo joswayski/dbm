@@ -64,11 +64,11 @@ jobs:
           toolchain: 1.94.0
           targets: aarch64-apple-darwin,x86_64-apple-darwin
       # Universal, like the release, so an Intel-only break fails here.
-      - name: Build AppKit development preview
+      - name: Build the AppKit app
         env:
           DBM_UNIVERSAL: 1
         run: bash apps/native/macos/build.sh
-      - name: Archive AppKit development preview
+      - name: Archive the AppKit app
         run: ditto -c -k --keepParent target/native/DBM.app target/native/DBM-macos.zip
       - name: Render isolated AppKit fixture states
         run: |
@@ -106,11 +106,11 @@ jobs:
       - run: cargo build --manifest-path apps/native/workbench/Cargo.toml --locked --release
       - name: Archive Linux native development binary
         if: runner.os == 'Linux'
-        run: tar -czf DBM-Native-linux.tar.gz -C apps/native/workbench/target/release dbm-workbench
+        run: tar -czf DBM-linux.tar.gz -C apps/native/workbench/target/release dbm-workbench
       - name: Archive Windows native development binary
         if: runner.os == 'Windows'
-        run: Compress-Archive apps/native/workbench/target/release/dbm-workbench.exe DBM-Native-windows.zip
+        run: Compress-Archive apps/native/workbench/target/release/dbm-workbench.exe DBM-windows.zip
       - uses: actions/upload-artifact@v4
         with:
-          name: DBM-Native-${{ runner.os }}-development
-          path: DBM-Native-*
+          name: DBM-${{ runner.os }}-development
+          path: DBM-*.*

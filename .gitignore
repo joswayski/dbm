@@ -1,14 +1,10 @@
 **/node_modules/
 **/target/
-**/dist/
-**/*.tsbuildinfo
 **/.DS_Store
 *.log
 .DS_Store
 .env
 .env.*
 !.env.example
-**/tauri.release.conf.json
-**/gen/schemas/
 .amp/portals/
 .amp/in/

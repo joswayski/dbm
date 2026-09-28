@@ -20,10 +20,8 @@ have() {
   [ -x "$path" ] || command -v "$name" >/dev/null 2>&1
 }
 
-have node /usr/local/node-v24/bin/node || missing+=(node)
 have cargo "$HOME/.cargo/bin/cargo" || missing+=(cargo)
 have redis-server /usr/bin/redis-server || missing+=(redis-server)
-[ -d node_modules ] || missing+=(node_modules)
 
 if ((${#missing[@]})); then
   printf 'DBM orb resume: missing %s. Run .agents/setup to repair the environment.\n' \

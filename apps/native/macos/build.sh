@@ -64,5 +64,5 @@ fi
 if [[ -n "${DBM_SIGNING_IDENTITY:-}" ]]; then
   printf 'Built signed release: %s\n' "$output"
 else
-  printf 'Built development preview (not installed): %s\n' "$output"
+  printf 'Built development app (not installed): %s\n' "$output"
 fi

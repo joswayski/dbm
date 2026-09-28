@@ -1,6 +1,6 @@
 import AppKit
 
-/// Stroke icons on a 16 pt grid, matching `Icon.tsx` and the egui host.
+/// Stroke icons on a 16 pt grid, matching the egui host.
 enum Icon {
     case plus, more, database, refresh, table, key, view, folder
     case chevronRight, chevronDown, chevronUp, chevronLeft
