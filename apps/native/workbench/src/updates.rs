@@ -1,8 +1,9 @@
 //! Self-updates from the native preview channel (`crates/dbm-update`).
 //!
 //! Checks run on a background thread shortly after launch and every 30
-//! minutes. Installing downloads the signed executable, verifies it against
-//! the release key, puts it in place of the running one, and restarts DBM.
+//! minutes. Installing downloads the signed executable (or, when running from
+//! an AppImage, the signed AppImage), verifies it against the release key,
+//! puts it in place of the running one, and restarts DBM.
 //! Development builds have no channel number and never check.
 
 use std::path::{Path, PathBuf};
@@ -103,7 +104,10 @@ impl Updates {
         let sender = self.sender.clone();
         let ctx = ctx.clone();
         std::thread::spawn(move || {
-            let result = dbm_update::check(current);
+            let result = match appimage() {
+                Some(_) => dbm_update::check_platform(current, dbm_update::LINUX_APPIMAGE),
+                None => dbm_update::check(current),
+            };
             let _ = sender.send(Event::Checked { result, quiet });
             ctx.request_repaint();
         });
@@ -157,11 +161,26 @@ fn remove_previous_executable() {
     }
 }
 
-/// Puts the verified download in place of this executable, starts it with the
-/// same arguments, and exits. The user confirmed losing unsaved work.
+/// The AppImage this process runs from. Its executable lives in a read-only
+/// mount, so updates replace the image itself.
+fn appimage() -> Option<PathBuf> {
+    if !cfg!(target_os = "linux") {
+        return None;
+    }
+    std::env::var_os("APPIMAGE")
+        .map(PathBuf::from)
+        .filter(|path| path.is_file())
+}
+
+/// Puts the verified download in place of this executable (or AppImage),
+/// starts it with the same arguments, and exits. The user confirmed losing
+/// unsaved work.
 fn replace_and_restart(download: &Path) -> Result<(), String> {
     let failed = |error: std::io::Error| format!("Couldn't install the update: {error}");
-    let current = std::env::current_exe().map_err(failed)?;
+    let current = match appimage() {
+        Some(image) => image,
+        None => std::env::current_exe().map_err(failed)?,
+    };
     if cfg!(windows) {
         let previous = previous_executable(&current);
         let _ = std::fs::remove_file(&previous);

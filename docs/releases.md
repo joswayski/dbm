@@ -318,7 +318,10 @@ release; no new secrets are needed.
   stapled `DBM-Native-macOS.dmg` for first installs. Gatekeeper opens it
   without a warning.
 - **Windows and Linux:** the release `dbm-workbench` executables, published as
-  `DBM-Native-Windows-x64.exe` and `DBM-Native-Linux-x64`. The Windows build is
+  `DBM-Native-Windows-x64.exe` and `DBM-Native-Linux-x64`. Linux is also
+  packaged as `DBM-Native-x86_64.AppImage` (`apps/native/workbench/appimage.sh`);
+  a copy running from the AppImage updates the image itself, through the
+  `linux-x86_64-appimage` manifest entry. The Windows build is
   not Authenticode-signed yet, so SmartScreen may still warn on first run.
 - **Updater signatures:** every updater artifact is signed with the Tauri
   updater key (`npx tauri signer sign`). `crates/dbm-update` verifies it
