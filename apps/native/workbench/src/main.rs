@@ -22,7 +22,7 @@ fn main() -> eframe::Result {
             .with_min_inner_size([900.0, 600.0])
             .with_icon(std::sync::Arc::new(
                 eframe::icon_data::from_png_bytes(include_bytes!(
-                    "../../../desktop/src-tauri/icons/icon.png"
+                    "../../icons/icon.png"
                 ))
                 .expect("bundled app icon is a valid PNG"),
             )),
