@@ -1,7 +1,12 @@
 import XCTest
+import UIKit
 @testable import DBM
 
 final class ModelsTests: XCTestCase {
+    func testBundledFontsUseRegisteredPostScriptNames() {
+        XCTAssertNotNil(UIFont(name: "Geist-Regular", size: 15))
+        XCTAssertNotNil(UIFont(name: "GeistMono-Regular", size: 14))
+    }
     func testMobileProfileAlwaysUsesSafeSettings() {
         var draft = ProfileDraft(); draft.password = "secret"
         XCTAssertEqual(draft.input["readOnly"] as? Bool, true)

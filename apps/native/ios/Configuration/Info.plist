@@ -15,7 +15,7 @@
   <key>NSLocalNetworkUsageDescription</key><string>DBM connects directly to the databases you configure on your private network.</string>
   <key>UIApplicationSceneManifest</key><dict><key>UIApplicationSupportsMultipleScenes</key><false/></dict>
   <key>UILaunchScreen</key><dict/>
-  <key>UIAppFonts</key><array><string>Geist-Regular.ttf</string><string>Geist-Medium.ttf</string><string>Geist-Semibold.ttf</string><string>GeistMono-Regular.ttf</string></array>
+  <key>UIAppFonts</key><array><string>Geist-Regular.ttf</string><string>GeistMono-Regular.ttf</string></array>
   <key>UIFileSharingEnabled</key><false/>
   <key>UISupportedInterfaceOrientations</key><array><string>UIInterfaceOrientationPortrait</string><string>UIInterfaceOrientationLandscapeLeft</string><string>UIInterfaceOrientationLandscapeRight</string></array>
 </dict></plist>

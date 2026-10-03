@@ -12,7 +12,7 @@ struct ConnectionsView: View {
                     HStack(spacing: 12) {
                         Circle().fill(Color(hex: profile.color)).frame(width: 12, height: 12)
                         Button { editor = ProfileDraft(profile) } label: {
-                            VStack(alignment: .leading) { Text(profile.name).font(.custom("Geist-Semibold", size: 16)); Text("\(profile.engine.title) · \(profile.host):\(profile.port)").foregroundStyle(Graphite.muted) }
+                            VStack(alignment: .leading) { Text(profile.name).font(.custom("Geist-Regular", size: 16).weight(.semibold)); Text("\(profile.engine.title) · \(profile.host):\(profile.port)").foregroundStyle(Graphite.muted) }
                         }.buttonStyle(.plain).accessibilityIdentifier("edit-\(profile.id)")
                         Spacer()
                         Button("Connect") { if model.isDemo { model.connect(profile) } else { editor = ProfileDraft(profile) } }.buttonStyle(.borderedProminent).accessibilityIdentifier("connect-\(profile.id)")
