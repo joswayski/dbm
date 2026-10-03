@@ -82,9 +82,15 @@ jobs:
       - name: Provision the SDK-matched iPhone test simulator
         run: |
           sudo xcodebuild -runFirstLaunch
+          # simctl waits for CoreSimulator's cache initialization; xcodebuild does not.
+          xcrun simctl list
           version="$(xcrun --sdk iphonesimulator --show-sdk-version)"
-          xcodebuild -downloadPlatform iOS -buildVersion "$version"
           runtime="com.apple.CoreSimulator.SimRuntime.iOS-${version//./-}"
+          runtimes="$(xcrun simctl list runtimes --json)"
+          if ! jq -e --arg runtime "$runtime" 'any(.runtimes[]; .identifier == $runtime and .isAvailable)' <<< "$runtimes" > /dev/null; then
+            xcodebuild -downloadPlatform iOS -buildVersion "$version"
+            xcrun simctl list
+          fi
           device="$(xcrun simctl create 'DBM UI Tests' com.apple.CoreSimulator.SimDeviceType.iPhone-16 "$runtime")"
           xcrun simctl boot "$device"
           xcrun simctl bootstatus "$device" -b
