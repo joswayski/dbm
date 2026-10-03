@@ -42,10 +42,14 @@ final class DBMUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Rows 1–25"].waitForExistence(timeout: 10))
         let firstTableRow = app.otherElements["result-row-1"]
         XCTAssertTrue(firstTableRow.label.contains("email:"), firstTableRow.label)
+        XCTAssertFalse(app.buttons["Previous"].isEnabled)
+        XCTAssertTrue(app.buttons["Next"].isEnabled)
         retainScreenshot(app, named: "iphone-table-page-1")
 
         app.buttons["Next"].tap()
         XCTAssertTrue(app.staticTexts["Rows 26–40"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["Previous"].isEnabled)
+        XCTAssertFalse(app.buttons["Next"].isEnabled)
         retainScreenshot(app, named: "iphone-table-page-2")
     }
 

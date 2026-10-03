@@ -14,7 +14,7 @@ struct WorkspaceView: View {
                 HStack { Text("Results · capped at 1,000 rows").font(.caption).foregroundStyle(Graphite.muted); Spacer(); Button("Run", systemImage: "play.fill") { model.run() }.buttonStyle(.borderedProminent).disabled(model.sql.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty).accessibilityIdentifier("run-query") }.padding(12).background(Graphite.chrome)
                 GridView(data: model.grid)
                 HStack { Button("Refresh results") { model.refresh() }; Spacer(); Text(model.grid.rows.isEmpty ? "0 rows" : "Rows \(model.grid.offset + 1)–\(model.grid.offset + model.grid.rows.count)").font(.caption) }.padding(12)
-                if model.selectedTable != nil { HStack { Button("Previous") { model.previous() }.disabled(model.grid.offset == 0); Spacer(); Button("Next") { model.next() }.disabled(!model.grid.hasMore) }.padding(12).background(Graphite.chrome) }
+                if model.selectedTable != nil { HStack { Button("Previous") { model.previous() }.disabled(model.grid.offset == 0).opacity(model.grid.offset == 0 ? 0.4 : 1); Spacer(); Button("Next") { model.next() }.disabled(!model.grid.hasMore).opacity(model.grid.hasMore ? 1 : 0.4) }.padding(12).background(Graphite.chrome) }
             }
             .navigationTitle(model.active?.name ?? "Query")
             .navigationBarTitleDisplayMode(.inline)
@@ -60,7 +60,7 @@ struct GridView: View {
         if data.columns.isEmpty { ContentUnavailableView("No results", systemImage: "tablecells", description: Text("Run a query or select a table or key.")) }
         else { ScrollView([.horizontal, .vertical]) { VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 0) { ForEach(Array(data.columns.enumerated()), id: \.offset) { _, column in Text(column).font(.custom("GeistMono-Regular", size: 12).bold()).frame(width: width, alignment: .leading).padding(.horizontal, 8).frame(height: 36).background(Color(hex: "1a1a1c")) } }
-            ForEach(Array(data.rows.enumerated()), id: \.offset) { rowIndex, row in HStack(spacing: 0) { ForEach(Array(data.columns.indices), id: \.self) { index in Text(index < row.count ? display(row[index]) : "").font(.custom("GeistMono-Regular", size: 12)).lineLimit(1).frame(width: width, alignment: .leading).padding(.horizontal, 8).frame(height: 34).overlay(alignment: .bottom) { Divider() } } }.accessibilityElement(children: .ignore).accessibilityLabel(rowLabel(rowIndex: rowIndex, row: row)).accessibilityIdentifier("result-row-\(rowIndex + 1)") }
+            ForEach(Array(data.rows.enumerated()), id: \.offset) { rowIndex, row in HStack(spacing: 0) { ForEach(Array(data.columns.indices), id: \.self) { index in Text(index < row.count ? display(row[index]) : "").font(.custom("GeistMono-Regular", size: 12)).lineLimit(1).frame(width: width, alignment: .leading).padding(.horizontal, 8).frame(height: 34).overlay(alignment: .bottom) { Rectangle().fill(Graphite.border).frame(height: 0.5) } } }.accessibilityElement(children: .ignore).accessibilityLabel(rowLabel(rowIndex: rowIndex, row: row)).accessibilityIdentifier("result-row-\(rowIndex + 1)") }
         } }.accessibilityIdentifier("results-grid") }
     }
 
