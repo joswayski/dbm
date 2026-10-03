@@ -49,7 +49,7 @@ struct WorkspaceView: View {
                 HStack { Image(systemName: model.active?.engine == .redis ? "key" : "tablecells").foregroundStyle(Color(hex: model.active?.color ?? "#4c9aff")); Text("\(table.schema).\(table.table)").font(.custom("Geist-Regular", size: 13).weight(.medium)); Spacer(); Button("Refresh", systemImage: "arrow.clockwise") { model.refresh() }.buttonStyle(SecondaryButton()) }
                     .padding(.horizontal, 12).frame(height: 42).graphitePanel()
             }
-            GridView(data: model.grid).frame(maxWidth: .infinity, maxHeight: .infinity)
+            GridView(data: model.grid).frame(maxWidth: .infinity, maxHeight: .infinity).clipped()
             HStack(spacing: 12) {
                 Text(model.grid.rows.isEmpty ? "0 rows" : "Rows \(model.grid.offset + 1)–\(model.grid.offset + model.grid.rows.count)").foregroundStyle(Graphite.muted)
                 Spacer()
@@ -131,7 +131,7 @@ struct GridView: View {
             ScrollView(.vertical) { LazyVStack(alignment: .leading, spacing: 0) {
                 ForEach(Array(data.rows.enumerated()), id: \.offset) { rowIndex, row in HStack(spacing: 0) { ForEach(data.columns.indices, id: \.self) { index in Text(index < row.count ? display(row[index]) : "").foregroundStyle((index < row.count && row[index] is NSNull) ? Graphite.faint : Graphite.text).font(.custom("GeistMono-Regular", size: 12)).lineLimit(1).frame(width: width, alignment: .leading).padding(.horizontal, 8).frame(height: 32).overlay(alignment: .bottom) { Rectangle().fill(Graphite.hairline).frame(height: 0.5) } } }.accessibilityElement(children: .ignore).accessibilityLabel(rowLabel(rowIndex, row)).accessibilityIdentifier("result-row-\(rowIndex + 1)") }
             } }.accessibilityIdentifier("results-rows")
-        }.frame(width: CGFloat(data.columns.count) * (width + 16), height: nil, alignment: .topLeading).frame(maxHeight: .infinity) }.background(Graphite.bg).accessibilityIdentifier("results-grid") }
+        }.frame(width: CGFloat(data.columns.count) * (width + 16), alignment: .topLeading).frame(maxHeight: .infinity) }.background(Graphite.bg).accessibilityIdentifier("results-grid") }
     }
     private func rowLabel(_ index: Int, _ row: [Any]) -> String { (["Row \(index + 1)"] + data.columns.enumerated().map { "\($0.element): \($0.offset < row.count ? display(row[$0.offset]) : "")" }).joined(separator: ", ") }
 }
