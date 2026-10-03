@@ -79,6 +79,16 @@ jobs:
         with:
           toolchain: 1.94.0
           targets: aarch64-apple-ios-sim,aarch64-apple-ios
+      - name: Provision the SDK-matched iPhone test simulator
+        run: |
+          sudo xcodebuild -runFirstLaunch
+          version="$(xcrun --sdk iphonesimulator --show-sdk-version)"
+          xcodebuild -downloadPlatform iOS -buildVersion "$version"
+          runtime="com.apple.CoreSimulator.SimRuntime.iOS-${version//./-}"
+          device="$(xcrun simctl create 'DBM UI Tests' com.apple.CoreSimulator.SimDeviceType.iPhone-16 "$runtime")"
+          xcrun simctl boot "$device"
+          xcrun simctl bootstatus "$device" -b
+          echo "DBM_IOS_TEST_DESTINATION=platform=iOS Simulator,id=$device" >> "$GITHUB_ENV"
       - run: bash apps/native/ios/build.sh simulator
       - name: Record simulator-only package, exact revision and checksums
         run: |
