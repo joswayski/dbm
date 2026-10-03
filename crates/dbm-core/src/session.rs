@@ -89,6 +89,11 @@ impl DbSession {
     }
 
     pub async fn apply_mutations(&self, batch: &MutationBatch) -> AppResult<MutationResult> {
+        if batch.database != self.profile().default_database {
+            return Err(AppError::InvalidInput(
+                "the active database changed; reload the table before saving changes".into(),
+            ));
+        }
         match self {
             Self::Postgres(session) => session.apply_mutations(batch).await,
             Self::Mysql(session) => session.apply_mutations(batch).await,

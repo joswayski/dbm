@@ -211,7 +211,7 @@ fn demo_sessions_answer_from_the_fixture_and_refuse_writes() {
         serde_json::to_vec(&json!({"command": "exportProgress", "path": path_text})).unwrap();
     let reply = unsafe { take(dbm_bridge_helper_call(progress.as_ptr(), progress.len())) };
     assert_eq!(reply, json!({"ok": true, "value": null}));
-    let save = br#"{"command":"applyTableMutations","batch":{"profileId":"00000000-0000-0000-0000-000000000001","schema":"public","table":"customers","mutations":[]}}"#;
+    let save = br#"{"command":"applyTableMutations","batch":{"profileId":"00000000-0000-0000-0000-000000000001","database":"dbm_demo","schema":"public","table":"customers","mutations":[]}}"#;
     let reply = unsafe { take(dbm_bridge_session_call(session, save.as_ptr(), save.len())) };
     assert_eq!(reply["ok"], false);
     assert!(

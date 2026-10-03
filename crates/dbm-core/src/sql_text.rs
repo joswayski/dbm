@@ -123,7 +123,7 @@ fn statement_ranges(text: &str) -> Vec<Range> {
                 index += 1;
             }
         } else if let Some(delimiter) = dollar_quote {
-            if text[index..].starts_with(delimiter) {
+            if bytes[index..].starts_with(delimiter.as_bytes()) {
                 index += delimiter.len() - 1;
                 dollar_quote = None;
             }
@@ -1103,6 +1103,16 @@ mod tests {
         assert_eq!(at_cursor(sql, sql.len()), "SELECT 'ü';");
         // An offset inside a multibyte character snaps to its start.
         assert_eq!(at_cursor(sql, 9), "SELECT 'é';");
+    }
+
+    #[test]
+    fn dollar_quoted_unicode_keeps_statement_boundaries() {
+        for literal in ["$$é;🚀$$", "$body$é;🚀$body$"] {
+            let first = format!("SELECT {literal};");
+            let sql = format!("{first}\nSELECT 2;");
+            assert_eq!(at_cursor(&sql, sql.find('🚀').unwrap()), first);
+            assert_eq!(at_cursor(&sql, sql.len()), "SELECT 2;");
+        }
     }
 
     #[test]

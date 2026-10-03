@@ -655,9 +655,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, Qu
     }
 
     func saveChanges(_ tab: WorkTab) {
-        guard let state = tab.tableState, let target = tab.target, !state.pending.isEmpty, !saving.contains(tab.id) else { return }
+        guard let state = tab.tableState, let target = tab.target, let database = workspaces[tab.profileID]?.profile.database,
+              !state.pending.isEmpty, !saving.contains(tab.id) else { return }
         let batch: [String: Any] = [
-            "profileId": tab.profileID, "schema": target.schema, "table": target.table,
+            "profileId": tab.profileID, "database": database, "schema": target.schema, "table": target.table,
             "mutations": state.pending.keys.sorted().compactMap { state.pending[$0]?.json },
         ]
         saving.insert(tab.id)

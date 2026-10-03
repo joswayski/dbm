@@ -1037,6 +1037,7 @@ mod tests {
             let result = session
                 .apply_mutations(&MutationBatch {
                     profile_id: Uuid::nil(),
+                    database: database.clone(),
                     schema: database.clone(),
                     table: "files".into(),
                     mutations: vec![RowMutation {

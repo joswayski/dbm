@@ -276,6 +276,8 @@ pub struct RowMutation {
 #[serde(rename_all = "camelCase")]
 pub struct MutationBatch {
     pub profile_id: Uuid,
+    /// The database the table was opened on, captured before queueing a write.
+    pub database: String,
     pub schema: String,
     pub table: String,
     pub mutations: Vec<RowMutation>,

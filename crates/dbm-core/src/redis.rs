@@ -17,7 +17,6 @@ use crate::models::{
 const MAX_PAGE_SIZE: u32 = 1_000;
 const DEFAULT_QUERY_ROWS: u32 = 10_000;
 const TREE_KEYS_PER_TYPE: usize = 250;
-const KEY_LIST_SCAN_CAP: usize = 5_000;
 const MAX_VALUE_BYTES: usize = 256 * 1024;
 const KEY_TYPES: [&str; 6] = ["string", "hash", "list", "set", "zset", "stream"];
 
@@ -318,23 +317,41 @@ async fn keys_table_page(
     let limit = request.limit.clamp(1, MAX_PAGE_SIZE);
     let pattern = scan_pattern(&request.filters)?;
     let type_filter = type_filter(&request.filters);
-    let scanned = scan_keys(conn, &pattern, type_filter.as_deref(), KEY_LIST_SCAN_CAP).await?;
-    let scan_capped = scanned.len() >= KEY_LIST_SCAN_CAP;
-    let mut rows = key_index_rows(conn, scanned).await?;
-    rows.retain(|row| row_matches(&metadata, row, &request.filters));
-    sort_rows(&metadata, &mut rows, request.order_by.as_ref())?;
-    let total_rows = if request.include_total.unwrap_or(true) && !scan_capped {
-        Some(rows.len() as u64)
-    } else if request.include_total.unwrap_or(true) && request.filters.is_empty() {
-        dbsize(conn).await.ok()
-    } else {
-        None
-    };
+    // Offset pagination needs the complete keyspace in a deterministic order.
+    // SCAN can repeat keys, so deduplicate before counting or slicing.
+    let mut keys = scan_keys(conn, &pattern, type_filter.as_deref(), usize::MAX).await?;
+    keys.sort_unstable();
+    keys.dedup();
     let offset = usize::try_from(request.offset).unwrap_or(0);
     let take = usize::try_from(limit).unwrap_or(0);
-    let page_rows: Vec<Vec<JsonValue>> = rows.iter().skip(offset).take(take).cloned().collect();
-    let has_more = offset + page_rows.len() < rows.len()
-        || (scan_capped && offset + page_rows.len() >= rows.len());
+    let key_order = request
+        .order_by
+        .as_ref()
+        .is_none_or(|order| order.column == "key");
+    let (page_rows, total) = if request.filters.is_empty() && key_order {
+        // The common path only needs TYPE/TTL for the keys on this page.
+        let total = keys.len();
+        if request
+            .order_by
+            .as_ref()
+            .is_some_and(|order| order.descending)
+        {
+            keys.reverse();
+        }
+        let keys = keys.into_iter().skip(offset).take(take).collect();
+        (key_index_rows(conn, keys).await?, total)
+    } else {
+        let mut rows = key_index_rows(conn, keys).await?;
+        rows.retain(|row| row_matches(&metadata, row, &request.filters));
+        sort_rows(&metadata, &mut rows, request.order_by.as_ref())?;
+        let total = rows.len();
+        (rows.into_iter().skip(offset).take(take).collect(), total)
+    };
+    let total_rows = request
+        .include_total
+        .unwrap_or(true)
+        .then_some(total as u64);
+    let has_more = offset.saturating_add(take) < total;
     Ok(TablePage {
         metadata,
         columns: vec!["key".into(), "type".into(), "ttl".into()],
@@ -381,11 +398,6 @@ async fn key_index_rows(
         ]);
     }
     Ok(rows)
-}
-
-async fn dbsize(conn: &mut MultiplexedConnection) -> AppResult<u64> {
-    let size: i64 = redis_rs::cmd("DBSIZE").query_async(conn).await?;
-    u64::try_from(size).map_err(|_| AppError::Database("invalid DBSIZE".into()))
 }
 
 async fn key_table_page(
@@ -593,9 +605,23 @@ async fn apply_key_mutations(
             batch.table, batch.schema
         )));
     }
+    let mut mutations: Vec<_> = batch.mutations.iter().collect();
+    if key_type == "list" {
+        // A deletion shifts every later index. Apply higher original indices
+        // first, including updates, so none of this batch targets a shifted row.
+        let mut indexed = mutations
+            .into_iter()
+            .map(|mutation| {
+                let index = json_to_i64(mutation.primary_key.first().unwrap_or(&JsonValue::Null))?;
+                Ok((index, mutation))
+            })
+            .collect::<AppResult<Vec<_>>>()?;
+        indexed.sort_by_key(|(index, _)| std::cmp::Reverse(*index));
+        mutations = indexed.into_iter().map(|(_, mutation)| mutation).collect();
+    }
     let mut applied = 0;
     let mut conflicts = Vec::new();
-    for mutation in &batch.mutations {
+    for mutation in mutations {
         let changed = match key_type.as_str() {
             "string" => apply_string_mutation(conn, &batch.table, mutation).await?,
             "hash" => apply_hash_mutation(conn, &batch.table, mutation).await?,
@@ -1803,6 +1829,7 @@ mod tests {
         let mutated = session
             .apply_mutations(&MutationBatch {
                 profile_id: session.profile().id,
+                database: session.profile().default_database.clone(),
                 schema: "hash".into(),
                 table: "user:1".into(),
                 mutations: vec![RowMutation {
@@ -1832,6 +1859,7 @@ mod tests {
         let deleted = session
             .apply_mutations(&MutationBatch {
                 profile_id: session.profile().id,
+                database: session.profile().default_database.clone(),
                 schema: "keys".into(),
                 table: "all".into(),
                 mutations: vec![RowMutation {
@@ -1858,6 +1886,223 @@ mod tests {
             .await
             .expect("exists");
         assert_eq!(missing.rows[0][0], JsonValue::Number(0.into()));
+    }
+
+    #[tokio::test]
+    async fn list_batches_keep_original_indices_when_deleting_and_updating() {
+        let Some((_server, session)) = start_test_redis().await else {
+            eprintln!("skipping live Redis test because redis-server is unavailable");
+            return;
+        };
+        session
+            .run_query("RPUSH tasks A B C D", None)
+            .await
+            .unwrap();
+        let mutation = |index: i64, original: &str, changed: &str, deleted| RowMutation {
+            original: vec![JsonValue::from(index), JsonValue::from(original)],
+            changes: vec![JsonValue::from(index), JsonValue::from(changed)],
+            primary_key: vec![JsonValue::from(index)],
+            xmin: None,
+            deleted,
+        };
+        let result = session
+            .apply_mutations(&MutationBatch {
+                profile_id: session.profile().id,
+                database: session.profile().default_database.clone(),
+                schema: "list".into(),
+                table: "tasks".into(),
+                mutations: vec![mutation(0, "A", "A", true), mutation(2, "C", "C", true)],
+            })
+            .await
+            .unwrap();
+        assert_eq!(result.applied, 2);
+        assert!(result.conflicts.is_empty());
+        assert_eq!(
+            session
+                .run_query("LRANGE tasks 0 -1", None)
+                .await
+                .unwrap()
+                .rows,
+            vec![vec![JsonValue::from("B")], vec![JsonValue::from("D")]]
+        );
+
+        session.run_query("DEL tasks", None).await.unwrap();
+        session
+            .run_query("RPUSH tasks A B C D E F G H I J K L", None)
+            .await
+            .unwrap();
+        let result = session
+            .apply_mutations(&MutationBatch {
+                profile_id: session.profile().id,
+                database: session.profile().default_database.clone(),
+                schema: "list".into(),
+                table: "tasks".into(),
+                mutations: vec![
+                    mutation(0, "A", "A", true),
+                    mutation(2, "C", "C", true),
+                    mutation(10, "K", "edited", false),
+                ],
+            })
+            .await
+            .unwrap();
+        assert_eq!(result.applied, 3);
+        assert!(result.conflicts.is_empty());
+        let expected: Vec<_> = ["B", "D", "E", "F", "G", "H", "I", "J", "edited", "L"]
+            .into_iter()
+            .map(|value| vec![JsonValue::from(value)])
+            .collect();
+        assert_eq!(
+            session
+                .run_query("LRANGE tasks 0 -1", None)
+                .await
+                .unwrap()
+                .rows,
+            expected
+        );
+    }
+
+    #[tokio::test]
+    async fn key_index_pages_reach_every_key_past_five_thousand() {
+        let Some((_server, session)) = start_test_redis().await else {
+            eprintln!("skipping live Redis test because redis-server is unavailable");
+            return;
+        };
+        let expected: Vec<_> = (0..5_100).map(|i| format!("item:{i:04}")).collect();
+        {
+            let mut conn = session.conn().await;
+            let mut pipe = redis_rs::pipe();
+            for key in &expected {
+                pipe.cmd("SET").arg(key).arg("value").ignore();
+            }
+            pipe.query_async::<()>(&mut *conn).await.unwrap();
+        }
+        let mut request = TablePageRequest {
+            profile_id: session.profile().id,
+            schema: "keys".into(),
+            table: "all".into(),
+            offset: 0,
+            limit: 1_000,
+            filters: Vec::new(),
+            order_by: None,
+            include_total: Some(true),
+        };
+        let mut found = Vec::new();
+        for page_index in 0..6 {
+            request.offset = page_index * 1_000;
+            let page = session.table_page(&request).await.unwrap();
+            assert_eq!(page.total_rows, Some(5_100));
+            assert_eq!(page.has_more, page_index < 5);
+            if page_index == 0 {
+                let stats = session.run_query("INFO commandstats", None).await.unwrap();
+                let stats = stats.rows[0][0].as_str().unwrap();
+                for command in ["type", "ttl"] {
+                    assert!(
+                        stats.lines().any(|line| {
+                            line.starts_with(&format!("cmdstat_{command}:calls=1000,"))
+                        }),
+                        "only visible keys need {command}: {stats}"
+                    );
+                }
+            }
+            found.extend(
+                page.rows
+                    .into_iter()
+                    .map(|row| row[0].as_str().unwrap().to_owned()),
+            );
+        }
+        assert_eq!(found, expected, "default key order is stable and complete");
+
+        request.order_by = Some(OrderSpec {
+            column: "key".into(),
+            descending: true,
+        });
+        request.offset = 5_000;
+        request.include_total = Some(false);
+        let page = session.table_page(&request).await.unwrap();
+        assert_eq!(page.total_rows, None);
+        assert!(!page.has_more);
+        let found: Vec<_> = page
+            .rows
+            .iter()
+            .map(|row| row[0].as_str().unwrap())
+            .collect();
+        let reverse_tail: Vec<_> = expected[..100].iter().rev().map(String::as_str).collect();
+        assert_eq!(found, reverse_tail);
+
+        request.order_by = None;
+        request.filters = vec![FilterCondition {
+            column: "ttl".into(),
+            operator: FilterOperator::Equals,
+            value: Some("-1".into()),
+        }];
+        request.include_total = Some(true);
+        let page = session.table_page(&request).await.unwrap();
+        assert_eq!(page.total_rows, Some(5_100));
+        assert!(!page.has_more);
+        let found: Vec<_> = page
+            .rows
+            .iter()
+            .map(|row| row[0].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            found,
+            expected[5_000..]
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[tokio::test]
+    async fn queued_mutations_cannot_write_to_a_different_database() {
+        use crate::session::DbSession;
+
+        let Some((_server, original)) = start_test_redis().await else {
+            eprintln!("skipping live Redis test because redis-server is unavailable");
+            return;
+        };
+        original
+            .run_query("SET greeting old-db", None)
+            .await
+            .unwrap();
+        let mut batch = MutationBatch {
+            profile_id: original.profile().id,
+            database: "0".into(),
+            schema: "string".into(),
+            table: "greeting".into(),
+            mutations: vec![RowMutation {
+                original: vec![JsonValue::from("greeting"), JsonValue::from("old-db")],
+                changes: vec![JsonValue::from("greeting"), JsonValue::from("edited")],
+                primary_key: vec![JsonValue::from("greeting")],
+                xmin: None,
+                deleted: false,
+            }],
+        };
+        let mut profile = original.profile().clone();
+        profile.default_database = "1".into();
+        let switched = DbSession::connect(profile, None).await.unwrap();
+        switched
+            .run_query("SET greeting new-db", None)
+            .await
+            .unwrap();
+        let error = switched.apply_mutations(&batch).await.unwrap_err();
+        assert!(error.to_string().contains("active database changed"));
+        assert_eq!(
+            switched.run_query("GET greeting", None).await.unwrap().rows,
+            vec![vec![JsonValue::from("new-db")]]
+        );
+        assert_eq!(
+            original.run_query("GET greeting", None).await.unwrap().rows,
+            vec![vec![JsonValue::from("old-db")]]
+        );
+
+        batch.database = "1".into();
+        batch.mutations[0].original[1] = JsonValue::from("new-db");
+        assert_eq!(switched.apply_mutations(&batch).await.unwrap().applied, 1);
+        assert_eq!(
+            switched.run_query("GET greeting", None).await.unwrap().rows,
+            vec![vec![JsonValue::from("edited")]]
+        );
     }
 
     #[tokio::test]

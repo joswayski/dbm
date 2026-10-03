@@ -1100,6 +1100,12 @@ impl Workbench {
         let state = self.tables.get(&tab_id)?;
         Some(MutationBatch {
             profile_id,
+            database: self
+                .workspaces
+                .get(&profile_id)?
+                .profile
+                .default_database
+                .clone(),
             schema,
             table,
             mutations: state
@@ -3822,7 +3828,7 @@ mod tests {
         assert_eq!(app.query_results[&first].rows, vec![vec![json!(37)]]);
         assert!(!app.query_results.contains_key(&second));
         let mut table = TableState::default();
-        table.page = Some(page());
+        table.page = Some(std::sync::Arc::new(page()));
         let row = page().rows[0].clone();
         table.pending.insert(0, pending_row(&page(), &row));
         app.tables.insert(first, table);
@@ -3935,6 +3941,40 @@ mod tests {
         app.close_table_tabs(id);
         assert!(!app.query_results.contains_key(&tab));
         assert!(app.tabs[0].embedded.is_none());
+    }
+
+    #[test]
+    fn mutation_requests_capture_the_active_database_before_queueing() {
+        let mut app = app();
+        let mut profile = DemoStore::new().profiles().remove(0);
+        let id = profile.id;
+        profile.default_database = "first-db".into();
+        app.workspaces.insert(
+            id,
+            WorkspaceInfo {
+                profile,
+                databases: vec![],
+            },
+        );
+        app.open_table(id, "public".into(), "customers".into());
+        let tab = app.active_tab.unwrap();
+        let page = page();
+        app.tables
+            .get_mut(&tab)
+            .unwrap()
+            .pending
+            .insert(0, pending_row(&page, &page.rows[0]));
+        let batch = app.mutation_batch(tab).unwrap();
+        app.workspaces
+            .get_mut(&id)
+            .unwrap()
+            .profile
+            .default_database = "second-db".into();
+        assert_eq!(batch.database, "first-db");
+        assert_eq!(batch.profile_id, id);
+        assert_eq!(batch.schema, "public");
+        assert_eq!(batch.table, "customers");
+        assert_eq!(batch.mutations.len(), 1);
     }
 
     #[test]
