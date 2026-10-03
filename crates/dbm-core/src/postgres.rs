@@ -1109,6 +1109,7 @@ mod tests {
                 .get(0);
             let batch = MutationBatch {
                 profile_id: Uuid::nil(),
+                database: session.profile().default_database.clone(),
                 schema,
                 table: "batch_validation".into(),
                 mutations: vec![
