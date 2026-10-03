@@ -28,7 +28,8 @@ updates.
   `tools/dbm-sign` produces the signatures in the release workflow.
 - `apps/native/icons` holds the app icon: `icon.icns` for the macOS bundle,
   `icon.ico` for the Windows executable and installer, and `icon.png` for the
-  egui window and the AppImage.
+  egui window and the AppImage. All three use the same isolated database artwork
+  with a transparent background, rather than an opaque square behind the icon.
 
 Database I/O runs off the UI thread. Passwords remain in the OS credential store,
 not SQLite. Profiles, queries, and results are not sent to an off-device service.
