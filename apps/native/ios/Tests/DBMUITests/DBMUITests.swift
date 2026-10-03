@@ -8,6 +8,7 @@ final class DBMUITests: XCTestCase {
         retainScreenshot(app, named: "iphone-connections")
         app.buttons["add-connection"].tap()
         XCTAssertTrue(app.staticTexts["New connection"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.textFields["port"].value as? String, "5432")
         let name = app.textFields["name"]; name.tap(); name.typeText("Demo PostgreSQL")
         let username = app.textFields["username"]; username.tap(); username.typeText("demo_user")
         let password = app.secureTextFields["password"]; password.tap(); password.typeText("memory-only")
@@ -54,9 +55,13 @@ final class DBMUITests: XCTestCase {
         let publicSchema = app.buttons["schema-item-public"]
         XCTAssertTrue(publicSchema.waitForExistence(timeout: 5))
         XCTAssertTrue(publicSchema.isEnabled)
+        XCTAssertEqual(publicSchema.value as? String, "Collapsed")
         publicSchema.tap()
         let users = app.buttons["schema-item-users"]
         XCTAssertTrue(users.waitForExistence(timeout: 5))
+        XCTAssertEqual(app.buttons.matching(identifier: "schema-item-public").count, 1)
+        XCTAssertEqual(app.buttons.matching(identifier: "schema-item-users").count, 1)
+        XCTAssertEqual(publicSchema.value as? String, "Expanded")
         retainScreenshot(app, named: "iphone-schema-expanded")
         users.tap()
         XCTAssertFalse(app.textViews["query-editor"].exists)

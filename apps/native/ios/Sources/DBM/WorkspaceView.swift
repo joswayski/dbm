@@ -77,20 +77,20 @@ struct SourceList: View {
             ScrollView {
             VStack(alignment: .leading, spacing: 0) {
             Text("Connections").sectionLabel()
-            ForEach(model.profiles) { profile in
+            ForEach(model.profiles.sorted { $0.id == model.active?.id && $1.id != model.active?.id }) { profile in
                 Button {
                     if model.active?.id == profile.id { close?() }
                     else if model.isDemo { model.connect(profile); close?() }
                     else { editor = ProfileDraft(profile) }
                 } label: { HStack(spacing: 9) { Circle().fill(Color(hex: profile.color)).frame(width: 8, height: 8); VStack(alignment: .leading, spacing: 2) { Text(profile.name); Text("\(profile.engine.title) · \(profile.host)").foregroundStyle(Graphite.faint).font(.custom("Geist-Regular", size: 11)) }; Spacer() }.padding(.horizontal, 10).frame(height: 44).background(model.active?.id == profile.id ? Color.white.opacity(0.06) : .clear).clipShape(RoundedRectangle(cornerRadius: 6)) }.buttonStyle(.plain).accessibilityIdentifier("source-profile-\(profile.id)")
-            }
-            if model.active != nil {
+            if model.active?.id == profile.id {
                 Divider().overlay(Graphite.border).padding(.vertical, 8)
                 Text("Database").sectionLabel()
                 Picker("Database", selection: Binding(get: { model.database }, set: model.switchDatabase)) { ForEach(model.databases, id: \.self, content: Text.init) }.pickerStyle(.menu).padding(.horizontal, 8).accessibilityIdentifier("database-picker")
                 HStack { Text(model.active?.engine == .redis ? "Keys" : "Schema").sectionLabel(); Spacer(); Button { model.loadSchema() } label: { Image(systemName: "arrow.clockwise").frame(width: 44, height: 44) }.accessibilityLabel("Refresh schema") }
                 TextField("Filter schema", text: $filter).graphiteField().padding(8).accessibilityIdentifier("schema-filter")
                 SchemaTree(items: model.schema, filter: filter, close: close)
+            }
             }
             }
             }.frame(maxHeight: .infinity).accessibilityIdentifier("source-list-scroll")
@@ -105,10 +105,16 @@ private struct SchemaTree: View {
     @EnvironmentObject var model: AppModel
     let items: [SchemaItem], filter: String
     let close: (() -> Void)?
+    @State private var expanded: Set<UUID> = []
     var body: some View { VStack(alignment: .leading, spacing: 2) { ForEach(items) { node in
         if filter.isEmpty || node.name.localizedCaseInsensitiveContains(filter) || node.children?.contains(where: { $0.name.localizedCaseInsensitiveContains(filter) }) == true {
             if let schema = node.schema, let table = node.table { Button { model.browse(schema: schema, table: table); close?() } label: { Label(node.name, systemImage: model.active?.engine == .redis ? "key" : "tablecells").frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 22).frame(height: 36).background(model.showingTable && model.selectedTable?.schema == schema && model.selectedTable?.table == table ? Color(hex: model.active?.color ?? "#4c9aff").opacity(0.18) : .clear) }.buttonStyle(.plain).accessibilityIdentifier("schema-item-\(node.name)") }
-            else { DisclosureGroup { SchemaTree(items: node.children ?? [], filter: filter, close: close) } label: { Label(node.name, systemImage: "folder").frame(height: 32) }.padding(.horizontal, 10).accessibilityIdentifier("schema-item-\(node.name)") }
+            else {
+                Button { if expanded.contains(node.id) { expanded.remove(node.id) } else { expanded.insert(node.id) } } label: {
+                    HStack(spacing: 6) { Image(systemName: expanded.contains(node.id) ? "chevron.down" : "chevron.right").font(.system(size: 9)).foregroundStyle(Graphite.faint).frame(width: 10); Label(node.name, systemImage: "folder"); Spacer() }.frame(height: 36).padding(.horizontal, 10)
+                }.buttonStyle(.plain).accessibilityLabel(node.name).accessibilityValue(expanded.contains(node.id) ? "Expanded" : "Collapsed").accessibilityIdentifier("schema-item-\(node.name)")
+                if expanded.contains(node.id) || !filter.isEmpty { SchemaTree(items: node.children ?? [], filter: filter, close: close).padding(.leading, 14) }
+            }
         }
     } }.font(.custom("Geist-Regular", size: 12.5)) }
 }

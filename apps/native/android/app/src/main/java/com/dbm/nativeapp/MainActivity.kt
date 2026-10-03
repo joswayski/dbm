@@ -17,6 +17,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -70,6 +71,7 @@ private val Success = Color(0xff5ad394); private val Danger = Color(0xffff8a80)
 private val Palette = listOf("#4c9aff", "#ff9f43", "#3dd6c6", "#b48cff", "#ff6b8a", "#7ed957", "#f0b14c", "#8e8e93")
 private val UiFont = FontFamily(Font(R.font.geist)); private val MonoFont = FontFamily(Font(R.font.geist_mono))
 private fun profileColor(value: String?) = runCatching { Color(android.graphics.Color.parseColor(value ?: "#4c9aff")) }.getOrDefault(Accent)
+private fun engineTitle(value: String) = when(value) { "postgres" -> "PostgreSQL"; "mysql" -> "MySQL"; else -> "Redis" }
 
 @Composable fun DbmApp(vm: DbmViewModel = viewModel()) {
     val owner = LocalLifecycleOwner.current
@@ -106,7 +108,7 @@ private fun profileColor(value: String?) = runCatching { Color(android.graphics.
     var deleting by remember { mutableStateOf<Profile?>(null) }
     Column(Modifier.fillMaxSize().background(Sidebar)) {
         Row(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-            DbIcon(Icon.Database, TextStrong); Spacer(Modifier.width(9.dp)); Text("DBM", color = TextStrong, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+            DbIcon(Icon.Database, Accent); Spacer(Modifier.width(9.dp)); Text("DBM", color = TextStrong, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
         }
         Text("Connections", color = Muted, fontWeight = FontWeight.SemiBold, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
         LazyColumn(Modifier.weight(1f).padding(horizontal = 8.dp)) {
@@ -114,7 +116,7 @@ private fun profileColor(value: String?) = runCatching { Color(android.graphics.
             items(vm.state.profiles, key = { it.id }) { p ->
                 Row(Modifier.fillMaxWidth().heightIn(min = 54.dp).clip(RoundedCornerShape(6.dp)).clickable(enabled = !vm.state.busy) { vm.select(p) }.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
                     Dot(profileColor(p.color), false); Spacer(Modifier.width(10.dp))
-                    Column(Modifier.weight(1f)) { Text(p.name, color = Text, fontWeight = FontWeight.Medium); Text("${p.engine}  ${p.host}:${p.port}", color = Faint, fontSize = 11.sp, maxLines = 1) }
+                    Column(Modifier.weight(1f)) { Text(p.name, color = Text, fontWeight = FontWeight.Medium); Text("${engineTitle(p.engine)}  ${p.host}:${p.port}", color = Faint, fontSize = 11.sp, maxLines = 1) }
                     SmallButton("Delete", danger = true, enabled = !vm.state.busy) { deleting = p }
                 }
             }
@@ -128,7 +130,7 @@ private fun profileColor(value: String?) = runCatching { Color(android.graphics.
     val d = vm.state.draft
     LazyColumn(Modifier.fillMaxSize().background(Color(0xff262629)).padding(horizontal = 18.dp), verticalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(vertical = 18.dp)) {
         item { Row(verticalAlignment = Alignment.Top) { Column(Modifier.weight(1f)) { Text(d.engine.uppercase(), color = Muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold); Text(if (d.id == null) "New connection" else "Edit connection", color = TextStrong, fontSize = 17.sp, fontWeight = FontWeight.SemiBold) }; SmallButton("Cancel", enabled = !vm.state.busy, action = vm::cancelForm) } }
-        item { Label("Database engine"); Row(Modifier.fillMaxWidth().background(Control, RoundedCornerShape(7.dp)).padding(2.dp)) { listOf("postgres", "mysql", "redis").forEach { e -> Segment(e.replaceFirstChar(Char::uppercase), d.engine == e, Modifier.weight(1f)) { vm.editDraft { it.copy(engine = e, port = when(e) { "postgres" -> "5432"; "mysql" -> "3306"; else -> "6379" }, database = if (e == "redis") "0" else "") } } } } }
+        item { Label("Database engine"); Row(Modifier.fillMaxWidth().background(Control, RoundedCornerShape(7.dp)).padding(2.dp)) { listOf("postgres", "mysql", "redis").forEach { e -> Segment(engineTitle(e), d.engine == e, Modifier.weight(1f)) { vm.editDraft { it.copy(engine = e, port = when(e) { "postgres" -> "5432"; "mysql" -> "3306"; else -> "6379" }, database = if (e == "redis") "0" else "") } } } } }
         item { GField("Name", d.name) { vm.editDraft { x -> x.copy(name = it) } } }
         item { Label("Connection color"); Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) { Palette.forEach { hex -> val selected = d.color.equals(hex, true); Box(Modifier.size(30.dp).clip(RoundedCornerShape(15.dp)).then(if(selected) Modifier.border(2.dp, Text, RoundedCornerShape(15.dp)) else Modifier).clickable { vm.editDraft { it.copy(color = hex) } }.testTag("color-$hex"), contentAlignment = Alignment.Center) { Dot(profileColor(hex), true) } }; GField("Custom", d.color, Modifier.width(112.dp)) { vm.editDraft { x -> x.copy(color = it) } } } }
         item { Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) { GField("Host", d.host, Modifier.weight(2f)) { vm.editDraft { x -> x.copy(host = it) } }; GField("Port", d.port, Modifier.weight(1f)) { vm.editDraft { x -> x.copy(port = it) } } } }
@@ -152,23 +154,24 @@ private fun profileColor(value: String?) = runCatching { Color(android.graphics.
 @Composable private fun SourceList(vm: DbmViewModel, modifier: Modifier = Modifier, onNavigate: () -> Unit = {}) {
     var filter by remember { mutableStateOf("") }; var databaseMenu by remember { mutableStateOf(false) }; val s = vm.state
     Column(modifier.fillMaxHeight().background(Sidebar).border(0.5.dp, Border)) {
-        Row(Modifier.height(48.dp).fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) { DbIcon(Icon.Database, TextStrong); Spacer(Modifier.width(8.dp)); Text("DBM", color = TextStrong, fontWeight = FontWeight.SemiBold) }
+        Row(Modifier.height(48.dp).fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) { DbIcon(Icon.Database, Accent); Spacer(Modifier.width(8.dp)); Text("DBM", color = TextStrong, fontWeight = FontWeight.SemiBold) }
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).testTag("schema")) {
         Text("Connections", color = Muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
-        s.profiles.forEach { p ->
-            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp).clip(RoundedCornerShape(6.dp)).background(if(s.active?.id == p.id) Color.White.copy(alpha = .06f) else Color.Transparent).clickable(enabled = !s.busy) { if(s.active?.id != p.id) vm.select(p); onNavigate() }.padding(10.dp).testTag("source-profile-${p.id}"), verticalAlignment = Alignment.CenterVertically) { Dot(profileColor(p.color), false); Spacer(Modifier.width(9.dp)); Column(Modifier.weight(1f)) { Text(p.name, color = Text, fontWeight = FontWeight.Medium, maxLines = 1); Text("${p.engine}  ${p.host}:${p.port}", color = Faint, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) } }
+        s.profiles.sortedBy { it.id != s.active?.id }.forEach { p ->
+            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp).clip(RoundedCornerShape(6.dp)).background(if(s.active?.id == p.id) Color.White.copy(alpha = .06f) else Color.Transparent).clickable(enabled = !s.busy) { if(s.active?.id != p.id) vm.select(p); onNavigate() }.padding(10.dp).testTag("source-profile-${p.id}"), verticalAlignment = Alignment.CenterVertically) { Dot(profileColor(p.color), false); Spacer(Modifier.width(9.dp)); Column(Modifier.weight(1f)) { Text(p.name, color = Text, fontWeight = FontWeight.Medium, maxLines = 1); Text("${engineTitle(p.engine)}  ${p.host}:${p.port}", color = Faint, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) } }
+            if(s.active?.id == p.id) {
+                Text("Database", color = Muted, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
+                Box(Modifier.padding(horizontal = 10.dp)) {
+                    SecondaryButton(s.database, Icon.Database, Modifier.fillMaxWidth().testTag("database-picker"), !s.busy) { databaseMenu = true }
+                    DropdownMenu(databaseMenu, { databaseMenu = false }) { s.databases.filter { it.isConnectable }.forEach { db -> DropdownMenuItem(text = { Text(db.name) }, onClick = { databaseMenu = false; vm.selectDatabase(db.name) }) } }
+                }
+                GField("Filter schema", filter, Modifier.padding(8.dp), tag = "tree-filter") { filter = it }
+                Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) { Text("Schema", color = Muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f)); SmallButton("Refresh", enabled = !s.busy, action = vm::refreshSchema) }
+                SchemaTree(vm, s.tree, filter, onNavigate)
+            }
         }
-        Text("Database", color = Muted, fontSize = 11.sp, modifier = Modifier.padding(12.dp))
-        Box(Modifier.padding(horizontal = 10.dp)) {
-            SecondaryButton(s.database, Icon.Database, Modifier.fillMaxWidth().testTag("database-picker"), !s.busy) { databaseMenu = true }
-            DropdownMenu(databaseMenu, { databaseMenu = false }) { s.databases.filter { it.isConnectable }.forEach { db -> DropdownMenuItem(text = { Text(db.name) }, onClick = { databaseMenu = false; vm.selectDatabase(db.name) }) } }
-        }
-        GField("Filter schema", filter, Modifier.padding(8.dp), tag = "tree-filter") { filter = it }
-        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) { Text("Schema", color = Muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f)); SmallButton("Refresh", enabled = !s.busy, action = vm::refreshSchema) }
-        SchemaTree(vm, s.tree, filter, onNavigate)
         }
         SecondaryButton("New connection", Icon.Plus, Modifier.fillMaxWidth().padding(10.dp), !s.busy, vm::add)
-        SmallButton("Disconnect", enabled = !s.busy, modifier = Modifier.fillMaxWidth(), action = vm::disconnect)
     }
 }
 
@@ -189,7 +192,7 @@ private fun matches(node: SchemaNode, filter: String): Boolean = node.name.conta
 @Composable private fun WorkbenchMain(vm: DbmViewModel, openDrawer: (() -> Unit)?) {
     val s = vm.state; val color = profileColor(s.active?.color)
     Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().height(44.dp).background(Chrome).padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) { if(openDrawer != null) { IconButton(openDrawer, Modifier.testTag("source-toggle").semantics { contentDescription = "Show source list" }) { DbIcon(Icon.Sidebar, Secondary) }; Spacer(Modifier.width(4.dp)) }; Dot(color, false); Spacer(Modifier.width(8.dp)); Text(s.active?.name ?: "Connection", color = TextStrong, fontWeight = FontWeight.Medium); Text("  ·  ${s.database}", color = Muted, fontSize = 12.sp, maxLines = 1) }
+        Row(Modifier.fillMaxWidth().height(44.dp).background(Chrome).padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) { if(openDrawer != null) { IconButton(openDrawer, Modifier.testTag("source-toggle").semantics { contentDescription = "Show source list" }) { DbIcon(Icon.Sidebar, Secondary) }; Spacer(Modifier.width(4.dp)) }; Dot(color, false); Spacer(Modifier.width(8.dp)); Column(Modifier.weight(1f)) { Text(s.active?.name ?: "Connection", color = TextStrong, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis); Text(s.database, color = Muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }; IconButton(vm::disconnect, enabled = !s.busy, modifier = Modifier.semantics { contentDescription = "Disconnect" }) { DbIcon(Icon.Close, Secondary) } }
         Row(Modifier.fillMaxWidth().height(38.dp).background(Chrome).horizontalScroll(rememberScrollState())) {
             Tab("${if(s.active?.engine == "redis") "Redis" else "SQL"} query", Icon.Query, s.screen != Screen.Browse, color, vm::backToQuery)
             s.table?.let { table -> Tab(table.second, Icon.Table, s.screen == Screen.Browse, color, vm::showTable) }
@@ -219,7 +222,7 @@ private fun matches(node: SchemaNode, filter: String): Boolean = node.name.conta
     if(columns.isEmpty()) { Box(modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { Text("No results", color = Faint, fontSize = 12.sp) }; return }
     Box(modifier.horizontalScroll(rememberScrollState()).verticalScroll(rememberScrollState()).testTag("results")) { Column { Row(Modifier.background(GridHeader)) { columns.forEach { Cell(it, true) } }; rows.forEach { row -> Row { columns.indices.forEach { index -> val value = row.getOrNull(index); Cell(if(value == null || value is JsonNull) "NULL" else (value as? JsonPrimitive)?.contentOrNull ?: value.toString(), false) } } } } }
 }
-@Composable private fun Cell(value: String, header: Boolean) { Text(value, color = if(header) Text else Secondary, fontFamily = MonoFont, fontSize = if(header) 11.sp else 12.sp, modifier = Modifier.width(160.dp).height(if(header) 34.dp else 32.dp).border(0.5.dp, if(header) Border else Color(0xff202023)).padding(horizontal = 8.dp, vertical = 7.dp), maxLines = 1, overflow = TextOverflow.Ellipsis) }
+@Composable private fun Cell(value: String, header: Boolean) { Text(value, color = Text, fontFamily = MonoFont, fontSize = if(header) 11.sp else 12.sp, modifier = Modifier.width(160.dp).height(if(header) 34.dp else 32.dp).drawBehind { drawLine(if(header) Border else Color(0xff202023), Offset(0f, size.height), Offset(size.width, size.height), .5.dp.toPx()) }.padding(horizontal = 8.dp, vertical = 7.dp), maxLines = 1, overflow = TextOverflow.Ellipsis) }
 
 @Composable private fun GField(label: String, value: String, modifier: Modifier = Modifier, password: Boolean = false, tag: String? = null, changed: (String) -> Unit) { Column(modifier) { Label(label); TextField(value, changed, singleLine = true, visualTransformation = if(password) PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None, textStyle = TextStyle(Text, 13.sp, fontFamily = if(label == "Port" || label == "Custom") MonoFont else UiFont), colors = TextFieldDefaults.colors(focusedContainerColor = Control, unfocusedContainerColor = Control, focusedIndicatorColor = Accent, unfocusedIndicatorColor = BorderStrong, cursorColor = Accent), shape = RoundedCornerShape(6.dp), modifier = Modifier.fillMaxWidth().height(48.dp).then(if(tag != null) Modifier.testTag(tag) else Modifier)) } }
 @Composable private fun GEditor(value: String, changed: (String) -> Unit, modifier: Modifier) { TextField(value, changed, textStyle = TextStyle(Text, 12.sp, fontFamily = MonoFont), colors = TextFieldDefaults.colors(focusedContainerColor = Bg, unfocusedContainerColor = Bg, focusedIndicatorColor = Accent, unfocusedIndicatorColor = Border, cursorColor = Accent), shape = RoundedCornerShape(0.dp), modifier = modifier) }
@@ -236,7 +239,7 @@ private fun matches(node: SchemaNode, filter: String): Boolean = node.name.conta
 
 @Composable private fun PrimaryButton(text: String, icon: Icon? = null, modifier: Modifier = Modifier, enabled: Boolean = true, action: () -> Unit) { Button(action, modifier.heightIn(min = 40.dp), enabled, shape = RoundedCornerShape(6.dp), colors = ButtonDefaults.buttonColors(AccentStrong, Color.White, Control, Faint), contentPadding = PaddingValues(horizontal = 13.dp, vertical = 7.dp)) { if(icon != null) { DbIcon(icon, Color.White); Spacer(Modifier.width(6.dp)) }; Text(text, fontSize = 12.sp, fontWeight = FontWeight.SemiBold) } }
 @Composable private fun SecondaryButton(text: String, icon: Icon? = null, modifier: Modifier = Modifier, enabled: Boolean = true, action: () -> Unit) { Button(action, modifier.heightIn(min = 40.dp), enabled, shape = RoundedCornerShape(6.dp), colors = ButtonDefaults.buttonColors(Control, Text, Control, Faint), border = BorderStroke(1.dp, BorderStrong), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 7.dp)) { if(icon != null) { DbIcon(icon, if(enabled) Secondary else Faint); Spacer(Modifier.width(6.dp)) }; Text(text, fontSize = 12.sp) } }
-@Composable private fun SmallButton(text: String, danger: Boolean = false, enabled: Boolean = true, modifier: Modifier = Modifier, action: () -> Unit) { TextButton(action, modifier.heightIn(min = 40.dp), enabled, shape = RoundedCornerShape(5.dp), contentPadding = PaddingValues(horizontal = 9.dp, vertical = 5.dp), colors = ButtonDefaults.textButtonColors(if(danger) Danger else Secondary, disabledContentColor = Faint)) { Text(text, fontSize = 12.sp) } }
+@Composable private fun SmallButton(text: String, danger: Boolean = false, enabled: Boolean = true, modifier: Modifier = Modifier, action: () -> Unit) { TextButton(action, modifier.heightIn(min = 40.dp), enabled, shape = RoundedCornerShape(5.dp), contentPadding = PaddingValues(horizontal = 9.dp, vertical = 5.dp), colors = ButtonDefaults.textButtonColors(contentColor = if(danger) Danger else Secondary, disabledContentColor = Faint)) { Text(text, fontSize = 12.sp) } }
 
 private enum class Icon { Database, Table, Folder, Query, Refresh, Play, Plus, Close, Sidebar, ChevronDown, ChevronRight }
 @Composable private fun DbIcon(icon: Icon, color: Color) { Canvas(Modifier.size(16.dp)) { withTransform({ scale(size.width / 16f, size.height / 16f, Offset.Zero) }) { val w = 1.5f; val stroke = Stroke(w, cap = StrokeCap.Round); when(icon) {

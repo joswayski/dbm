@@ -72,6 +72,7 @@ class DemoNavigationTest {
             check(automation.setRotation(UiAutomation.ROTATION_FREEZE_90))
             compose.waitUntil(10_000) { compose.onAllNodesWithTag("source-toggle").fetchSemanticsNodes().isEmpty() }
             compose.onNodeWithTag("tree-filter").assertExists()
+            compose.onNodeWithTag("database-picker").assertIsDisplayed()
             compose.onNodeWithText("Rows 1–25").assertExists()
             compose.onNodeWithTag("editor").assertDoesNotExist()
             capture("landscape-table")
@@ -90,6 +91,9 @@ class DemoNavigationTest {
         compose.onNodeWithText("Production").performClick()
         compose.waitUntil(10_000) { compose.onAllNodesWithTag("editor").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithTag("run").assertIsEnabled()
+        compose.onNodeWithContentDescription("Disconnect").performClick()
+        awaitConnections()
+        compose.onNodeWithTag("editor").assertDoesNotExist()
     }
 
     @Test fun deletingAConnectionRequiresConfirmation() {

@@ -3,7 +3,7 @@ import Foundation
 enum Engine: String, CaseIterable, Codable, Identifiable {
     case postgres, mysql, redis
     var id: String { rawValue }
-    var title: String { self == .postgres ? "PostgreSQL" : rawValue.capitalized }
+    var title: String { self == .postgres ? "PostgreSQL" : self == .mysql ? "MySQL" : "Redis" }
     var defaultPort: Int { self == .postgres ? 5432 : self == .mysql ? 3306 : 6379 }
     var defaultDatabase: String { self == .postgres ? "postgres" : self == .mysql ? "mysql" : "0" }
 }
