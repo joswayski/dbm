@@ -73,7 +73,7 @@ class DbmViewModel(application: Application, val demo: Boolean = false) : Androi
         val workspace: Workspace = bridge.json.decodeFromJsonElement(call(expected, command("connect", profile.id)))
         state = state.copy(screen = Screen.Query, active = workspace.profile, databases = workspace.databases,
             database = workspace.profile.defaultDatabase, sql = if (profile.engine == "redis") "PING" else "SELECT 1",
-            queryColumns = emptyList(), queryRows = emptyList(), columns = emptyList(), rows = emptyList(), table = null)
+            lastExecuted = null, queryColumns = emptyList(), queryRows = emptyList(), columns = emptyList(), rows = emptyList(), table = null)
         loadSchema(expected, profile.id)
     }
     private suspend fun loadSchema(expected: Long, id: String) {
@@ -85,15 +85,18 @@ class DbmViewModel(application: Application, val demo: Boolean = false) : Androi
     fun selectDatabase(database: String) = launch { expected ->
         val p = state.active ?: return@launch
         call(expected, buildJsonObject { put("command", "connectDatabase"); put("profile_id", p.id); put("database", database) })
-        state = state.copy(screen = Screen.Query, database = database, queryColumns = emptyList(), queryRows = emptyList(),
+        state = state.copy(screen = Screen.Query, database = database, lastExecuted = null, queryColumns = emptyList(), queryRows = emptyList(),
             columns = emptyList(), rows = emptyList(), table = null)
         loadSchema(expected, p.id)
     }
     fun setSql(sql: String) { if (!state.busy) state = state.copy(sql = sql) }
-    fun query() = launch { expected ->
+    fun query() = query(state.sql)
+    fun refreshQuery() { state.lastExecuted?.let { query(it) } }
+    private fun query(sql: String) = launch { expected ->
         val p = state.active ?: return@launch
-        val result: QueryResult = bridge.json.decodeFromJsonElement(call(expected, buildJsonObject { put("command", "query"); putJsonObject("request") { put("profileId", p.id); put("sql", state.sql); put("maxRows", 1000) } }))
-        state = state.copy(queryColumns = result.columns.map { it.name }, queryRows = result.rows,
+        if (sql.isBlank()) return@launch
+        val result: QueryResult = bridge.json.decodeFromJsonElement(call(expected, buildJsonObject { put("command", "query"); putJsonObject("request") { put("profileId", p.id); put("sql", sql); put("maxRows", 1000) } }))
+        state = state.copy(lastExecuted = sql, queryColumns = result.columns.map { it.name }, queryRows = result.rows,
             message = if (result.truncated) "Results truncated at 1,000 rows" else "${result.rows.size} rows · ${result.durationMs} ms")
     }
     fun browse(schema: String, table: String, offset: Int = 0) = launch { expected ->

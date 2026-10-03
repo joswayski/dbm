@@ -76,6 +76,14 @@ final class DBMUITests: XCTestCase {
         XCTAssertFalse(app.buttons["Previous"].isEnabled)
         XCTAssertTrue(app.buttons["Next"].isEnabled)
         retainScreenshot(named: "iphone-table-page-1")
+        let header = app.staticTexts["result-column-0"]
+        let headerY = header.frame.minY
+        XCTAssertTrue(header.isHittable)
+        app.scrollViews["results-rows"].swipeUp()
+        XCTAssertTrue(header.isHittable)
+        XCTAssertEqual(header.frame.minY, headerY, accuracy: 1)
+        XCTAssertTrue(app.otherElements["result-row-25"].isHittable)
+        retainScreenshot(named: "iphone-table-scrolled")
 
         app.buttons["Next"].tap()
         XCTAssertTrue(app.staticTexts["Rows 26–40"].waitForExistence(timeout: 10))
@@ -91,6 +99,36 @@ final class DBMUITests: XCTestCase {
         app.buttons["users"].tap()
         XCTAssertFalse(app.textViews["query-editor"].exists)
         XCTAssertTrue(app.staticTexts["Rows 26–40"].exists)
+    }
+
+    func testQueryRefreshKeepsTheLastExecutedStatementAndEditorDraft() {
+        let app = launchDemo()
+        XCTAssertTrue(app.staticTexts["Production"].waitForExistence(timeout: 10))
+        app.buttons["connect-00000000-0000-0000-0000-000000000001"].tap()
+        let editor = app.textViews["query-editor"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 10))
+        let refresh = app.buttons["refresh-query"]
+        XCTAssertFalse(refresh.isEnabled)
+        XCTAssertLessThan(app.buttons["run-query"].frame.maxY, editor.frame.minY)
+        app.buttons["run-query"].tap()
+        let row = app.otherElements["result-row-1"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        editor.tap()
+        editor.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 30) + "SHOW DATABASES")
+        XCTAssertEqual(editor.value as? String, "SHOW DATABASES")
+        refresh.tap()
+        XCTAssertTrue(row.label.contains("full_name: Maya Okafor"), row.label)
+        XCTAssertEqual(editor.value as? String, "SHOW DATABASES")
+        retainScreenshot(named: "iphone-query-refresh")
+        app.buttons["run-query"].tap()
+        expectation(for: NSPredicate(format: "label CONTAINS %@", "result: DBM demo"), evaluatedWith: row)
+        waitForExpectations(timeout: 10)
+        editor.tap()
+        editor.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 30) + "SELECT 1")
+        XCTAssertEqual(editor.value as? String, "SELECT 1")
+        refresh.tap()
+        XCTAssertTrue(row.label.contains("result: DBM demo"), row.label)
+        XCTAssertEqual(editor.value as? String, "SELECT 1")
     }
 
     func testInvalidConnectionShowsValidationError() {

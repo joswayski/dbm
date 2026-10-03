@@ -11,6 +11,7 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.rules.ActivityScenarioRule
 import androidx.test.platform.app.InstrumentationRegistry
 import java.io.File
+import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.rules.RuleChain
 import org.junit.Test
@@ -54,6 +55,13 @@ class DemoNavigationTest {
         compose.onNodeWithText("Previous").performClick()
         compose.waitUntil(10_000) { compose.onAllNodesWithText("Rows 1–25").fetchSemanticsNodes().isNotEmpty() }
         capture("table")
+        val headerTop = compose.onNodeWithTag("results-header").fetchSemanticsNode().boundsInRoot.top
+        val firstRowTop = compose.onNodeWithText("Maya Okafor").fetchSemanticsNode().boundsInRoot.top
+        compose.onNodeWithTag("results-rows").performTouchInput { swipeUp() }
+        compose.onNodeWithText("id").assertIsDisplayed()
+        assertEquals(headerTop, compose.onNodeWithTag("results-header").fetchSemanticsNode().boundsInRoot.top, 0.5f)
+        check(compose.onNodeWithText("Maya Okafor").fetchSemanticsNode().boundsInRoot.top < firstRowTop)
+        capture("table-scrolled")
         compose.onNodeWithText("SQL query").performClick()
         compose.onNodeWithTag("editor").assertTextEquals("SELECT 1")
         compose.onNodeWithText("Maya Okafor").assertExists()
@@ -94,6 +102,32 @@ class DemoNavigationTest {
         compose.onNodeWithContentDescription("Disconnect").performClick()
         awaitConnections()
         compose.onNodeWithTag("editor").assertDoesNotExist()
+    }
+
+    @Test fun queryRefreshRerunsExecutedSqlWithoutReplacingDraft() {
+        awaitConnections()
+        compose.onNodeWithText("Production").performClick()
+        compose.waitUntil(10_000) { compose.onAllNodesWithTag("editor").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithTag("refresh-query").assertIsNotEnabled()
+        val runTop = compose.onNodeWithTag("run").fetchSemanticsNode().boundsInRoot.top
+        check(runTop < compose.onNodeWithTag("editor").fetchSemanticsNode().boundsInRoot.top)
+        compose.onNodeWithTag("run").performClick()
+        compose.waitUntil(10_000) { compose.onAllNodes(hasTestTag("refresh-query") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithTag("editor").performTextReplacement("SHOW DATABASES")
+        compose.onNodeWithTag("refresh-query").performClick()
+        compose.waitUntil(10_000) { compose.onAllNodes(hasTestTag("refresh-query") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithTag("editor").assertTextEquals("SHOW DATABASES")
+        compose.onNodeWithText("Maya Okafor").assertExists()
+        compose.onNodeWithText("DBM demo").assertDoesNotExist()
+        capture("query-refresh")
+        compose.onNodeWithTag("run").performClick()
+        compose.waitUntil(10_000) { compose.onAllNodesWithText("DBM demo").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("Maya Okafor").assertDoesNotExist()
+        compose.onNodeWithTag("editor").performTextReplacement("SELECT 1")
+        compose.onNodeWithTag("refresh-query").performClick()
+        compose.waitUntil(10_000) { compose.onAllNodes(hasTestTag("refresh-query") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("DBM demo").assertExists()
+        compose.onNodeWithTag("editor").assertTextEquals("SELECT 1")
     }
 
     @Test fun deletingAConnectionRequiresConfirmation() {

@@ -10,6 +10,7 @@ final class AppModel: ObservableObject {
     @Published var database = ""
     @Published var schema: [SchemaItem] = []
     @Published var sql = ""
+    @Published private(set) var lastExecuted: String?
     @Published var queryGrid = GridData()
     @Published var tableGrid = GridData()
     @Published var showingTable = false
@@ -57,12 +58,18 @@ final class AppModel: ObservableObject {
             active = profile
             databases = (object["databases"] as? [[String: Any]] ?? []).filter { $0["isConnectable"] as? Bool ?? true }.compactMap { $0["name"] as? String }
             database = profile.database; route = .workspace; sql = profile.engine == .redis ? "PING" : "SELECT 1"
-            queryGrid = GridData(); tableGrid = GridData(); showingTable = false; selectedTable = nil; schema = []; loadSchema()
+            lastExecuted = nil; queryGrid = GridData(); tableGrid = GridData(); showingTable = false; selectedTable = nil; schema = []; loadSchema()
         }
     }
-    func switchDatabase(_ name: String) { guard let active else { return }; send(["command": "connectDatabase", "profile_id": active.id, "database": name]) { [weak self] _ in self?.database = name; self?.queryGrid = GridData(); self?.tableGrid = GridData(); self?.showingTable = false; self?.selectedTable = nil; self?.schema = []; self?.loadSchema() } }
+    func switchDatabase(_ name: String) { guard let active else { return }; send(["command": "connectDatabase", "profile_id": active.id, "database": name]) { [weak self] _ in self?.database = name; self?.lastExecuted = nil; self?.queryGrid = GridData(); self?.tableGrid = GridData(); self?.showingTable = false; self?.selectedTable = nil; self?.schema = []; self?.loadSchema() } }
     func loadSchema() { guard let active else { return }; send(["command": "loadSchemaTree", "profile_id": active.id]) { [weak self] value in self?.schema = (value as? [[String: Any]] ?? []).map(SchemaItem.init) } }
-    func run() { guard let active, !sql.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }; send(["command": "query", "request": ["profileId": active.id, "sql": sql, "maxRows": 1000]]) { [weak self] value in self?.queryGrid = GridData(query: value as? [String: Any] ?? [:]) } }
+    func run() { run(sql) }
+    private func run(_ statement: String) {
+        guard let active, !statement.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        send(["command": "query", "request": ["profileId": active.id, "sql": statement, "maxRows": 1000]]) { [weak self] value in
+            self?.lastExecuted = statement; self?.queryGrid = GridData(query: value as? [String: Any] ?? [:])
+        }
+    }
     func browse(schema: String, table: String, offset: Int = 0) {
         guard let active else { return }
         let request: [String: Any] = ["profileId": active.id, "schema": schema, "table": table, "offset": max(0, offset), "limit": GridData.pageSize, "filters": [], "orderBy": NSNull(), "includeTotal": false]
@@ -72,10 +79,10 @@ final class AppModel: ObservableObject {
     func showTable() { guard selectedTable != nil else { return }; showingTable = true }
     func previous() { if let target = selectedTable { browse(schema: target.schema, table: target.table, offset: grid.offset - grid.limit) } }
     func next() { if let target = selectedTable { browse(schema: target.schema, table: target.table, offset: grid.offset + grid.limit) } }
-    func refresh() { if showingTable, let target = selectedTable { browse(schema: target.schema, table: target.table, offset: grid.offset) } else { run() } }
+    func refresh() { if showingTable, let target = selectedTable { browse(schema: target.schema, table: target.table, offset: grid.offset) } else if let lastExecuted { run(lastExecuted) } }
     func background() {
         privacyEpoch += 1; started = false; loading = false
-        active = nil; sql = ""; queryGrid = GridData(); tableGrid = GridData(); showingTable = false; schema = []; databases = []; database = ""
+        active = nil; sql = ""; lastExecuted = nil; queryGrid = GridData(); tableGrid = GridData(); showingTable = false; schema = []; databases = []; database = ""
         selectedTable = nil; error = nil; notice = nil; route = .connections
         bridge.dispose()
     }

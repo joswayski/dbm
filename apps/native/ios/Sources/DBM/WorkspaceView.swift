@@ -37,17 +37,20 @@ struct WorkspaceView: View {
             }.frame(height: 38).background(Graphite.chrome).overlay(alignment: .bottom) { Rectangle().fill(Graphite.border).frame(height: 0.5) }
 
             if !model.showingTable {
+                HStack(spacing: 6) {
+                    Text(model.active?.engine == .redis ? "Command" : "SQL editor").foregroundStyle(Graphite.secondary).lineLimit(1)
+                    Spacer(minLength: 4)
+                    Button("Refresh", systemImage: "arrow.clockwise") { model.refresh() }.buttonStyle(SecondaryButton()).disabled(model.lastExecuted == nil).accessibilityIdentifier("refresh-query")
+                    Button("Run", systemImage: "play.fill") { model.run() }.buttonStyle(PrimaryButton()).disabled(model.sql.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty).accessibilityIdentifier("run-query")
+                }.font(.custom("Geist-Regular", size: 12)).padding(.horizontal, 12).frame(height: 42).graphitePanel()
                 TextEditor(text: $model.sql).scrollContentBackground(.hidden).autocorrectionDisabled().textInputAutocapitalization(.never).font(.custom("GeistMono-Regular", size: 12)).frame(minHeight: 112, maxHeight: 170).padding(8).background(Graphite.bg)
                     .accessibilityLabel(model.active?.engine == .redis ? "Redis command editor" : "SQL editor").accessibilityIdentifier("query-editor")
-                HStack { Text("Results · 1,000 row cap").foregroundStyle(Graphite.muted); Spacer(); Button("Run", systemImage: "play.fill") { model.run() }.buttonStyle(PrimaryButton()).disabled(model.sql.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty).accessibilityIdentifier("run-query") }
-                    .font(.custom("Geist-Regular", size: 12)).padding(.horizontal, 12).frame(height: 42).graphitePanel()
             } else if let table = model.selectedTable {
-                HStack { Image(systemName: model.active?.engine == .redis ? "key" : "tablecells").foregroundStyle(Color(hex: model.active?.color ?? "#4c9aff")); Text("\(table.schema).\(table.table)").font(.custom("Geist-Regular", size: 13).weight(.medium)); Spacer(); Button("Refresh", systemImage: "arrow.clockwise") { model.refresh() }.buttonStyle(.plain) }
+                HStack { Image(systemName: model.active?.engine == .redis ? "key" : "tablecells").foregroundStyle(Color(hex: model.active?.color ?? "#4c9aff")); Text("\(table.schema).\(table.table)").font(.custom("Geist-Regular", size: 13).weight(.medium)); Spacer(); Button("Refresh", systemImage: "arrow.clockwise") { model.refresh() }.buttonStyle(SecondaryButton()) }
                     .padding(.horizontal, 12).frame(height: 42).graphitePanel()
             }
             GridView(data: model.grid).frame(maxWidth: .infinity, maxHeight: .infinity)
             HStack(spacing: 12) {
-                if !model.showingTable { Button { model.refresh() } label: { Image(systemName: "arrow.clockwise").frame(width: 36, height: 44) }.accessibilityLabel("Refresh results") }
                 Text(model.grid.rows.isEmpty ? "0 rows" : "Rows \(model.grid.offset + 1)–\(model.grid.offset + model.grid.rows.count)").foregroundStyle(Graphite.muted)
                 Spacer()
                 if model.showingTable {
@@ -123,12 +126,19 @@ struct GridView: View {
     let data: GridData; private let width: CGFloat = 150
     var body: some View {
         if data.columns.isEmpty { VStack(spacing: 10) { Image(systemName: "tablecells"); Text("No results").font(.custom("Geist-Regular", size: 13)); Text("Run a query or choose a table.").foregroundStyle(Graphite.faint).font(.custom("Geist-Regular", size: 11)) }.frame(maxWidth: .infinity, maxHeight: .infinity).background(Graphite.bg) }
-        else { ScrollView([.horizontal, .vertical]) { VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 0) { ForEach(Array(data.columns.enumerated()), id: \.offset) { _, column in Text(column).font(.custom("GeistMono-Regular", size: 11).weight(.semibold)).frame(width: width, alignment: .leading).padding(.horizontal, 8).frame(height: 34).background(Graphite.gridHeader) } }
-            ForEach(Array(data.rows.enumerated()), id: \.offset) { rowIndex, row in HStack(spacing: 0) { ForEach(data.columns.indices, id: \.self) { index in Text(index < row.count ? display(row[index]) : "").foregroundStyle((index < row.count && row[index] is NSNull) ? Graphite.faint : Graphite.text).font(.custom("GeistMono-Regular", size: 12)).lineLimit(1).frame(width: width, alignment: .leading).padding(.horizontal, 8).frame(height: 32).overlay(alignment: .bottom) { Rectangle().fill(Graphite.hairline).frame(height: 0.5) } } }.accessibilityElement(children: .ignore).accessibilityLabel(rowLabel(rowIndex, row)).accessibilityIdentifier("result-row-\(rowIndex + 1)") }
-        } }.background(Graphite.bg).accessibilityIdentifier("results-grid") }
+        else { ScrollView(.horizontal) { VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 0) { ForEach(Array(data.columns.enumerated()), id: \.offset) { index, column in Text(column).font(.custom("GeistMono-Regular", size: 11).weight(.semibold)).lineLimit(1).frame(width: width, alignment: .leading).padding(.horizontal, 8).frame(height: 34).background(Graphite.gridHeader).accessibilityIdentifier("result-column-\(index)") } }.overlay(alignment: .bottom) { Rectangle().fill(Graphite.border).frame(height: 0.5) }
+            ScrollView(.vertical) { LazyVStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(data.rows.enumerated()), id: \.offset) { rowIndex, row in HStack(spacing: 0) { ForEach(data.columns.indices, id: \.self) { index in Text(index < row.count ? display(row[index]) : "").foregroundStyle((index < row.count && row[index] is NSNull) ? Graphite.faint : Graphite.text).font(.custom("GeistMono-Regular", size: 12)).lineLimit(1).frame(width: width, alignment: .leading).padding(.horizontal, 8).frame(height: 32).overlay(alignment: .bottom) { Rectangle().fill(Graphite.hairline).frame(height: 0.5) } } }.accessibilityElement(children: .ignore).accessibilityLabel(rowLabel(rowIndex, row)).accessibilityIdentifier("result-row-\(rowIndex + 1)") }
+            } }.accessibilityIdentifier("results-rows")
+        }.frame(width: CGFloat(data.columns.count) * (width + 16), height: nil, alignment: .topLeading).frame(maxHeight: .infinity) }.background(Graphite.bg).accessibilityIdentifier("results-grid") }
     }
     private func rowLabel(_ index: Int, _ row: [Any]) -> String { (["Row \(index + 1)"] + data.columns.enumerated().map { "\($0.element): \($0.offset < row.count ? display(row[$0.offset]) : "")" }).joined(separator: ", ") }
+}
+
+private struct SecondaryButton: ButtonStyle {
+    @Environment(\.isEnabled) private var enabled
+    func makeBody(configuration: Configuration) -> some View { configuration.label.font(.custom("Geist-Regular", size: 12)).padding(.horizontal, 12).frame(minHeight: 36).background(configuration.isPressed ? Graphite.controlActive : Graphite.control).foregroundStyle(Graphite.text).clipShape(RoundedRectangle(cornerRadius: 6)).overlay(RoundedRectangle(cornerRadius: 6).stroke(Graphite.borderStrong)).opacity(enabled ? 1 : 0.4) }
 }
 
 private struct PrimaryButton: ButtonStyle {

@@ -203,7 +203,7 @@ private fun matches(node: SchemaNode, filter: String): Boolean = node.name.conta
 
 @Composable private fun QueryPane(vm: DbmViewModel) { val s = vm.state
     Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().height(42.dp).background(Chrome).padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) { Text(if(s.active?.engine == "redis") "Command" else "SQL editor", color = Secondary, fontSize = 12.sp, modifier = Modifier.weight(1f)); PrimaryButton("Run", Icon.Play, Modifier.testTag("run"), !s.busy && s.sql.isNotBlank(), vm::query) }
+        Row(Modifier.fillMaxWidth().height(42.dp).background(Chrome).padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) { Text(if(s.active?.engine == "redis") "Command" else "SQL editor", color = Secondary, fontSize = 12.sp, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis); SecondaryButton("Refresh", Icon.Refresh, Modifier.testTag("refresh-query"), !s.busy && s.lastExecuted != null, vm::refreshQuery); Spacer(Modifier.width(6.dp)); PrimaryButton("Run", Icon.Play, Modifier.testTag("run"), !s.busy && s.sql.isNotBlank(), vm::query) }
         GEditor(s.sql, vm::setSql, Modifier.fillMaxWidth().height(150.dp).testTag("editor"))
         Divider(); DataGrid(s.queryColumns, s.queryRows, Modifier.weight(1f))
         StatusFooter(if(s.queryColumns.isEmpty()) "Ready" else "${s.queryRows.size} rows", s.message)
@@ -220,7 +220,12 @@ private fun matches(node: SchemaNode, filter: String): Boolean = node.name.conta
 
 @Composable private fun DataGrid(columns: List<String>, rows: List<List<JsonElement>>, modifier: Modifier = Modifier) {
     if(columns.isEmpty()) { Box(modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { Text("No results", color = Faint, fontSize = 12.sp) }; return }
-    Box(modifier.horizontalScroll(rememberScrollState()).verticalScroll(rememberScrollState()).testTag("results")) { Column { Row(Modifier.background(GridHeader)) { columns.forEach { Cell(it, true) } }; rows.forEach { row -> Row { columns.indices.forEach { index -> val value = row.getOrNull(index); Cell(if(value == null || value is JsonNull) "NULL" else (value as? JsonPrimitive)?.contentOrNull ?: value.toString(), false) } } } } }
+    Column(modifier.horizontalScroll(rememberScrollState()).testTag("results")) {
+        Row(Modifier.background(GridHeader).testTag("results-header")) { columns.forEach { Cell(it, true) } }
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).testTag("results-rows")) {
+            rows.forEach { row -> Row { columns.indices.forEach { index -> val value = row.getOrNull(index); Cell(if(value == null || value is JsonNull) "NULL" else (value as? JsonPrimitive)?.contentOrNull ?: value.toString(), false) } } }
+        }
+    }
 }
 @Composable private fun Cell(value: String, header: Boolean) { Text(value, color = Text, fontFamily = MonoFont, fontSize = if(header) 11.sp else 12.sp, modifier = Modifier.width(160.dp).height(if(header) 34.dp else 32.dp).drawBehind { drawLine(if(header) Border else Color(0xff202023), Offset(0f, size.height), Offset(size.width, size.height), .5.dp.toPx()) }.padding(horizontal = 8.dp, vertical = 7.dp), maxLines = 1, overflow = TextOverflow.Ellipsis) }
 

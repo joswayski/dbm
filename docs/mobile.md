@@ -24,6 +24,10 @@ DBM has no server, account, pairing service, telemetry, or connection sync.
 - One query tab and one retained table/key tab per active connection. Switching
   tabs preserves SQL/command text, query results and the table's current page;
   changing databases clears both result sets. Table tabs contain no SQL editor.
+- Run and Refresh share the toolbar above the query editor. Refresh reruns the
+  last successful statement without replacing the editor draft; it stays
+  disabled until a query succeeds. Grid headers stay visible while rows scroll
+  vertically and move with their columns when scrolling horizontally.
 
 No row editing, exports, desktop history browser, URL import, custom CA import,
 SSH tunnel, biometric unlock, profile sync or background queries are implemented.
