@@ -2405,6 +2405,7 @@ fn inspector_field(
                         .interactive(!read_only)
                         .frame(false)
                         .font(mono(12.0))
+                        .vertical_align(egui::Align::Center)
                         .text_color(if read_only { theme::MUTED } else { theme::TEXT })
                         .hint_text(
                             RichText::new(if current.is_null() { "NULL" } else { "" })
@@ -2499,6 +2500,76 @@ pub mod tests {
             order_by: None,
             include_total: Some(true),
         })
+    }
+
+    #[test]
+    fn inspector_text_is_vertically_centered_in_every_field_state() {
+        for scale in [1.0, 1.5, 2.0] {
+            // Normal, focused, staged, NULL, primary key, and deleted fields.
+            for (column, value, focused, deleted) in [
+                (1, json!("person1@example.com"), false, false),
+                (1, json!("person1@example.com"), true, false),
+                (1, json!("changed@example.com"), false, false),
+                (3, Value::Null, false, false),
+                (0, json!(1), false, false),
+                (1, json!("person1@example.com"), false, true),
+            ] {
+                let context = egui::Context::default();
+                theme::configure(&context);
+                context.set_pixels_per_point(scale);
+                let page = page();
+                let mut values = page.rows[0].clone();
+                values[column] = value;
+                let mut state = TableState::default();
+                let cx = TableContext {
+                    tab_id: 1,
+                    schema: "public",
+                    table: "customers",
+                    embedded: false,
+                    read_only: false,
+                    saving: false,
+                    exporting: false,
+                };
+                let id = field_editor_id(cx.tab_id, 0, column);
+                if focused {
+                    context.memory_mut(|m| m.request_focus(id));
+                }
+                let input = egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        Vec2::new(300.0, 200.0),
+                    )),
+                    ..Default::default()
+                };
+                let output = context.run(input, |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        ui.set_width(270.0);
+                        inspector_field(ui, &cx, &mut state, &page, (0, column), &values, deleted);
+                    });
+                });
+                let expected = if values[column].is_null() {
+                    "NULL".to_owned()
+                } else {
+                    editable_text(&values[column])
+                };
+                let text = output
+                    .shapes
+                    .iter()
+                    .find_map(|shape| match &shape.shape {
+                        egui::epaint::Shape::Text(text) if text.galley.text() == expected => {
+                            Some(text)
+                        }
+                        _ => None,
+                    })
+                    .expect("field value or NULL placeholder is painted");
+                let editor = context.read_response(id).unwrap().rect;
+                let text_center = text.pos.y + text.galley.size().y / 2.0;
+                assert!(
+                    (text_center - editor.center().y).abs() <= 1.0 / scale,
+                    "{expected}: text center {text_center}, editor {editor:?}, scale {scale}"
+                );
+            }
+        }
     }
 
     #[test]
