@@ -19,10 +19,9 @@ targets:
       - Sources/DBM
       - path: Resources
         buildPhase: resources
-    info:
-      path: Configuration/Info.plist
     settings:
       base:
+        INFOPLIST_FILE: Configuration/Info.plist
         PRODUCT_BUNDLE_IDENTIFIER: $(DBM_IOS_BUNDLE_ID)
         PRODUCT_NAME: DBM
         SWIFT_OBJC_BRIDGING_HEADER: Configuration/DBM-Bridging-Header.h

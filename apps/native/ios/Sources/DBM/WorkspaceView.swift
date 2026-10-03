@@ -27,7 +27,30 @@ struct WorkspaceView: View {
 struct ExplorerView: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.dismiss) var dismiss
-    var body: some View { NavigationStack { List { if model.schema.isEmpty { ContentUnavailableView("Nothing to browse", systemImage: "tablecells", description: Text("Refresh the schema or keyspace.")) } else { OutlineGroup(model.schema, children: \.children) { node in Button { if let schema = node.schema, let table = node.table { model.browse(schema: schema, table: table); dismiss() } } label: { Label(node.name, systemImage: node.table == nil ? "folder" : (model.active?.engine == .redis ? "key" : "tablecells")) }.disabled(node.table == nil) } } }.navigationTitle(model.active?.engine == .redis ? "Keys" : "Schema").toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Refresh") { model.loadSchema() } }; ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } } } } }
+    var body: some View {
+        NavigationStack {
+            List {
+                if model.schema.isEmpty {
+                    ContentUnavailableView("Nothing to browse", systemImage: "tablecells", description: Text("Refresh the schema or keyspace."))
+                } else {
+                    OutlineGroup(model.schema, children: \.children) { node in
+                        if let schema = node.schema, let table = node.table {
+                            Button { model.browse(schema: schema, table: table); dismiss() } label: {
+                                Label(node.name, systemImage: model.active?.engine == .redis ? "key" : "tablecells")
+                            }
+                        } else {
+                            Label(node.name, systemImage: "folder")
+                        }
+                    }
+                }
+            }
+            .navigationTitle(model.active?.engine == .redis ? "Keys" : "Schema")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) { Button("Refresh") { model.loadSchema() } }
+                ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
+            }
+        }
+    }
 }
 
 struct GridView: View {

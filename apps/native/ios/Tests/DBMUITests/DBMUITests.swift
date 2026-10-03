@@ -31,9 +31,13 @@ final class DBMUITests: XCTestCase {
 
         app.buttons["explorer"].tap()
         XCTAssertTrue(app.navigationBars["Schema"].waitForExistence(timeout: 5))
-        app.staticTexts["public"].tap()
+        let publicSchema = app.buttons["public"]
+        XCTAssertTrue(publicSchema.waitForExistence(timeout: 5))
+        XCTAssertTrue(publicSchema.isEnabled)
+        publicSchema.tap()
         let users = app.buttons["users"]
         XCTAssertTrue(users.waitForExistence(timeout: 5))
+        retainScreenshot(app, named: "iphone-schema-expanded")
         users.tap()
         XCTAssertTrue(app.staticTexts["Rows 1–25"].waitForExistence(timeout: 10))
         let firstTableRow = app.otherElements["result-row-1"]
