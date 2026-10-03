@@ -29,6 +29,11 @@ What the app does today, what is deliberately not built yet, and what it stores 
   CSV export. Redis connections show numbered databases, a SCAN-backed key
   index, and per-type key folders (strings, hashes, lists, sets, sorted sets,
   streams).
+- Redis key-index pages scan the complete matching keyspace, deduplicate keys,
+  and default to key-name order; browsing and export have no 5,000-key cutoff.
+  Unfiltered key-name pages fetch type and TTL only for visible keys. Filtering
+  or sorting by metadata inspects all matching keys, so large keyspaces can take
+  longer. Pages and exports are not snapshots of concurrent database changes.
 - Resizable sidebars and columns, collapsible wide fields, and multi-row
   selection for staged edits and deletes.
 - A row inspector next to table grids that shows every field of the selected
@@ -44,6 +49,10 @@ What the app does today, what is deliberately not built yet, and what it stores 
   mode blocks GUI writes on every engine; PostgreSQL and MySQL sessions for
   read-only profiles are also marked read-only on the server, so writes the
   app cannot recognize are rejected too.
+- Table writes carry their target database and are rejected if the connection
+  switched databases while the write was queued. Redis list batches apply
+  higher indices first so staged deletes do not shift later edits onto other
+  elements; this does not protect against concurrent edits by other clients.
 - PostgreSQL values of any type display, including `numeric`, `uuid`, enums,
   and arrays. Integers beyond ±2^53 are shown and edited as exact text.
 - SQL tabs with syntax highlighting and keyword completion, query result

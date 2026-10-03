@@ -79,7 +79,8 @@ impl FilterDraft {
 }
 
 pub struct TableState {
-    pub page: Option<TablePage>,
+    /// Immutable row data shared with the renderer instead of copied each frame.
+    pub page: Option<Arc<TablePage>>,
     /// The request that produced `page`, restored when a later load fails.
     pub loaded: Option<TablePageRequest>,
     /// The request in flight, recorded as `loaded` when its page arrives.
@@ -175,7 +176,7 @@ impl TableState {
         self.anchor = None;
         self.drafts.clear();
         self.editing = None;
-        self.page = Some(page);
+        self.page = Some(Arc::new(page));
     }
 
     /// A load failed: return the controls to the page still on screen.
@@ -2538,9 +2539,42 @@ pub mod tests {
     }
 
     #[test]
+    fn rendering_shared_pages_preserves_original_and_staged_values() {
+        let context = egui::Context::default();
+        theme::configure(&context);
+        let shared = Arc::new(page());
+        let original = shared.rows[0][1].clone();
+        let mut state = TableState {
+            page: Some(shared.clone()),
+            inspector_open: true,
+            ..TableState::default()
+        };
+        stage_cell(&mut state, 0, 1, "ada@example.com");
+        state.selected.insert(0);
+        let cx = TableContext {
+            tab_id: 1,
+            schema: "public",
+            table: "customers",
+            embedded: false,
+            read_only: false,
+            saving: false,
+            exporting: false,
+        };
+        let output = context.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                assert!(show(ui, &cx, &mut state).is_empty());
+            });
+        });
+        assert!(!output.shapes.is_empty());
+        assert!(Arc::ptr_eq(state.page.as_ref().unwrap(), &shared));
+        assert_eq!(shared.rows[0][1], original);
+        assert_eq!(state.pending[&0].changes[1], json!("ada@example.com"));
+    }
+
+    #[test]
     fn staging_uses_typed_parsing_and_drops_no_op_edits() {
         let mut state = TableState {
-            page: Some(page()),
+            page: Some(Arc::new(page())),
             ..TableState::default()
         };
         stage_cell(&mut state, 0, 2, "no");
@@ -2571,7 +2605,7 @@ pub mod tests {
     #[test]
     fn copy_skips_deleted_rows_and_uses_staged_values() {
         let mut state = TableState {
-            page: Some(page()),
+            page: Some(Arc::new(page())),
             ..TableState::default()
         };
         stage_cell(&mut state, 0, 1, "ada@example.com");
