@@ -9,6 +9,7 @@ publish = false
 [dependencies]
 chrono.workspace = true
 directories.workspace = true
+futures-util.workspace = true
 keyring.workspace = true
 mysql_async.workspace = true
 native-tls.workspace = true

@@ -240,7 +240,7 @@ impl MysqlSession {
         let conn = workbench
             .as_mut()
             .expect("workbench connection was just opened");
-        let outcome = run_statements(conn, sql).await;
+        let outcome = run_statements(conn, sql, max_rows).await;
         if outcome
             .as_ref()
             .is_err_and(|error| error.is_connection_lost())
@@ -356,7 +356,11 @@ enum StatementOutcome {
 
 /// Runs one or more statements and reports the last result set, matching what a
 /// SQL console shows after a script finishes.
-async fn run_statements(conn: &mut Conn, sql: &str) -> AppResult<StatementOutcome> {
+async fn run_statements(
+    conn: &mut Conn,
+    sql: &str,
+    max_rows: usize,
+) -> AppResult<StatementOutcome> {
     let mut result = conn.query_iter(sql).await?;
     loop {
         let columns = result
@@ -364,8 +368,20 @@ async fn run_statements(conn: &mut Conn, sql: &str) -> AppResult<StatementOutcom
             .filter(|columns| !columns.is_empty())
             .map(|columns| columns.to_vec());
         let affected_rows = result.affected_rows();
-        let rows: Vec<Row> = result.collect().await?;
-        if result.is_empty() {
+        let mut rows = Vec::new();
+        // Keep one extra row to detect truncation, but drain every result set so
+        // subsequent statements run and their errors belong to this query.
+        while let Some(row) = result.next().await? {
+            if rows.len() <= max_rows {
+                rows.push(row);
+            }
+        }
+        // `next` already advanced to the next set. A pending final UPDATE has
+        // Some(empty) columns even though is_empty() reports true (no rows).
+        if result.columns().is_none() {
+            // Missing columns can also mean a deferred server error. Consume it
+            // now rather than returning success and failing the next query.
+            result.drop_result().await?;
             return Ok(match columns {
                 Some(columns) => StatementOutcome::Rows(columns, rows),
                 None => StatementOutcome::Affected(affected_rows),
@@ -968,6 +984,129 @@ mod tests {
                 created_at: now,
                 updated_at: now,
             })
+        }
+
+        #[tokio::test]
+        async fn capped_queries_drain_scripts_and_preserve_result_boundaries() {
+            let Some(profile) = profile("mysql", false) else {
+                return;
+            };
+            let session = MysqlSession::connect(profile, None).await.expect("connect");
+            session
+                .run_query(
+                    "CREATE TEMPORARY TABLE query_cap (n INT PRIMARY KEY);
+                 INSERT INTO query_cap VALUES (1), (2), (3), (4)",
+                    None,
+                )
+                .await
+                .expect("fixture");
+            for (count, truncated) in [(2, false), (3, false), (4, true)] {
+                let response = session
+                    .run_query(
+                        &format!("SELECT n FROM query_cap WHERE n <= {count} ORDER BY n"),
+                        Some(3),
+                    )
+                    .await
+                    .expect("capped query");
+                let expected = (1..=count.min(3))
+                    .map(|n| vec![JsonValue::from(n.to_string())])
+                    .collect::<Vec<_>>();
+                assert_eq!(response.rows, expected);
+                assert_eq!(response.truncated, truncated);
+            }
+            // Expand without requiring vendor-specific sequence generators.
+            for step in 0..13 {
+                session
+                    .run_query(
+                        &format!(
+                            "INSERT INTO query_cap SELECT n + {} FROM query_cap",
+                            4 << step,
+                        ),
+                        None,
+                    )
+                    .await
+                    .expect("expand fixture");
+            }
+            {
+                let mut conn = session.workbench.lock().await;
+                let outcome = run_statements(
+                    conn.as_mut().expect("connection"),
+                    "SELECT n FROM query_cap ORDER BY n",
+                    3,
+                )
+                .await
+                .expect("bounded result");
+                let StatementOutcome::Rows(_, rows) = outcome else {
+                    panic!("expected rows");
+                };
+                assert_eq!(
+                    rows.len(),
+                    4,
+                    "retain only the cap plus a truncation sentinel"
+                );
+                assert_eq!(rows[3].get::<i32, _>(0), Some(4));
+            }
+            let response = session
+                .run_query("SELECT n FROM query_cap; SELECT 42 AS answer", Some(3))
+                .await
+                .expect("script after large result");
+            assert_eq!(response.rows, vec![vec![JsonValue::from("42")]]);
+            assert_eq!(response.columns[0].name, "answer");
+            assert!(!response.truncated);
+            let response = session
+                .run_query(
+                    "SELECT n FROM query_cap; SELECT 42 AS empty WHERE false",
+                    Some(3),
+                )
+                .await
+                .expect("empty final set");
+            assert_eq!(response.columns[0].name, "empty");
+            assert!(response.rows.is_empty());
+            assert_eq!(response.affected_rows, None);
+            let response = session
+                .run_query(
+                    "SELECT n FROM query_cap; UPDATE query_cap SET n = n + 100000 WHERE n <= 2",
+                    Some(3),
+                )
+                .await
+                .expect("final update");
+            assert!(response.columns.is_empty());
+            assert_eq!(response.affected_rows, Some(2));
+            assert!(!response.truncated);
+            let response = session
+                .run_query(
+                    "SELECT n FROM query_cap; UPDATE query_cap SET n = 0 WHERE n < 0",
+                    Some(3),
+                )
+                .await
+                .expect("final update matching no rows");
+            assert!(response.columns.is_empty());
+            assert_eq!(response.affected_rows, Some(0));
+            let response = session
+                .run_query(
+                    "UPDATE query_cap SET n = 0 WHERE n < 0; SELECT 9 AS nine",
+                    Some(3),
+                )
+                .await
+                .expect("select after update");
+            assert_eq!(response.rows, vec![vec![JsonValue::from("9")]]);
+            assert_eq!(response.affected_rows, None);
+            assert!(
+                session
+                    .run_query(
+                        "SELECT n FROM query_cap; SELECT missing_column FROM query_cap",
+                        Some(3),
+                    )
+                    .await
+                    .is_err(),
+                "errors after the cap must not be discarded"
+            );
+            let response = session
+                .run_query("SELECT 7 AS recovered", Some(3))
+                .await
+                .expect("connection remains usable");
+            assert_eq!(response.rows, vec![vec![JsonValue::from("7")]]);
+            session.close().await;
         }
 
         #[tokio::test]

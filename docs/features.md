@@ -52,6 +52,10 @@ What the app does today, what is deliberately not built yet, and what it stores 
   default) instead of SQL. Scripts with several statements show the last
   result set. The MySQL workbench keeps one connection, so `USE`, session
   variables, and explicit transactions carry over between runs.
+  PostgreSQL and MySQL retain only capped query results in memory while
+  consuming the remaining rows, so later statements and errors still run
+  through the normal result handling. The cap does not limit server execution
+  or network transfer; add SQL `LIMIT` when you need to bound those too.
 - Automatically reconnects once after an idle connection closes, staying on the
   selected database, then retries read-only browsing and SQL statements. Writes
   are never retried automatically.
