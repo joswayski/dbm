@@ -1,5 +1,6 @@
 package com.dbm.nativeapp
 
+import android.app.UiAutomation
 import android.content.Intent
 import android.graphics.Bitmap
 import androidx.compose.ui.graphics.asAndroidBitmap
@@ -23,15 +24,27 @@ class DemoNavigationTest {
     @Test fun demoNavigatesQueryAndBrowseScreens() {
         compose.waitUntil(10_000) { compose.onAllNodesWithText("Production").fetchSemanticsNodes().isNotEmpty() }
         capture("connections")
+        compose.onNodeWithTag("add").performClick()
+        compose.onNodeWithText("New connection").assertExists()
+        capture("connection-form")
+        compose.onNodeWithText("Test").performScrollTo().performClick()
+        val validationError = "invalid input: name, host, and username are required"
+        compose.waitUntil(10_000) { compose.onAllNodesWithText(validationError).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText(validationError).performScrollTo().assertIsDisplayed()
+        capture("connection-error")
+        compose.onNodeWithText("Cancel").performScrollTo().performClick()
         compose.onNodeWithText("Production").performClick()
         compose.waitUntil(10_000) { compose.onAllNodesWithTag("editor").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithTag("run").performClick()
         compose.waitUntil(10_000) { compose.onAllNodesWithTag("results").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("Maya Okafor").assertExists()
         capture("query")
-        compose.onNodeWithText("Explorer").performClick()
-        compose.onNodeWithText("users").performClick()
+        compose.onNodeWithTag("source-toggle").performClick()
+        capture("source-list")
+        compose.onNodeWithText("users").performScrollTo().performClick()
         compose.waitUntil(10_000) { compose.onAllNodesWithText("Rows 1–25").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithTag("editor").assertDoesNotExist()
+        compose.onNodeWithText("email").assertExists()
         compose.onNodeWithText("Previous").assertIsNotEnabled()
         compose.onNodeWithTag("next").assertIsEnabled().performClick()
         compose.waitUntil(10_000) { compose.onAllNodesWithText("Rows 26–40").fetchSemanticsNodes().isNotEmpty() }
@@ -41,6 +54,23 @@ class DemoNavigationTest {
         compose.onNodeWithText("Previous").performClick()
         compose.waitUntil(10_000) { compose.onAllNodesWithText("Rows 1–25").fetchSemanticsNodes().isNotEmpty() }
         capture("table")
+        compose.onNodeWithText("SQL query").performClick()
+        compose.onNodeWithTag("editor").assertTextEquals("SELECT 1")
+        compose.onNodeWithText("Maya Okafor").assertExists()
+        compose.onNodeWithText("paid_total").assertExists()
+        compose.onNodeWithText("email").assertDoesNotExist()
+        compose.onNodeWithText("users").performClick()
+        compose.onNodeWithText("Rows 1–25").assertExists()
+
+        val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
+        try {
+            check(automation.setRotation(UiAutomation.ROTATION_FREEZE_90))
+            compose.waitUntil(10_000) { compose.onAllNodesWithTag("source-toggle").fetchSemanticsNodes().isEmpty() }
+            compose.onNodeWithTag("tree-filter").assertExists()
+            compose.onNodeWithText("Rows 1–25").assertExists()
+            compose.onNodeWithTag("editor").assertDoesNotExist()
+            capture("landscape-table")
+        } finally { automation.setRotation(UiAutomation.ROTATION_UNFREEZE) }
 
         activity.scenario.moveToState(Lifecycle.State.CREATED)
         activity.scenario.moveToState(Lifecycle.State.RESUMED)

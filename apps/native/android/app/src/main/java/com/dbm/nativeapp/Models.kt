@@ -27,6 +27,7 @@ enum class Screen { Connections, Form, Query, Explorer, Browse }
 data class UiState(val screen: Screen = Screen.Connections, val profiles: List<Profile> = emptyList(),
     val draft: ProfileDraft = ProfileDraft(), val active: Profile? = null, val databases: List<DatabaseRef> = emptyList(),
     val database: String = "", val tree: List<SchemaNode> = emptyList(), val sql: String = "SELECT 1",
+    val queryColumns: List<String> = emptyList(), val queryRows: List<List<JsonElement>> = emptyList(),
     val columns: List<String> = emptyList(), val rows: List<List<JsonElement>> = emptyList(),
     val table: Pair<String, String>? = null, val offset: Int = 0, val hasMore: Boolean = false,
     val busy: Boolean = false, val error: String? = null, val message: String? = null)

@@ -10,7 +10,9 @@ final class AppModel: ObservableObject {
     @Published var database = ""
     @Published var schema: [SchemaItem] = []
     @Published var sql = ""
-    @Published var grid = GridData()
+    @Published var queryGrid = GridData()
+    @Published var tableGrid = GridData()
+    @Published var showingTable = false
     @Published var selectedTable: (schema: String, table: String)?
     @Published var loading = false
     @Published var error: String?
@@ -19,6 +21,7 @@ final class AppModel: ObservableObject {
     private var started = false
     let bridge = Bridge()
     var isDemo: Bool { bridge.demo }
+    var grid: GridData { showingTable ? tableGrid : queryGrid }
 
     func start() {
         guard !started else { return }; started = true; loading = true
@@ -37,8 +40,11 @@ final class AppModel: ObservableObject {
     }
     func saveAndConnect(_ draft: ProfileDraft, completion: @escaping (Bool) -> Void) {
         send(["command": "saveProfile", "input": draft.input]) { [weak self] value in
-            guard let profile = value as? [String: Any] else { completion(false); return }
-            self?.connect(Profile(profile)); completion(true)
+            guard let self, let object = value as? [String: Any] else { completion(false); return }
+            let profile = Profile(object)
+            profiles.removeAll { $0.id == profile.id }
+            profiles.append(profile); profiles.sort { $0.name < $1.name }
+            connect(profile); completion(true)
         } failure: { _ in completion(false) }
     }
     func test(_ draft: ProfileDraft, completion: @escaping (Bool) -> Void) {
@@ -46,27 +52,30 @@ final class AppModel: ObservableObject {
     }
     func delete(_ profile: Profile) { send(["command": "deleteProfile", "profile_id": profile.id]) { [weak self] _ in self?.loadProfiles() } }
     func connect(_ profile: Profile) {
-        active = profile; send(["command": "connect", "profile_id": profile.id]) { [weak self] value in
+        send(["command": "connect", "profile_id": profile.id]) { [weak self] value in
             guard let self, let object = value as? [String: Any] else { return }
+            active = profile
             databases = (object["databases"] as? [[String: Any]] ?? []).filter { $0["isConnectable"] as? Bool ?? true }.compactMap { $0["name"] as? String }
             database = profile.database; route = .workspace; sql = profile.engine == .redis ? "PING" : "SELECT 1"
-            grid = GridData(); selectedTable = nil; loadSchema()
+            queryGrid = GridData(); tableGrid = GridData(); showingTable = false; selectedTable = nil; schema = []; loadSchema()
         }
     }
-    func switchDatabase(_ name: String) { guard let active else { return }; send(["command": "connectDatabase", "profile_id": active.id, "database": name]) { [weak self] _ in self?.database = name; self?.grid = GridData(); self?.selectedTable = nil; self?.loadSchema() } }
+    func switchDatabase(_ name: String) { guard let active else { return }; send(["command": "connectDatabase", "profile_id": active.id, "database": name]) { [weak self] _ in self?.database = name; self?.queryGrid = GridData(); self?.tableGrid = GridData(); self?.showingTable = false; self?.selectedTable = nil; self?.schema = []; self?.loadSchema() } }
     func loadSchema() { guard let active else { return }; send(["command": "loadSchemaTree", "profile_id": active.id]) { [weak self] value in self?.schema = (value as? [[String: Any]] ?? []).map(SchemaItem.init) } }
-    func run() { guard let active, !sql.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }; send(["command": "query", "request": ["profileId": active.id, "sql": sql, "maxRows": 1000]]) { [weak self] value in self?.grid = GridData(query: value as? [String: Any] ?? [:]); self?.selectedTable = nil } }
+    func run() { guard let active, !sql.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }; send(["command": "query", "request": ["profileId": active.id, "sql": sql, "maxRows": 1000]]) { [weak self] value in self?.queryGrid = GridData(query: value as? [String: Any] ?? [:]) } }
     func browse(schema: String, table: String, offset: Int = 0) {
-        guard let active else { return }; selectedTable = (schema, table)
+        guard let active else { return }
         let request: [String: Any] = ["profileId": active.id, "schema": schema, "table": table, "offset": max(0, offset), "limit": GridData.pageSize, "filters": [], "orderBy": NSNull(), "includeTotal": false]
-        send(["command": "loadTablePage", "request": request]) { [weak self] value in self?.grid = GridData(page: value as? [String: Any] ?? [:]) }
+        send(["command": "loadTablePage", "request": request]) { [weak self] value in guard let self else { return }; tableGrid = GridData(page: value as? [String: Any] ?? [:]); selectedTable = (schema, table); showingTable = true }
     }
+    func showQuery() { showingTable = false }
+    func showTable() { guard selectedTable != nil else { return }; showingTable = true }
     func previous() { if let target = selectedTable { browse(schema: target.schema, table: target.table, offset: grid.offset - grid.limit) } }
     func next() { if let target = selectedTable { browse(schema: target.schema, table: target.table, offset: grid.offset + grid.limit) } }
-    func refresh() { if let target = selectedTable { browse(schema: target.schema, table: target.table, offset: grid.offset) } else { run() } }
+    func refresh() { if showingTable, let target = selectedTable { browse(schema: target.schema, table: target.table, offset: grid.offset) } else { run() } }
     func background() {
         privacyEpoch += 1; started = false; loading = false
-        active = nil; sql = ""; grid = GridData(); schema = []; databases = []; database = ""
+        active = nil; sql = ""; queryGrid = GridData(); tableGrid = GridData(); showingTable = false; schema = []; databases = []; database = ""
         selectedTable = nil; error = nil; notice = nil; route = .connections
         bridge.dispose()
     }
