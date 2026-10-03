@@ -83,6 +83,7 @@ class DemoNavigationTest {
             compose.onNodeWithTag("database-picker").assertIsDisplayed()
             compose.onNodeWithText("Rows 1–25").assertExists()
             compose.onNodeWithTag("editor").assertDoesNotExist()
+            compose.onNode(hasText("users") and hasAnyAncestor(hasTestTag("schema"))).performScrollTo().assertIsDisplayed()
             capture("landscape-table")
         } finally { automation.setRotation(UiAutomation.ROTATION_UNFREEZE) }
 

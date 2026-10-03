@@ -113,8 +113,10 @@ final class DBMUITests: XCTestCase {
         app.buttons["run-query"].tap()
         let row = app.otherElements["result-row-1"]
         XCTAssertTrue(row.waitForExistence(timeout: 10))
-        editor.tap()
-        editor.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 30) + "SHOW DATABASES")
+        // A tap in the blank center can put the caret before the first line.
+        let endOfFirstLine = editor.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0)).withOffset(CGVector(dx: 0, dy: 18))
+        endOfFirstLine.tap()
+        editor.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: "SELECT 1".count) + "SHOW DATABASES")
         XCTAssertEqual(editor.value as? String, "SHOW DATABASES")
         refresh.tap()
         XCTAssertTrue(row.label.contains("full_name: Maya Okafor"), row.label)
@@ -123,8 +125,8 @@ final class DBMUITests: XCTestCase {
         app.buttons["run-query"].tap()
         expectation(for: NSPredicate(format: "label CONTAINS %@", "result: DBM demo"), evaluatedWith: row)
         waitForExpectations(timeout: 10)
-        editor.tap()
-        editor.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 30) + "SELECT 1")
+        endOfFirstLine.tap()
+        editor.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: "SHOW DATABASES".count) + "SELECT 1")
         XCTAssertEqual(editor.value as? String, "SELECT 1")
         refresh.tap()
         XCTAssertTrue(row.label.contains("result: DBM demo"), row.label)
