@@ -1,3 +1,4 @@
+use std::pin::pin;
 use std::time::{Duration, Instant};
 
 use crate::error::{AppError, AppResult};
@@ -7,6 +8,7 @@ use crate::models::{
     TablePage, TablePageRequest, TlsMode, escape_like, json_integer,
 };
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
+use futures_util::TryStreamExt;
 use serde_json::Value;
 use tokio_postgres::types::{FromSql, Type};
 use tokio_postgres::{Client, Config, NoTls, Row, SimpleQueryMessage};
@@ -321,10 +323,12 @@ impl PgSession {
         };
         // The simple query protocol returns every value as text, so any column
         // type can be shown, and multi-statement scripts run in one round trip.
-        let messages = self.client.simple_query(sql).await?;
+        // Stream instead of collecting the entire response before applying the
+        // row cap. Drain it fully so later commands and errors are still handled.
+        let mut messages = pin!(self.client.simple_query_raw(sql).await?);
         let mut result = SimpleResult::default();
         let mut current: Option<SimpleResult> = None;
-        for message in messages {
+        while let Some(message) = messages.try_next().await? {
             match message {
                 SimpleQueryMessage::RowDescription(description) => {
                     current = Some(SimpleResult {
@@ -408,11 +412,17 @@ impl PgSession {
             ));
         }
         let table_name = qualified_name(&batch.schema, &batch.table)?;
+        // Validate the whole batch before BEGIN: an invalid later key must not
+        // leave earlier edits pending in this persistent workbench connection.
+        let predicates = batch
+            .mutations
+            .iter()
+            .map(|mutation| mutation_predicate(&metadata, mutation))
+            .collect::<AppResult<Vec<_>>>()?;
         self.client.batch_execute("BEGIN").await?;
         let mut applied = 0;
         let mut conflicts = Vec::new();
-        for mutation in &batch.mutations {
-            let predicate = mutation_predicate(&metadata, mutation)?;
+        for (mutation, predicate) in batch.mutations.iter().zip(predicates) {
             let statement = if mutation.deleted {
                 format!("DELETE FROM {table_name} WHERE {predicate}")
             } else {
@@ -1072,6 +1082,138 @@ mod tests {
                 }),
                 include_total: Some(true),
             }
+        }
+
+        #[tokio::test]
+        async fn invalid_mutation_batch_does_not_leave_partial_edits_in_a_transaction() {
+            let Some(profile) = profile(false) else {
+                return;
+            };
+            let session = PgSession::connect(profile, None).await.expect("connect");
+            session
+                .client
+                .batch_execute(
+                    "CREATE TEMP TABLE batch_validation (id int PRIMARY KEY, label text);
+                 INSERT INTO batch_validation VALUES (1, 'original')",
+                )
+                .await
+                .expect("fixture");
+            let schema: String = session
+                .client
+                .query_one(
+                    "SELECT nspname FROM pg_namespace WHERE oid = pg_my_temp_schema()",
+                    &[],
+                )
+                .await
+                .expect("temporary schema")
+                .get(0);
+            let batch = MutationBatch {
+                profile_id: Uuid::nil(),
+                schema,
+                table: "batch_validation".into(),
+                mutations: vec![
+                    RowMutation {
+                        original: vec![Value::from(1), Value::from("original")],
+                        changes: vec![Value::from(1), Value::from("edited")],
+                        primary_key: vec![Value::from(1)],
+                        xmin: None,
+                        deleted: false,
+                    },
+                    RowMutation {
+                        original: Vec::new(),
+                        changes: Vec::new(),
+                        primary_key: Vec::new(),
+                        xmin: None,
+                        deleted: true,
+                    },
+                ],
+            };
+            let error = session
+                .apply_mutations(&batch)
+                .await
+                .expect_err("invalid key");
+            assert!(matches!(error, AppError::InvalidInput(_)), "{error}");
+            assert!(
+                error
+                    .to_string()
+                    .contains("primary key values do not match table")
+            );
+            // A later console COMMIT must not persist part of a rejected batch.
+            session
+                .client
+                .batch_execute("COMMIT")
+                .await
+                .expect("commit");
+            let row = session
+                .client
+                .query_one("SELECT label FROM batch_validation", &[])
+                .await
+                .expect("read row");
+            assert_eq!(row.get::<_, String>(0), "original");
+        }
+
+        #[tokio::test]
+        async fn capped_queries_drain_scripts_and_preserve_result_boundaries() {
+            let Some(profile) = profile(false) else {
+                return;
+            };
+            let session = PgSession::connect(profile, None).await.expect("connect");
+            for (count, truncated) in [(2, false), (3, false), (4, true)] {
+                let response = session
+                    .run_query(
+                        &format!("SELECT n FROM generate_series(1, {count}) n ORDER BY n"),
+                        Some(3),
+                    )
+                    .await
+                    .expect("capped query");
+                let expected = (1..=count.min(3))
+                    .map(|n| vec![Value::from(n)])
+                    .collect::<Vec<_>>();
+                assert_eq!(response.rows, expected);
+                assert_eq!(response.truncated, truncated);
+            }
+            let response = session
+                .run_query(
+                    "SELECT n FROM generate_series(1, 20000) n; SELECT 42 AS answer",
+                    Some(3),
+                )
+                .await
+                .expect("script after large result");
+            assert_eq!(response.rows, vec![vec![Value::from("42")]]);
+            assert_eq!(response.columns[0].name, "answer");
+            assert!(!response.truncated);
+            let response = session
+                .run_query("SELECT 1; SELECT 42 AS empty WHERE false", Some(3))
+                .await
+                .expect("empty final set");
+            assert_eq!(response.columns[0].name, "empty");
+            assert!(response.rows.is_empty());
+            assert_eq!(response.affected_rows, None);
+            let response = session
+                .run_query(
+                    "SELECT n FROM generate_series(1, 20000) n; SET application_name = 'dbm-test'",
+                    Some(3),
+                )
+                .await
+                .expect("non-row final command");
+            assert!(response.columns.is_empty());
+            assert_eq!(response.affected_rows, Some(0));
+            assert!(!response.truncated);
+            assert!(
+                session
+                    .run_query(
+                        "SELECT n FROM generate_series(1, 20000) n; SELECT 1 / 0",
+                        Some(3),
+                    )
+                    .await
+                    .is_err(),
+                "errors after the cap must not be discarded"
+            );
+            let response = session
+                .run_query("SELECT 7 AS recovered", Some(3))
+                .await
+                .expect("connection remains usable");
+            assert_eq!(response.rows, vec![vec![Value::from(7)]]);
         }
 
         #[tokio::test]

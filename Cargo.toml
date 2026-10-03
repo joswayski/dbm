@@ -11,6 +11,7 @@ rust-version = "1.94"
 [workspace.dependencies]
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 directories = "6"
+futures-util = "0.3"
 keyring = "4.1"
 mysql_async = { version = "0.37", default-features = false, features = ["minimal", "native-tls-tls"] }
 native-tls = "0.2"
