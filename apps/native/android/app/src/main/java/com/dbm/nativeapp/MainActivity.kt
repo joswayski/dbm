@@ -3,6 +3,7 @@ package com.dbm.nativeapp
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.*
@@ -18,7 +19,9 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -31,7 +34,9 @@ import kotlinx.serialization.json.contentOrNull
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState); enableEdgeToEdge()
+        super.onCreate(savedInstanceState)
+        enableEdgeToEdge(statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT))
         val demo = BuildConfig.ALLOW_DEMO && intent.getBooleanExtra("demo", false)
         if (!demo) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         val factory = object : ViewModelProvider.Factory { override fun <T : ViewModel> create(modelClass: Class<T>): T = DbmViewModel(application, demo) as T }
@@ -53,7 +58,7 @@ private val Danger = Color(0xffff8a80)
         owner.lifecycle.addObserver(observer); onDispose { owner.lifecycle.removeObserver(observer) }
     }
     val fonts = FontFamily(Font(R.font.geist))
-    MaterialTheme(colorScheme = darkColorScheme(background = Bg, surface = Chrome, primary = Accent, onBackground = Text, onSurface = Text, error = Danger), typography = Typography().run { copy(bodyLarge = bodyLarge.copy(fontFamily = fonts), bodyMedium = bodyMedium.copy(fontFamily = fonts), titleLarge = titleLarge.copy(fontFamily = fonts)) }) {
+    MaterialTheme(colorScheme = darkColorScheme(background = Bg, surface = Chrome, primary = Accent, onPrimary = Bg, secondaryContainer = Control, onSecondaryContainer = Text, onBackground = Text, onSurface = Text, error = Danger), typography = Typography().run { copy(bodyLarge = bodyLarge.copy(fontFamily = fonts), bodyMedium = bodyMedium.copy(fontFamily = fonts), titleLarge = titleLarge.copy(fontFamily = fonts)) }) {
         Surface(Modifier.fillMaxSize()) { Column(Modifier.safeDrawingPadding()) {
             if (vm.demo) Text("DEMO — local Rust fixture", Modifier.fillMaxWidth().background(Control).padding(8.dp))
             Status(vm.state)
@@ -120,4 +125,4 @@ private fun flatten(nodes:List<SchemaNode>):List<SchemaNode> = nodes.flatMap { l
 }
 
 @Composable private fun DataGrid(columns:List<String>, rows:List<List<kotlinx.serialization.json.JsonElement>>, modifier:Modifier=Modifier) { if(columns.isEmpty()) { Box(modifier.fillMaxWidth()){Text("No results",color=Muted,modifier=Modifier.padding(16.dp))}; return }; Box(modifier.horizontalScroll(rememberScrollState()).verticalScroll(rememberScrollState()).testTag("results")) { Column { Row(Modifier.background(Color(0xff1a1a1c))) { columns.forEach { Cell(it,true) } }; rows.forEach { row -> Row { row.forEach { value -> Cell(if(value is JsonNull) "NULL" else (value as? JsonPrimitive)?.contentOrNull ?: value.toString(),false) } } } } } }
-@Composable private fun Cell(value:String, header:Boolean) { Text(value, color=if(header) Text else Color(0xffc7c7cc), fontFamily=FontFamily(Font(R.font.geist_mono)), modifier=Modifier.width(160.dp).height(48.dp).border(0.5.dp,Control).padding(8.dp), maxLines=2) }
+@Composable private fun Cell(value:String, header:Boolean) { Text(value, color=if(header) Text else Color(0xffc7c7cc), fontFamily=FontFamily(Font(R.font.geist_mono)), fontSize=12.sp, lineHeight=16.sp, modifier=Modifier.width(160.dp).height(40.dp).border(0.5.dp,Control).padding(8.dp), maxLines=1, overflow=TextOverflow.Ellipsis) }
