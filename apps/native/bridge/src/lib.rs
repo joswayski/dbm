@@ -21,7 +21,7 @@ use dbm_core::{
     export::export_csv,
     models::{
         DatabaseEngine, MutationBatch, QueryRequest, SaveProfileInput, SchemaNode, TableColumn,
-        TablePageRequest, WorkspaceInfo,
+        TablePageRequest, TlsMode, WorkspaceInfo,
     },
     session::DbSession,
     sql_text::{
@@ -187,10 +187,13 @@ enum Request {
     // Self-updates from the latest release. They block on the
     // network, so hosts call them off the main thread.
     /// This build's channel number, or null for development builds.
+    #[cfg(feature = "desktop-updater")]
     UpdateCurrent {},
     /// A newer signed build for this platform, or null.
+    #[cfg(feature = "desktop-updater")]
     UpdateCheck {},
     /// Downloads and verifies `update` into `directory`; returns the file path.
+    #[cfg(feature = "desktop-updater")]
     UpdateDownload {
         update: dbm_update::Available,
         directory: String,
@@ -199,6 +202,7 @@ enum Request {
 
 enum Backend {
     Live(AppState),
+    Mobile(AppState),
     Demo(DemoStore),
 }
 
@@ -210,6 +214,40 @@ struct Inner {
 /// Opaque session type. Its contents are private to Rust.
 pub struct DbmBridgeSession {
     inner: Mutex<Inner>,
+}
+
+/// Keep mobile capabilities in the core boundary, not just hidden UI controls.
+async fn dispatch_mobile(state: &AppState, request: Request) -> Result<Value, String> {
+    match &request {
+        Request::SaveProfile { input } | Request::TestProfile { input } => {
+            if !input.read_only || input.tls_mode != TlsMode::Required || input.ssh.is_some() {
+                return Err("mobile connections require read-only mode and verified TLS; SSH is not supported".into());
+            }
+        }
+        Request::Connect { profile_id } | Request::ConnectDatabase { profile_id, .. } => {
+            let profile = state.profile(*profile_id).map_err(message)?;
+            if !profile.read_only || profile.tls_mode != TlsMode::Required {
+                return Err("mobile connections require read-only mode and verified TLS".into());
+            }
+        }
+        Request::Disconnect { profile_id } => {
+            state.disconnect(*profile_id).await;
+            state
+                .credentials
+                .delete_password(*profile_id)
+                .map_err(message)?;
+            return Ok(Value::Null);
+        }
+        Request::ListProfiles {}
+        | Request::DeleteProfile { .. }
+        | Request::ListDatabases { .. }
+        | Request::LoadSchemaTree { .. }
+        | Request::LoadTablePage { .. }
+        | Request::Query { .. }
+        | Request::ListQueryHistory { .. } => {}
+        _ => return Err("operation is unavailable in the read-only mobile app".into()),
+    }
+    dispatch(state, request).await
 }
 
 async fn dispatch(state: &AppState, request: Request) -> Result<Value, String> {
@@ -426,15 +464,18 @@ fn helper_value(request: Request) -> Result<Value, String> {
             serde_json::to_value(completions(engine, &prefix))
         }
         Request::InlineDiff { before, after } => serde_json::to_value(inline_diff(&before, &after)),
+        #[cfg(feature = "desktop-updater")]
         Request::UpdateCurrent {} => {
             Ok(dbm_update::current_build().map_or(Value::Null, Value::from))
         }
+        #[cfg(feature = "desktop-updater")]
         Request::UpdateCheck {} => {
             let Some(current) = dbm_update::current_build() else {
                 return Ok(Value::Null);
             };
             serde_json::to_value(dbm_update::check(current)?)
         }
+        #[cfg(feature = "desktop-updater")]
         Request::UpdateDownload { update, directory } => {
             let path = dbm_update::download(&update, std::path::Path::new(&directory))?;
             Ok(Value::String(path.to_string_lossy().into_owned()))
@@ -538,6 +579,48 @@ fn error_response(error: impl std::fmt::Display) -> *mut c_char {
 pub unsafe extern "C" fn dbm_bridge_session_create(
     error_out: *mut *mut c_char,
 ) -> *mut DbmBridgeSession {
+    unsafe {
+        create_session(error_out, || {
+            AppState::new().map(Backend::Live).map_err(message)
+        })
+    }
+}
+
+/// Creates a TLS-required, read-only session with host-managed metadata storage
+/// and session-only passwords. `path` is an absolute UTF-8 SQLite file path.
+/// Its parent must exist; the host controls sandbox protection and backup policy.
+///
+/// # Safety
+///
+/// `path` must address `length` readable bytes. A non-null `error_out` must point
+/// to writable pointer storage. Errors and sessions have the usual ABI ownership.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn dbm_bridge_mobile_session_create(
+    path: *const u8,
+    length: usize,
+    error_out: *mut *mut c_char,
+) -> *mut DbmBridgeSession {
+    unsafe {
+        create_session(error_out, || {
+            if path.is_null() || length == 0 || length > MAX_REQUEST_BYTES {
+                return Err("invalid mobile storage path".into());
+            }
+            let bytes = std::slice::from_raw_parts(path, length);
+            let path =
+                std::str::from_utf8(bytes).map_err(|_| "mobile storage path must be UTF-8")?;
+            let path = std::path::Path::new(path);
+            if !path.is_absolute() {
+                return Err("mobile storage path must be absolute".into());
+            }
+            AppState::mobile(path).map(Backend::Mobile).map_err(message)
+        })
+    }
+}
+
+unsafe fn create_session(
+    error_out: *mut *mut c_char,
+    create: impl FnOnce() -> Result<Backend, String>,
+) -> *mut DbmBridgeSession {
     if !error_out.is_null() {
         // SAFETY: The ABI contract requires a writable pointer when non-null.
         unsafe { *error_out = ptr::null_mut() };
@@ -548,7 +631,7 @@ pub unsafe extern "C" fn dbm_bridge_session_create(
             .enable_all()
             .build()
             .map_err(message)?;
-        let backend = Backend::Live(AppState::new().map_err(message)?);
+        let backend = create()?;
         Ok::<_, String>(Box::new(DbmBridgeSession {
             inner: Mutex::new(Inner { runtime, backend }),
         }))
@@ -629,6 +712,7 @@ pub unsafe extern "C" fn dbm_bridge_session_call(
         let Inner { runtime, backend } = &mut *inner;
         let result = match backend {
             Backend::Live(state) => runtime.block_on(dispatch(state, request)),
+            Backend::Mobile(state) => runtime.block_on(dispatch_mobile(state, request)),
             Backend::Demo(store) => match request {
                 // Demo exports stream the fixture to the chosen file, as the
                 // other hosts' demo mode does.
@@ -720,6 +804,109 @@ fn response_json(pointer: *mut c_char) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mobile_profiles_persist_but_credentials_do_not_and_capabilities_fail_closed() {
+        let directory = std::env::temp_dir().join(format!("dbm-mobile-{}-é", Uuid::new_v4()));
+        std::fs::create_dir(&directory).unwrap();
+        let path = directory.join("profiles.sqlite3");
+        let bytes = path.to_str().unwrap().as_bytes();
+        let mut error = ptr::null_mut();
+        let session =
+            unsafe { dbm_bridge_mobile_session_create(bytes.as_ptr(), bytes.len(), &mut error) };
+        assert!(!session.is_null());
+        assert!(error.is_null());
+        let call = |request: Value| {
+            let bytes = request.to_string().into_bytes();
+            response_json(unsafe { dbm_bridge_session_call(session, bytes.as_ptr(), bytes.len()) })
+        };
+        let input = json!({"name":"Phone 🦀", "host":"db.invalid", "port":5432,
+            "username":"reader", "defaultDatabase":"app", "readOnly":true,
+            "tlsMode":"required", "password":"fixture-session-password"});
+        for (field, value) in [("readOnly", json!(false)), ("tlsMode", json!("preferred"))] {
+            let mut unsafe_input = input.clone();
+            unsafe_input[field] = value;
+            assert_eq!(
+                call(json!({"command":"saveProfile", "input":unsafe_input}))["ok"],
+                false
+            );
+            assert_eq!(
+                call(json!({"command":"testProfile", "input":unsafe_input}))["ok"],
+                false
+            );
+        }
+        let saved = call(json!({"command":"saveProfile", "input":input}));
+        assert_eq!(saved["ok"], true);
+        let id: Uuid = serde_json::from_value(saved["value"]["id"].clone()).unwrap();
+        {
+            let inner = unsafe { &*session }.inner.lock().unwrap();
+            let Backend::Mobile(state) = &inner.backend else {
+                panic!("expected mobile backend")
+            };
+            assert_eq!(
+                state.credentials.get_password(id).unwrap().as_deref(),
+                Some("fixture-session-password")
+            );
+        }
+        let summaries = call(json!({"command":"listProfiles"}));
+        assert_eq!(summaries["value"][0]["profile"]["name"], "Phone 🦀");
+        assert!(summaries["value"][0]["profile"].get("password").is_none());
+        assert_eq!(
+            call(
+                json!({"command":"exportCsv", "path":directory.join("must-not-exist.csv"),
+            "columns":["id"], "request":{"profileId":id,"schema":"public","table":"items",
+            "offset":0,"limit":50,"filters":[],"orderBy":null,"includeTotal":false}})
+            )["ok"],
+            false
+        );
+        assert!(!directory.join("must-not-exist.csv").exists());
+        assert_eq!(
+            call(
+                json!({"command":"applyTableMutations", "batch":{"profileId":id,
+            "database":"app","schema":"public","table":"items","mutations":[]}})
+            )["ok"],
+            false
+        );
+        assert_eq!(
+            call(json!({"command":"disconnect","profile_id":id}))["ok"],
+            true
+        );
+        {
+            let inner = unsafe { &*session }.inner.lock().unwrap();
+            let Backend::Mobile(state) = &inner.backend else {
+                panic!("expected mobile backend")
+            };
+            assert!(state.credentials.get_password(id).unwrap().is_none());
+        }
+        unsafe { dbm_bridge_session_free(session) };
+        let reopened = AppState::mobile(&path).unwrap();
+        assert_eq!(reopened.profile(id).unwrap().name, "Phone 🦀");
+        assert!(reopened.credentials.get_password(id).unwrap().is_none());
+        let disk = std::fs::read(&path).unwrap();
+        assert!(
+            !disk
+                .windows(b"fixture-session-password".len())
+                .any(|window| window == b"fixture-session-password")
+        );
+        drop(reopened);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn mobile_constructor_rejects_invalid_paths_without_desktop_fallback() {
+        for path in [
+            b"relative.sqlite3".as_slice(),
+            b"\xff".as_slice(),
+            b"".as_slice(),
+        ] {
+            let mut error = ptr::null_mut();
+            let session =
+                unsafe { dbm_bridge_mobile_session_create(path.as_ptr(), path.len(), &mut error) };
+            assert!(session.is_null());
+            assert!(!error.is_null());
+            unsafe { dbm_bridge_response_free(error) };
+        }
+    }
 
     #[test]
     fn connection_url_helper_separates_masked_preview_from_full_copy() {

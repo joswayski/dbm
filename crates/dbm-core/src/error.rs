@@ -89,6 +89,7 @@ impl From<mysql_async::Error> for AppError {
     }
 }
 
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 impl From<keyring::Error> for AppError {
     fn from(error: keyring::Error) -> Self {
         Self::Credential(error.to_string())

@@ -2,7 +2,9 @@
 
 ## Product
 
-- DBM is a local-first desktop database manager (TablePlus / DataGrip style) for macOS, Windows, and Linux.
+- DBM is a local-first database manager. AppKit macOS and egui Windows/Linux
+  are released desktop apps; Compose Android and SwiftUI iPhone are development
+  clients, not store releases or desktop-parity products.
 - The current milestone is PostgreSQL, MySQL, and Redis: saved connections, schema or keyspace exploration, paginated table and key browsing, SQL/Redis workbench tabs, PK-backed or key-backed edits, and safe local profile storage.
 - Clearly separate current features from roadmap ideas. Do not present Redis Sentinel/Cluster, SSH jump hosts, encrypted profile sync, or other follow-ups as shipped unless the repository already implements them.
 - Prefer TablePlus/DataGrip-like defaults when UX is ambiguous: fast path to query, obvious refresh, non-destructive confirms for bulk writes.
@@ -11,6 +13,9 @@
 
 - `apps/native/macos` is the macOS app (Swift/AppKit), built by `build.sh`; it calls Rust through the C ABI in `apps/native/bridge`.
 - `apps/native/workbench` is the Windows and Linux app (Rust egui/wgpu) with its own Cargo workspace; `apps/native/windows` holds its installer, `apps/native/icons` the app icons.
+- `apps/native/android` and `apps/native/ios` are development clients. Both call
+  the mobile C ABI in-process; there is no hosted proxy. Their contract and
+  validation status live in `docs/mobile.md`.
 - `crates/dbm-core` owns database adapters, sessions, keyring, and local SQLite storage; `crates/dbm-update` is the self-updater; `tools/dbm-sign` signs release artifacts.
 - `docs/` holds features, development setup, releases (signing, notarization, publishing), the native architecture, the design system, and screenshots.
 - `scripts/release.mjs` picks release versions and notes for the release workflow.
@@ -36,12 +41,21 @@
 
 ## Product behavior to preserve
 
-- **Local-only:** connection profiles, query history, and results stay on the machine. Passwords live only in the OS keyring / credential store, never in the app SQLite file.
+- **Local-only:** connection profiles, query history, and results stay on the
+  machine. Desktop passwords use the OS keyring / credential store; mobile
+  passwords are memory-only and cleared on disconnect/background/disposal.
+  Passwords are never written to the app SQLite file.
 - **Connect → query:** opening a connection should land the user in a SQL query tab so they can run statements immediately (schema tree remains in the sidebar). Selecting an already-connected profile should keep or restore that profile's workbench, not dump the user on the empty welcome pane. Deleting or disconnecting a profile must close its tabs.
 - **Table tabs:** paginated previews, filters, ordering, CSV copy/export, PK-backed edits (PostgreSQL `xmin` concurrency; MySQL primary-key matching), Redis key index and typed key views, read-only profiles.
 - **Query tabs:** run statement under cursor or selection (⌘/Ctrl+Enter), history per profile+database, results capped (10k rows). Simple `SELECT * FROM table` can open the editable table viewer. Redis connections use a command workbench instead of SQL.
 - **Refresh:** table and query result views should be re-fetchable without re-authoring filters or SQL (toolbar Refresh).
 - SSH jump hosts, Redis Sentinel/Cluster, and encrypted profile sync are intentional non-goals until documented otherwise.
+- Mobile additionally requires read-only profiles and verified Required TLS,
+  caps query results at 1,000 rows and table pages at 25, and has no writes,
+  exports, updater, custom-CA UI, SSH, or sync. Backgrounding invalidates UI and
+  queues disposal behind active calls; it does not cancel server work. Keep
+  networking guidance in `docs/mobile.md` and never suggest exposing a database
+  port publicly.
 
 ## Documentation
 
@@ -49,6 +63,9 @@
 - Keep the root README short and visual: screenshots, the download link, a few feature bullets, and links. Put details in `docs/`: features and follow-ups in `docs/features.md`, setup and builds in `docs/development.md`, releases in `docs/releases.md`.
 - If a pull request does not need a README edit, still verify that its changes do not make the README inaccurate; do not add no-op wording solely to touch the file.
 - Keep current behavior and roadmap / deliberate follow-ups distinct, especially for adapters and transports that are not implemented yet.
+- Describe mobile CI as workflows that build/test/capture development clients,
+  not proof that checks passed. iOS cannot be compiled on Linux; physical-device
+  and live TLS database validation remain outstanding until explicitly recorded.
 
 ## Validation
 

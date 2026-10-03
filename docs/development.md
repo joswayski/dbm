@@ -1,6 +1,6 @@
 # Developing DBM
 
-DBM is two native clients over one Rust core:
+DBM's released desktop product is two native clients over one Rust core:
 
 - **macOS:** a Swift/AppKit app in `apps/native/macos`, calling the Rust core
   through the C ABI bridge in `apps/native/bridge`.
@@ -10,6 +10,11 @@ DBM is two native clients over one Rust core:
 The database adapters, models, session state, credentials, and SQLite store
 live in `crates/dbm-core`; the updater lives in `crates/dbm-update`. See
 [native architecture](native.md) for how the pieces fit together.
+
+Kotlin/Compose Android and SwiftUI iPhone development clients also call that
+Rust code directly in-process. They have a smaller read-only contract and a
+separate build workflow; see [mobile development](mobile.md) rather than using
+the desktop setup below.
 
 ## Setup
 
@@ -80,6 +85,14 @@ CI (`.github/workflows/ci.yml`) runs these on macOS, Windows, and Linux, builds
 the universal AppKit app with fixture snapshots, and builds the Windows NSIS
 installer from a stand-in executable.
 
+The separate [mobile workflow](../.github/workflows/mobile.yml) is configured to
+build/lint/test Android, run its emulator UI test, build/test the iPhone
+Simulator client, compile the iPhone Rust archive, and retain development
+artifacts and UI captures. These are workflow definitions, not claims about a
+particular run. SwiftUI is not compiled on Linux, and physical-device plus live
+TLS database validation remains outstanding. Commands and prerequisites are in
+[the mobile contract](mobile.md).
+
 ## Amp orbs
 
 Amp orbs run [`.agents/setup`](../.agents/setup) to prepare a fresh machine: it
@@ -116,8 +129,12 @@ Windows builds are not Authenticode-signed. Versioning, the workflow's steps,
 required secrets, and the update flow are documented in
 [docs/releases.md](releases.md).
 
+That desktop release flow is unchanged. Mobile CI does not sign, upload, or
+publish Play Store, App Store, or TestFlight releases.
+
 DBM never uploads connection profiles, query history, or database results.
-Passwords are stored in the operating system credential store when available.
+Desktop passwords use the operating system credential store; mobile passwords
+remain in memory only. See [mobile privacy and lifecycle](mobile.md#storage-and-lifecycle).
 
 ## Screenshots
 

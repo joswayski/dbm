@@ -24,7 +24,15 @@ impl AppState {
     pub fn new() -> AppResult<Self> {
         Ok(Self {
             store: LocalStore::new()?,
-            credentials: CredentialStore,
+            credentials: CredentialStore::default(),
+            sessions: Mutex::new(HashMap::new()),
+        })
+    }
+
+    pub fn mobile(path: &std::path::Path) -> AppResult<Self> {
+        Ok(Self {
+            store: LocalStore::from_path(path)?,
+            credentials: CredentialStore::in_memory(),
             sessions: Mutex::new(HashMap::new()),
         })
     }

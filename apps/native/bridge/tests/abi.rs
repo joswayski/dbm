@@ -231,11 +231,17 @@ fn helper_calls_need_no_session_and_reject_database_commands() {
     let request = br#"{"command":"listProfiles"}"#;
     let reply = unsafe { take(dbm_bridge_helper_call(request.as_ptr(), request.len())) };
     assert_eq!(reply["error"], "unsupported native request");
-    // Development builds have no channel number, so they never check.
-    let request = br#"{"command":"updateCurrent"}"#;
-    let reply = unsafe { take(dbm_bridge_helper_call(request.as_ptr(), request.len())) };
-    assert_eq!(reply, json!({"ok": true, "value": null}));
-    let request = br#"{"command":"updateCheck"}"#;
-    let reply = unsafe { take(dbm_bridge_helper_call(request.as_ptr(), request.len())) };
-    assert_eq!(reply, json!({"ok": true, "value": null}));
+    for command in ["updateCurrent", "updateCheck"] {
+        let request = json!({"command": command}).to_string();
+        let reply = unsafe { take(dbm_bridge_helper_call(request.as_ptr(), request.len())) };
+        // Desktop development builds have no channel. Mobile builds omit the
+        // updater entirely, including through the session-free helper entry.
+        #[cfg(feature = "desktop-updater")]
+        assert_eq!(reply, json!({"ok": true, "value": null}));
+        #[cfg(not(feature = "desktop-updater"))]
+        assert_eq!(
+            reply,
+            json!({"ok": false, "error": "invalid native request"})
+        );
+    }
 }

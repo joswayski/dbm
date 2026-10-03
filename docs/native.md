@@ -1,10 +1,11 @@
 # Native architecture
 
-DBM ships as browser-free native apps on **macOS, Windows, and Linux**: AppKit
-on macOS and egui on Windows and Linux, over one shared Rust core. Neither uses
-Electron, JavaScript, or a WebView. See [development](development.md) for
-prerequisites and commands and [releases](releases.md) for packaging and
-updates.
+DBM ships browser-free desktop apps on **macOS, Windows, and Linux**: AppKit on
+macOS and egui on Windows and Linux, over one shared Rust core. Android Compose
+and iPhone SwiftUI clients are in development and are not desktop-parity or
+store releases. None uses Electron, JavaScript, or a WebView. See
+[development](development.md) for desktop commands, [mobile](mobile.md) for the
+mobile contract, and [releases](releases.md) for desktop packaging and updates.
 
 ## Architecture
 
@@ -23,6 +24,12 @@ updates.
   Rendering uses native graphics backends and bundled Geist fonts. **egui draws
   its own controls, not Windows/GTK system widgets.** It is a separate Cargo
   workspace, so egui's dependency graph stays out of the root workspace.
+- `apps/native/android` and `apps/native/ios` use Compose and SwiftUI. They call
+  the mobile C ABI directly in-process (JNI on Android), not through a local or
+  hosted HTTP proxy. The bridge uses host-managed SQLite metadata and
+  memory-only passwords, and enforces read-only profiles with verified Required
+  TLS. See [mobile](mobile.md) for its intentionally limited command surface and
+  lifecycle semantics.
 - `crates/dbm-update` checks the release manifest, downloads an update, and
   verifies its signature; both apps use it (AppKit through the bridge).
   `tools/dbm-sign` produces the signatures in the release workflow.
@@ -33,6 +40,8 @@ updates.
 
 Database I/O runs off the UI thread. Passwords remain in the OS credential store,
 not SQLite. Profiles, queries, and results are not sent to an off-device service.
+On mobile, passwords instead remain only in the Rust session memory and are
+discarded with that session.
 
 ## Build outputs
 
@@ -47,6 +56,9 @@ not SQLite. Profiles, queries, and results are not sent to an off-device service
   produces `apps/native/workbench/target/release/dbm-workbench` (`.exe` on
   Windows). Release packaging renames it and, on Linux, wraps it with
   `apps/native/workbench/appimage.sh`.
+- `bash apps/native/android/build.sh` builds the two Rust static archives before
+  Gradle builds/tests the Android development APK. iPhone simulator/device build
+  commands and platform constraints are documented in [mobile](mobile.md).
 
 Both apps accept `--demo`, an isolated in-memory fixture that loads no local
 profiles and connects to no database. The AppKit app also accepts

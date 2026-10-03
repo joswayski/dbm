@@ -2,7 +2,7 @@
 
 What the app does today, what is deliberately not built yet, and what it stores locally.
 
-## Implemented
+## Released desktop apps
 
 - PostgreSQL, MySQL, and Redis direct connections with disabled, preferred, or
   required TLS. Connection attempts give up after 20 seconds.
@@ -71,7 +71,19 @@ What the app does today, what is deliberately not built yet, and what it stores 
 - Refresh on table previews and query results: reload the current page and
   filters, or re-run the last executed statement, without re-authoring them.
 
-## Deliberate follow-ups
+## Mobile development clients
+
+The Android Compose and iPhone SwiftUI clients are development builds, not
+shipped store apps. They provide direct in-process Rust connections for
+PostgreSQL, MySQL, and Redis, with read-only profiles and verified Required TLS.
+Queries are capped at 1,000 rows and read-only table/key pages at 25 rows.
+
+They intentionally omit writes, exports, the updater, custom-CA UI, SSH, and
+sync, and keep passwords in memory rather than the desktop OS keyring. See the
+[mobile contract](mobile.md) for exact capabilities, private-network guidance,
+lifecycle behavior, build workflows, and outstanding validation.
+
+## Desktop deliberate follow-ups
 
 SSH jump-host transport, query cancellation with dedicated sessions, Redis
 Sentinel/Cluster, and encrypted profile sync are kept out of this vertical

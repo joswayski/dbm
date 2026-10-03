@@ -184,7 +184,26 @@ async fn open_connection(
     password: Option<&str>,
     tls: bool,
 ) -> AppResult<MultiplexedConnection> {
+    #[cfg(not(target_os = "android"))]
     let client = Client::open(connection_info(profile, password, tls)?)?;
+    #[cfg(target_os = "android")]
+    let client = if tls {
+        let path = profile.ca_cert_path.as_deref().ok_or_else(|| {
+            AppError::InvalidInput("Android TLS requires the platform CA bundle".into())
+        })?;
+        let roots = std::fs::read(path).map_err(|error| {
+            AppError::InvalidInput(format!("could not read CA bundle: {error}"))
+        })?;
+        Client::build_with_tls(
+            connection_info(profile, password, tls)?,
+            redis_rs::TlsCertificates {
+                client_tls: None,
+                root_cert: Some(roots),
+            },
+        )?
+    } else {
+        Client::open(connection_info(profile, password, tls)?)?
+    };
     let mut connection = client.get_multiplexed_async_connection().await?;
     let _: String = redis_rs::cmd("PING").query_async(&mut connection).await?;
     Ok(connection)
@@ -2143,7 +2162,7 @@ mod tests {
         let session = DbSession::connect(profile, None).await.unwrap();
         let state = AppState {
             store,
-            credentials: CredentialStore,
+            credentials: CredentialStore::default(),
             sessions: Mutex::new(HashMap::from([(id, Arc::new(session))])),
         };
         let response = state

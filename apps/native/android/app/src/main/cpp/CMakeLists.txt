@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.22.1)
+project(dbm_android)
+add_library(dbm_native_bridge STATIC IMPORTED)
+set_target_properties(dbm_native_bridge PROPERTIES IMPORTED_LOCATION "${CMAKE_CURRENT_SOURCE_DIR}/../../../build/rust/${ANDROID_ABI}/libdbm_native_bridge.a")
+add_library(dbm_android SHARED dbm_jni.cpp)
+target_include_directories(dbm_android PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../../../../../bridge/include")
+target_link_libraries(dbm_android dbm_native_bridge android log dl m z)
