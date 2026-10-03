@@ -3,10 +3,19 @@
 A fast, local-first database manager for PostgreSQL, MySQL, and Redis on
 macOS, Windows, and Linux.
 
-**[Download the latest release →](https://github.com/joswayski/dbm/releases/latest)**
-macOS `DBM-macOS.dmg` (Apple Silicon and Intel) · Windows
-`DBM-Windows-x64-setup.exe` · Linux `DBM-Linux-x86_64.AppImage`. After the
-first install the app updates itself.
+## Download
+
+| Platform | Direct download |
+| --- | --- |
+| macOS (Apple Silicon and Intel) | [Download DMG](https://github.com/joswayski/dbm/releases/latest/download/DBM-macOS.dmg) |
+| Windows (x64) | [Download installer](https://github.com/joswayski/dbm/releases/latest/download/DBM-Windows-x64-setup.exe) |
+| Linux (x86_64) | [Download AppImage](https://github.com/joswayski/dbm/releases/latest/download/DBM-Linux-x86_64.AppImage) |
+
+These links always download the latest release. After the first install the
+app updates itself. See [release notes and checksums](https://github.com/joswayski/dbm/releases/latest).
+
+> The Windows installer is not code-signed yet, so SmartScreen may warn on
+> first install. The macOS app is signed and notarized.
 
 DBM is a native app on every platform: AppKit on macOS, and a Rust (egui)
 app on Windows and Linux. Installs of the earlier Tauri version update onto
@@ -33,9 +42,6 @@ it automatically and keep their saved connections.
 
 See [docs/features.md](docs/features.md) for the full feature list and what is
 planned.
-
-> The Windows installer is not code-signed yet, so SmartScreen may warn on
-> first install. The macOS app is signed and notarized.
 
 ## Docs
 
