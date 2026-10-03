@@ -87,11 +87,12 @@ final class DBMUITests: XCTestCase {
         let app = launchDemo()
         XCTAssertTrue(app.buttons["add-connection"].waitForExistence(timeout: 10))
         app.buttons["add-connection"].tap()
-        let name = app.textFields["name"]; name.tap(); name.typeText("   ")
-        let user = app.textFields["username"]; user.tap(); user.typeText("reader")
+        app.segmentedControls["engine"].buttons["Redis"].tap()
+        let name = app.textFields["name"]; name.tap(); name.typeText("Invalid Redis")
+        let database = app.textFields["database"]; database.tap(); database.typeText(XCUIKeyboardKey.delete.rawValue + "not-a-number")
         app.buttons["test-connection"].tap()
         XCTAssertTrue(app.alerts["DBM"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.alerts["DBM"].staticTexts["invalid input: name, host, and username are required"].exists)
+        XCTAssertTrue(app.alerts["DBM"].staticTexts["invalid input: Redis database must be a non-negative integer"].exists)
         retainScreenshot(app, named: "iphone-connection-error")
     }
 

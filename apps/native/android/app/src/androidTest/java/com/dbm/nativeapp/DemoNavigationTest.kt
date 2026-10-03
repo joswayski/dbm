@@ -49,7 +49,7 @@ class DemoNavigationTest {
         compose.onNodeWithTag("next").assertIsEnabled().performClick()
         compose.waitUntil(10_000) { compose.onAllNodesWithText("Rows 26–40").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithTag("next").assertIsNotEnabled()
-        compose.onNodeWithText("Refresh").performClick()
+        compose.onNodeWithTag("refresh-table").performClick()
         compose.onNodeWithText("Rows 26–40").assertExists()
         compose.onNodeWithText("Previous").performClick()
         compose.waitUntil(10_000) { compose.onAllNodesWithText("Rows 1–25").fetchSemanticsNodes().isNotEmpty() }
@@ -59,7 +59,12 @@ class DemoNavigationTest {
         compose.onNodeWithText("Maya Okafor").assertExists()
         compose.onNodeWithText("paid_total").assertExists()
         compose.onNodeWithText("email").assertDoesNotExist()
-        compose.onNodeWithText("users").performClick()
+        compose.onNodeWithTag("source-toggle").performClick()
+        compose.onNodeWithText("New connection").performClick()
+        compose.onNodeWithText("Cancel").performClick()
+        compose.onNodeWithTag("editor").assertTextEquals("SELECT 1")
+        compose.onNodeWithText("paid_total").assertExists()
+        compose.onNodeWithTag("tab-users").performClick()
         compose.onNodeWithText("Rows 1–25").assertExists()
 
         val automation = InstrumentationRegistry.getInstrumentation().uiAutomation

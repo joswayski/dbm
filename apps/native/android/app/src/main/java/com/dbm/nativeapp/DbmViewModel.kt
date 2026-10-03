@@ -15,6 +15,7 @@ class DbmViewModel(application: Application, val demo: Boolean = false) : Androi
     private var epoch = 0L
     private var foreground = true
     private var closing = false
+    private var formReturnScreen = Screen.Connections
 
     init { start() }
     private fun start() = launch { expected -> bridge.open(demo); profiles(expected) }
@@ -40,14 +41,14 @@ class DbmViewModel(application: Application, val demo: Boolean = false) : Androi
         val values: List<ProfileSummary> = bridge.json.decodeFromJsonElement(call(expected, command("listProfiles")))
         state = state.copy(profiles = values.map { it.profile })
     }
-    fun add() { state = state.copy(screen = Screen.Form, draft = ProfileDraft()) }
+    fun add() { formReturnScreen = state.screen; state = state.copy(screen = Screen.Form, draft = ProfileDraft()) }
     fun select(profile: Profile) {
         if (demo) connect(profile)
-        else state = state.copy(screen = Screen.Form, draft = ProfileDraft(id = profile.id, name = profile.name,
+        else { formReturnScreen = state.screen; state = state.copy(screen = Screen.Form, draft = ProfileDraft(id = profile.id, name = profile.name,
             color = profile.color ?: "#4c9aff", engine = profile.engine, host = profile.host,
-            port = profile.port.toString(), username = profile.username, database = profile.defaultDatabase))
+            port = profile.port.toString(), username = profile.username, database = profile.defaultDatabase)) }
     }
-    fun cancelForm() { state = state.copy(screen = Screen.Connections, draft = ProfileDraft()) }
+    fun cancelForm() { state = state.copy(screen = formReturnScreen, draft = ProfileDraft(), error = null, message = null) }
     fun editDraft(transform: (ProfileDraft) -> ProfileDraft) { if (!state.busy) state = state.copy(draft = transform(state.draft)) }
     private suspend fun input(): JsonObject {
         val draft = state.draft
@@ -62,7 +63,7 @@ class DbmViewModel(application: Application, val demo: Boolean = false) : Androi
     fun test() = launch { expected -> call(expected, buildJsonObject { put("command", "testProfile"); put("input", input()) }); state = state.copy(message = "Connection succeeded") }
     fun save(connectAfter: Boolean = false) = launch { expected ->
         val profile: Profile = bridge.json.decodeFromJsonElement(call(expected, buildJsonObject { put("command", "saveProfile"); put("input", input()) }))
-        state = state.copy(screen = Screen.Connections, draft = ProfileDraft())
+        state = state.copy(screen = formReturnScreen, draft = ProfileDraft())
         profiles(expected)
         if (connectAfter) connect(expected, profile)
     }
@@ -106,6 +107,7 @@ class DbmViewModel(application: Application, val demo: Boolean = false) : Androi
     fun background() {
         foreground = false
         epoch++; state = UiState(busy = true)
+        formReturnScreen = Screen.Connections
         closing = true
         viewModelScope.launch {
             bridge.close()

@@ -24,6 +24,8 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
@@ -180,7 +182,7 @@ private fun matches(node: SchemaNode, filter: String): Boolean = node.name.conta
 @Composable private fun WorkbenchMain(vm: DbmViewModel, openDrawer: (() -> Unit)?) {
     val s = vm.state; val color = profileColor(s.active?.color)
     Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().height(44.dp).background(Chrome).padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) { if(openDrawer != null) { IconButton(openDrawer, Modifier.testTag("source-toggle")) { DbIcon(Icon.Sidebar, Secondary) }; Spacer(Modifier.width(4.dp)) }; Dot(color, false); Spacer(Modifier.width(8.dp)); Text(s.active?.name ?: "Connection", color = TextStrong, fontWeight = FontWeight.Medium); Text("  ·  ${s.database}", color = Muted, fontSize = 12.sp, maxLines = 1) }
+        Row(Modifier.fillMaxWidth().height(44.dp).background(Chrome).padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) { if(openDrawer != null) { IconButton(openDrawer, Modifier.testTag("source-toggle").semantics { contentDescription = "Show source list" }) { DbIcon(Icon.Sidebar, Secondary) }; Spacer(Modifier.width(4.dp)) }; Dot(color, false); Spacer(Modifier.width(8.dp)); Text(s.active?.name ?: "Connection", color = TextStrong, fontWeight = FontWeight.Medium); Text("  ·  ${s.database}", color = Muted, fontSize = 12.sp, maxLines = 1) }
         Row(Modifier.fillMaxWidth().height(38.dp).background(Chrome).horizontalScroll(rememberScrollState())) {
             Tab("${if(s.active?.engine == "redis") "Redis" else "SQL"} query", Icon.Query, s.screen != Screen.Browse, color, vm::backToQuery)
             s.table?.let { table -> Tab(table.second, Icon.Table, s.screen == Screen.Browse, color, vm::showTable) }
@@ -200,7 +202,7 @@ private fun matches(node: SchemaNode, filter: String): Boolean = node.name.conta
 
 @Composable private fun TablePane(vm: DbmViewModel) { val s = vm.state
     Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().height(44.dp).background(Chrome).padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) { DbIcon(Icon.Table, profileColor(s.active?.color)); Spacer(Modifier.width(7.dp)); Text(s.table?.let { "${it.first}.${it.second}" } ?: "Table", color = TextStrong, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f)); SecondaryButton("Refresh", Icon.Refresh, enabled = !s.busy) { s.table?.let { vm.browse(it.first, it.second, s.offset) } } }
+        Row(Modifier.fillMaxWidth().height(44.dp).background(Chrome).padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) { DbIcon(Icon.Table, profileColor(s.active?.color)); Spacer(Modifier.width(7.dp)); Text(s.table?.let { "${it.first}.${it.second}" } ?: "Table", color = TextStrong, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f)); SecondaryButton("Refresh", Icon.Refresh, modifier = Modifier.testTag("refresh-table"), enabled = !s.busy) { s.table?.let { vm.browse(it.first, it.second, s.offset) } } }
         DataGrid(s.columns, s.rows, Modifier.weight(1f))
         Row(Modifier.fillMaxWidth().heightIn(min = 36.dp).background(Chrome).padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) { Text(if(s.rows.isEmpty()) "0 rows" else "Rows ${s.offset + 1}–${s.offset + s.rows.size}", color = Muted, fontSize = 11.sp, modifier = Modifier.weight(1f)); SmallButton("Previous", enabled = s.offset > 0 && !s.busy) { s.table?.let { vm.browse(it.first, it.second, (s.offset - TABLE_PAGE_SIZE).coerceAtLeast(0)) } }; Spacer(Modifier.width(5.dp)); SmallButton("Next", enabled = s.hasMore && !s.busy, modifier = Modifier.testTag("next")) { s.table?.let { vm.browse(it.first, it.second, s.offset + TABLE_PAGE_SIZE) } } }
     }
@@ -221,7 +223,7 @@ private fun matches(node: SchemaNode, filter: String): Boolean = node.name.conta
 @Composable private fun Divider() { HorizontalDivider(thickness = .5.dp, color = Border) }
 
 @Composable private fun Segment(text: String, selected: Boolean, modifier: Modifier, action: () -> Unit) { Box(modifier.height(34.dp).clip(RoundedCornerShape(5.dp)).background(if(selected) ControlActive else Color.Transparent).clickable(onClick = action), contentAlignment = Alignment.Center) { Text(text, color = if(selected) TextStrong else Muted, fontSize = 12.sp, fontWeight = if(selected) FontWeight.Medium else FontWeight.Normal) } }
-@Composable private fun Tab(text: String, icon: Icon, selected: Boolean, color: Color, action: () -> Unit) { Box(Modifier.widthIn(min = 132.dp).fillMaxHeight().clickable(onClick = action).background(if(selected) Bg else Chrome)) { Row(Modifier.fillMaxHeight().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) { DbIcon(icon, if(selected) color else Faint); Spacer(Modifier.width(7.dp)); Text(text, color = if(selected) TextStrong else Muted, fontSize = 12.sp, maxLines = 1) }; if(selected) Box(Modifier.matchParentSize().padding(bottom = 36.dp).background(color)) } }
+@Composable private fun Tab(text: String, icon: Icon, selected: Boolean, color: Color, action: () -> Unit) { Box(Modifier.widthIn(min = 132.dp).fillMaxHeight().testTag("tab-$text").clickable(onClick = action).background(if(selected) Bg else Chrome)) { Row(Modifier.fillMaxHeight().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) { DbIcon(icon, if(selected) color else Faint); Spacer(Modifier.width(7.dp)); Text(text, color = if(selected) TextStrong else Muted, fontSize = 12.sp, maxLines = 1) }; if(selected) Box(Modifier.matchParentSize().padding(bottom = 36.dp).background(color)) } }
 @Composable private fun SourceRow(text: String, icon: Icon, selected: Boolean, color: Color, enabled: Boolean = true, action: () -> Unit) { Row(Modifier.fillMaxWidth().heightIn(min = 38.dp).padding(horizontal = 7.dp).clip(RoundedCornerShape(6.dp)).background(if(selected) color.copy(alpha = .18f) else Color.Transparent).clickable(enabled, onClick = action).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) { DbIcon(icon, if(selected) color else Faint); Spacer(Modifier.width(8.dp)); Text(text, color = if(selected) TextStrong else Secondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) } }
 @Composable private fun StatusFooter(left: String, right: String?) { Row(Modifier.fillMaxWidth().height(28.dp).background(Chrome).padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) { Text(left, color = Faint, fontSize = 11.sp); Spacer(Modifier.weight(1f)); right?.let { Text(it, color = Muted, fontSize = 11.sp) } } }
 
