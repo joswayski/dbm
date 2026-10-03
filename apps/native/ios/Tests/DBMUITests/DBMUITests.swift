@@ -5,7 +5,7 @@ final class DBMUITests: XCTestCase {
     func testDemoConnectionFormAndScreenshot() {
         let app = launchDemo()
         XCTAssertTrue(app.staticTexts["DEMO"].waitForExistence(timeout: 10))
-        retainScreenshot(app, named: "iphone-connections")
+        retainScreenshot(named: "iphone-connections")
         app.buttons["add-connection"].tap()
         XCTAssertTrue(app.staticTexts["New connection"].waitForExistence(timeout: 5))
         XCTAssertEqual(app.textFields["port"].value as? String, "5432")
@@ -13,7 +13,7 @@ final class DBMUITests: XCTestCase {
         let username = app.textFields["username"]; username.tap(); username.typeText("demo_user")
         let password = app.secureTextFields["password"]; password.tap(); password.typeText("memory-only")
         XCTAssertTrue(app.buttons["test-connection"].isEnabled)
-        retainScreenshot(app, named: "iphone-connection-form")
+        retainScreenshot(named: "iphone-connection-form")
     }
 
     func testLandscapeUsesPersistentSourceList() {
@@ -32,7 +32,12 @@ final class DBMUITests: XCTestCase {
         app.buttons["schema-item-users"].tap()
         XCTAssertTrue(app.staticTexts["Rows 1–25"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.textViews["query-editor"].exists)
-        retainScreenshot(app, named: "iphone-landscape-sidebar")
+        XCTAssertTrue(app.buttons["Next"].isHittable)
+        app.buttons["Next"].tap()
+        XCTAssertTrue(app.staticTexts["Rows 26–40"].waitForExistence(timeout: 10))
+        app.buttons["Previous"].tap()
+        XCTAssertTrue(app.staticTexts["Rows 1–25"].waitForExistence(timeout: 10))
+        retainScreenshot(named: "iphone-landscape-sidebar")
         XCUIDevice.shared.orientation = .portrait
     }
 
@@ -49,7 +54,7 @@ final class DBMUITests: XCTestCase {
         let queryRow = app.otherElements["result-row-1"]
         XCTAssertTrue(queryRow.waitForExistence(timeout: 10))
         XCTAssertTrue(queryRow.label.contains("full_name:"), queryRow.label)
-        retainScreenshot(app, named: "iphone-query-results")
+        retainScreenshot(named: "iphone-query-results")
 
         app.buttons["explorer"].tap()
         let publicSchema = app.buttons["schema-item-public"]
@@ -62,7 +67,7 @@ final class DBMUITests: XCTestCase {
         XCTAssertEqual(app.buttons.matching(identifier: "schema-item-public").count, 1)
         XCTAssertEqual(app.buttons.matching(identifier: "schema-item-users").count, 1)
         XCTAssertEqual(publicSchema.value as? String, "Expanded")
-        retainScreenshot(app, named: "iphone-schema-expanded")
+        retainScreenshot(named: "iphone-schema-expanded")
         users.tap()
         XCTAssertFalse(app.textViews["query-editor"].exists)
         XCTAssertTrue(app.staticTexts["Rows 1–25"].waitForExistence(timeout: 10))
@@ -70,13 +75,13 @@ final class DBMUITests: XCTestCase {
         XCTAssertTrue(firstTableRow.label.contains("email:"), firstTableRow.label)
         XCTAssertFalse(app.buttons["Previous"].isEnabled)
         XCTAssertTrue(app.buttons["Next"].isEnabled)
-        retainScreenshot(app, named: "iphone-table-page-1")
+        retainScreenshot(named: "iphone-table-page-1")
 
         app.buttons["Next"].tap()
         XCTAssertTrue(app.staticTexts["Rows 26–40"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["Previous"].isEnabled)
         XCTAssertFalse(app.buttons["Next"].isEnabled)
-        retainScreenshot(app, named: "iphone-table-page-2")
+        retainScreenshot(named: "iphone-table-page-2")
 
         app.buttons["SQL"].tap()
         XCTAssertTrue(app.textViews["query-editor"].exists)
@@ -98,7 +103,7 @@ final class DBMUITests: XCTestCase {
         app.buttons["test-connection"].tap()
         XCTAssertTrue(app.alerts["DBM"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.alerts["DBM"].staticTexts["invalid input: Redis database must be a non-negative integer"].exists)
-        retainScreenshot(app, named: "iphone-connection-error")
+        retainScreenshot(named: "iphone-connection-error")
     }
 
     func testBackgroundReturnsToConnectionsAndClearsPasswordEntry() {
@@ -127,8 +132,8 @@ final class DBMUITests: XCTestCase {
         return app
     }
 
-    private func retainScreenshot(_ app: XCUIApplication, named name: String) {
-        let screenshot = XCTAttachment(screenshot: app.screenshot())
+    private func retainScreenshot(named name: String) {
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         screenshot.name = name
         screenshot.lifetime = .keepAlways
         add(screenshot)
