@@ -80,7 +80,14 @@ private fun profileColor(value: String?) = runCatching { Color(android.graphics.
         }
         owner.lifecycle.addObserver(observer); onDispose { owner.lifecycle.removeObserver(observer) }
     }
-    val typography = Typography(bodyMedium = TextStyle(fontFamily = UiFont, fontSize = 13.sp), bodySmall = TextStyle(fontFamily = UiFont, fontSize = 12.sp), titleMedium = TextStyle(fontFamily = UiFont, fontSize = 15.sp, fontWeight = FontWeight.SemiBold))
+    val typography = Typography(
+        bodyLarge = TextStyle(fontFamily = UiFont, fontSize = 13.sp),
+        bodyMedium = TextStyle(fontFamily = UiFont, fontSize = 13.sp),
+        bodySmall = TextStyle(fontFamily = UiFont, fontSize = 12.sp),
+        labelLarge = TextStyle(fontFamily = UiFont, fontSize = 12.sp),
+        titleMedium = TextStyle(fontFamily = UiFont, fontSize = 15.sp, fontWeight = FontWeight.SemiBold),
+        headlineSmall = TextStyle(fontFamily = UiFont, fontSize = 17.sp, fontWeight = FontWeight.SemiBold),
+    )
     MaterialTheme(colorScheme = darkColorScheme(background = Bg, surface = Chrome, primary = Accent, onPrimary = Color.White, onSurface = Text, error = Danger), typography = typography) {
         Surface(Modifier.fillMaxSize(), color = Bg) { Column(Modifier.safeDrawingPadding()) {
             if (vm.demo) Text("DEMO — local Rust fixture", Modifier.fillMaxWidth().background(Control).padding(horizontal = 12.dp, vertical = 4.dp), color = Muted, fontSize = 11.sp)
