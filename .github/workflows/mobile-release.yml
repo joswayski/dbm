@@ -146,7 +146,7 @@ jobs:
           set -euo pipefail
           umask 077
           aws secretsmanager get-secret-value --secret-id production/signing/release \
-            --query SecretString --output text | jq -er '.google_play.service_account_json | strings' > "$RUNNER_TEMP/play.json"
+            --query SecretString --output text | jq -er '.dbm_google_play.service_account_json | strings' > "$RUNNER_TEMP/play.json"
           python3 -m pip install --quiet 'pyjwt[crypto]==2.10.1'
           export GOOGLE_PLAY_SERVICE_ACCOUNT="$RUNNER_TEMP/play.json"
           export PLAY_RELEASE_NAME="0.1.$DBM_BUILD_NUMBER"

@@ -140,8 +140,9 @@ The release reads `production/signing/release` through GitHub OIDC role
   `DBM_BUILD_NUMBER`, then `bash apps/native/android/build.sh assembleRelease bundleRelease`.
   Debug `.debug` installs are separate, and CI debug keys are not stable.
 - **Google Play:** every approved Android release uploads the signed AAB to
-  `com.dbm.nativeapp` on the **internal testing** track, using Caper's existing
-  `google_play.service_account_json`. No repository opt-in variable is needed.
+  `com.dbm.nativeapp` on the **internal testing** track, using DBM's own service
+  account in `dbm_google_play.service_account_json`. It never falls back to
+  Caper's `google_play` key. No repository opt-in variable is needed.
   Missing credentials or denied access fail the Android job rather than silently
   skipping Play. Testers install and update through the Play Store after joining
   https://play.google.com/apps/testing/com.dbm.nativeapp with an enrolled account.
@@ -177,10 +178,31 @@ The release reads `production/signing/release` through GitHub OIDC role
    External testing additionally needs beta contact/review information.
 4. Create DBM in the same Play Console developer account as Caper. The first
    bundle establishes package `com.dbm.nativeapp`; the display name can change,
-   but the package cannot. Under **Users and permissions**, give Caper's existing
-   service account access to DBM with **View app information (read-only)** and
-   **Release apps to testing tracks**. No new key or production permission is
-   required. Add your Google account under **Testing → Internal testing → Testers**.
+   but the package cannot. Create a separate `dbm-play-release` service account
+   in Google Cloud Console, in a project with **Google Play Android Developer API**
+   enabled. Skip the optional Google Cloud IAM role grants. Under the service
+   account's **Keys → Add key → Create new key → JSON**, download its key and
+   save it as `~/Downloads/dbm-play-release.json`; never commit or share it.
+   In Play Console **Users and permissions → Invite new users**, enter this
+   new service account's email and select **only DBM** under **App permissions**.
+   Grant **View app information (read-only)** and **Release apps to testing tracks**;
+   leave account-wide permissions unset and do not grant Caper access.
+   Add your own Google account under DBM's **Testing → Internal testing → Testers**.
+   After updating the infrastructure checkout to the app-scoped storage script:
+
+   ```sh
+   aws sso login --profile production
+   ./scripts/store-release-signing-secrets.sh google-play --app dbm \
+     --service-account ~/Downloads/dbm-play-release.json --profile production
+   aws --profile production --region us-east-1 secretsmanager get-secret-value \
+     --secret-id production/signing/release --query SecretString --output text \
+     --no-cli-pager | jq -er '.dbm_google_play.client_email'
+   ```
+
+   Verify the printed email matches the new DBM bot. This writes only
+   `dbm_google_play`; Caper's key is unchanged. The separate Play credentials
+   remain in the existing shared AWS secret; this is not per-app AWS secret
+   access isolation. No additional Terraform resources or apply are needed.
 5. Merge the app workflow, wait for its exact `main` mobile tests, then use
    **Deploy DBM mobile**, or dispatch the tested SHA explicitly:
 

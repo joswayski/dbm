@@ -85,13 +85,14 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn(f"--target {SHA}", calls[2])
         self.assertEqual(release["jobs"]["publish"]["needs"], ["resolve", "android"])
 
-    def test_play_rollout_is_required_and_reuses_the_shared_service_account(self):
+    def test_play_rollout_requires_dbm_credentials_without_shared_fallback(self):
         step = workflow("mobile-release.yml")["jobs"]["android"]["steps"][-2]
         self.assertNotIn("if", step)
         executable(self.bin / "aws", '#!/bin/sh\nprintf "%s" "$SIGNING_SECRET"\n')
         executable(self.bin / "python3", '#!/bin/sh\nprintf "%s\\n" "$*" >> "$CALLS"\n')
-        account = json.dumps({"client_email": "caper-release@example.invalid"})
-        secret = json.dumps({"google_play": {"service_account_json": account}})
+        account = json.dumps({"client_email": "dbm-release@example.invalid"})
+        caper = {"service_account_json": json.dumps({"client_email": "caper-release@example.invalid"})}
+        secret = json.dumps({"dbm_google_play": {"service_account_json": account}, "google_play": caper})
         result = self.run_step(step["run"], SIGNING_SECRET=secret,
                                RUNNER_TEMP=str(self.directory), DBM_BUILD_NUMBER="902")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -101,7 +102,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
                       (self.directory / "calls").read_text().splitlines())
 
         (self.directory / "calls").unlink()
-        result = self.run_step(step["run"], SIGNING_SECRET='{"android": {}}',
+        result = self.run_step(step["run"], SIGNING_SECRET=json.dumps({"google_play": caper}),
                                RUNNER_TEMP=str(self.directory), DBM_BUILD_NUMBER="902")
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse((self.directory / "calls").exists())
