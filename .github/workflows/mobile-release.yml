@@ -32,6 +32,7 @@ jobs:
     name: Resolve tested main commit
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     permissions:
       contents: read
       actions: read
@@ -220,6 +221,7 @@ jobs:
     name: Update the Android download
     needs: [resolve, android]
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:
@@ -246,6 +248,7 @@ jobs:
     needs: [resolve, android, testflight, publish]
     if: ${{ always() && github.ref == 'refs/heads/main' && inputs.discord_message_id != '' }}
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - env:
