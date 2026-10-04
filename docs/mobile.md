@@ -139,12 +139,22 @@ The release reads `production/signing/release` through GitHub OIDC role
   `DBM_ANDROID_KEY_PASSWORD` inputs. Build locally with these variables and
   `DBM_BUILD_NUMBER`, then `bash apps/native/android/build.sh assembleRelease bundleRelease`.
   Debug `.debug` installs are separate, and CI debug keys are not stable.
+- **Google Play:** every approved Android release uploads the signed AAB to
+  `com.dbm.nativeapp` on the **internal testing** track, using DBM's own service
+  account in `dbm_google_play.service_account_json`. It never falls back to
+  Caper's `google_play` key. No repository opt-in variable is needed.
+  Missing credentials or denied access fail the Android job rather than silently
+  skipping Play. Testers install and update through the Play Store after joining
+  https://play.google.com/apps/testing/com.dbm.nativeapp with an enrolled account.
+  If Google accepts only a draft, the job warns; finish its rollout in Play
+  Console before expecting an install or update.
 - **Downloads:** the signed `DBM-Android.apk`, revision/version `BUILD.json`
   and `SHA256SUMS` go in the `mobile-latest` **prerelease**, never GitHub's
-  desktop `releases/latest` target. Once published, the APK is at
+  desktop `releases/latest` target. This is an alternative to Play testing.
+  Once published, the APK is at
   https://github.com/joswayski/dbm/releases/download/mobile-latest/DBM-Android.apk.
-  Allow installs from your browser on Android. The signed Play AAB is retained
-  as the run's `google-play-bundle` artifact for 30 days.
+  The signed Play AAB is retained as the run's `google-play-bundle` artifact for
+  30 days, including when the subsequent Play upload fails during first-app setup.
 - **iPhone:** `apps/native/ios/upload-testflight.sh` builds a Release device
   archive for `app.dbm.ios` with Xcode 26 and build number `<run number>.<attempt>`.
   The existing `apple` App Store Connect API key handles cloud-managed signing,
@@ -152,10 +162,6 @@ The release reads `production/signing/release` through GitHub OIDC role
   may still await Apple's beta review. Android publication does not wait for
   Apple; Discord reports failure if either platform fails, including partial
   uploads. A TestFlight success is not physical-device acceptance.
-- **Play:** automatic internal rollout is opt-in. Set repository variable
-  `DBM_PLAY_UPLOAD=true` only after registering `com.dbm.nativeapp` in Play
-  Console and granting the existing `google_play` service account DBM testing
-  release access. Otherwise the APK and AAB still build without Play uploads.
 
 ### One-time setup before the first release
 
@@ -170,7 +176,34 @@ The release reads `production/signing/release` through GitHub OIDC role
    API key needs **Admin** access for cloud-managed distribution signing. Add
    yourself to a TestFlight internal group; a public link is not required.
    External testing additionally needs beta contact/review information.
-4. Merge the app workflow, wait for its exact `main` mobile tests, then use
+4. Create DBM in the same Play Console developer account as Caper. The first
+   bundle establishes package `com.dbm.nativeapp`; the display name can change,
+   but the package cannot. Create a separate `dbm-play-release` service account
+   in Google Cloud Console, in a project with **Google Play Android Developer API**
+   enabled. Skip the optional Google Cloud IAM role grants. Under the service
+   account's **Keys → Add key → Create new key → JSON**, download its key and
+   save it as `~/Downloads/dbm-play-release.json`; never commit or share it.
+   In Play Console **Users and permissions → Invite new users**, enter this
+   new service account's email and select **only DBM** under **App permissions**.
+   Grant **View app information (read-only)** and **Release apps to testing tracks**;
+   leave account-wide permissions unset and do not grant Caper access.
+   Add your own Google account under DBM's **Testing → Internal testing → Testers**.
+   After updating the infrastructure checkout to the app-scoped storage script:
+
+   ```sh
+   aws sso login --profile production
+   ./scripts/store-release-signing-secrets.sh google-play --app dbm \
+     --service-account ~/Downloads/dbm-play-release.json --profile production
+   aws --profile production --region us-east-1 secretsmanager get-secret-value \
+     --secret-id production/signing/release --query SecretString --output text \
+     --no-cli-pager | jq -er '.dbm_google_play.client_email'
+   ```
+
+   Verify the printed email matches the new DBM bot. This writes only
+   `dbm_google_play`; Caper's key is unchanged. The separate Play credentials
+   remain in the existing shared AWS secret; this is not per-app AWS secret
+   access isolation. No additional Terraform resources or apply are needed.
+5. Merge the app workflow, wait for its exact `main` mobile tests, then use
    **Deploy DBM mobile**, or dispatch the tested SHA explicitly:
 
    ```sh
@@ -180,9 +213,18 @@ The release reads `production/signing/release` through GitHub OIDC role
    gh run list --repo joswayski/dbm --workflow mobile-release.yml --limit 5
    ```
 
-Check both platform jobs, install/upgrade the APK, and install DBM from TestFlight
-on the actual iPhone. For a regression, revert the app change and release a new,
-higher build number; do not rotate keys or downgrade installed versions.
+6. For a new Play app, download that run's **google-play-bundle** artifact and
+   upload `DBM-Android-Play.aab` under **Internal testing → Create new release**.
+   Complete Play App Signing and roll out to internal testers, not production.
+   Google requires this first Console upload before its publishing API can
+   update an app, so the first workflow's Play step may fail until this is done.
+   Rerun the workflow afterwards; the higher version code avoids reusing the
+   manually uploaded build. Later approved releases update Play automatically.
+
+Check both platform jobs, join the Play testing link and install DBM from the
+Play Store on Android, and install DBM from TestFlight on the actual iPhone.
+For a regression, revert the app change and release a new, higher build number;
+do not rotate keys or downgrade installed versions.
 App registration, infrastructure apply, secret sync, and the first upload are
 operator actions, not steps performed by development CI.
 

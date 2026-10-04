@@ -141,13 +141,12 @@ jobs:
           path: dist/mobile/play/DBM-Android-Play.aab
           if-no-files-found: error
           retention-days: 30
-      - name: Optional Google Play internal rollout
-        if: vars.DBM_PLAY_UPLOAD == 'true'
+      - name: Roll out to Google Play internal testers
         run: |
           set -euo pipefail
           umask 077
           aws secretsmanager get-secret-value --secret-id production/signing/release \
-            --query SecretString --output text | jq -er '.google_play.service_account_json | strings' > "$RUNNER_TEMP/play.json"
+            --query SecretString --output text | jq -er '.dbm_google_play.service_account_json | strings' > "$RUNNER_TEMP/play.json"
           python3 -m pip install --quiet 'pyjwt[crypto]==2.10.1'
           export GOOGLE_PLAY_SERVICE_ACCOUNT="$RUNNER_TEMP/play.json"
           export PLAY_RELEASE_NAME="0.1.$DBM_BUILD_NUMBER"
@@ -239,7 +238,7 @@ jobs:
           fi
           gh release create mobile-latest --repo "$GITHUB_REPOSITORY" --target "$RELEASE_SHA" \
             --prerelease --latest=false --title 'DBM mobile (latest)' \
-            --notes "Signed Android build from $RELEASE_SHA. Install DBM-Android.apk and allow installs from your browser. Updates use the same signing key. iPhone delivery runs separately through TestFlight; check this run's iPhone job for its result. Native clients remain read-only and require verified TLS. Desktop downloads and updates are unchanged." \
+            --notes "Signed Android build from $RELEASE_SHA. Install and update through Google Play internal testing: https://play.google.com/apps/testing/com.dbm.nativeapp (tester enrollment required). If the Play upload was saved as a draft, roll it out in Play Console first. The APK below is an alternative download, not the Play install. iPhone delivery runs separately through TestFlight; check this run's iPhone job for its result. Native clients remain read-only and require verified TLS. Desktop downloads and updates are unchanged." \
             release/DBM-Android.apk release/BUILD.json release/SHA256SUMS
 
   notify-discord:
