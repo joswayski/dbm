@@ -37,9 +37,9 @@ iPhone SwiftUI clients are in development.
 
 The mobile development clients are a deliberately smaller, read-only slice.
 They connect directly through the in-process Rust core, require verified TLS,
-and do not save passwords. They are not store releases. A separate Caper-style
-release workflow provides signed Android downloads and iPhone TestFlight uploads
-after the one-time signing/app setup. See
+and do not save passwords. They are not public store releases. A separate
+Caper-style release workflow delivers Android through Google Play internal
+testing and iPhone through TestFlight after the one-time signing/app setup. See
 [the mobile contract](docs/mobile.md) for capabilities, privacy, networking,
 builds, and validation status.
 

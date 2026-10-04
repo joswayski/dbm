@@ -84,7 +84,27 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("--prerelease --latest=false", calls[2])
         self.assertIn(f"--target {SHA}", calls[2])
         self.assertEqual(release["jobs"]["publish"]["needs"], ["resolve", "android"])
-        self.assertEqual(release["jobs"]["android"]["steps"][-2]["if"], "vars.DBM_PLAY_UPLOAD == 'true'")
+
+    def test_play_rollout_is_required_and_reuses_the_shared_service_account(self):
+        step = workflow("mobile-release.yml")["jobs"]["android"]["steps"][-2]
+        self.assertNotIn("if", step)
+        executable(self.bin / "aws", '#!/bin/sh\nprintf "%s" "$SIGNING_SECRET"\n')
+        executable(self.bin / "python3", '#!/bin/sh\nprintf "%s\\n" "$*" >> "$CALLS"\n')
+        account = json.dumps({"client_email": "caper-release@example.invalid"})
+        secret = json.dumps({"google_play": {"service_account_json": account}})
+        result = self.run_step(step["run"], SIGNING_SECRET=secret,
+                               RUNNER_TEMP=str(self.directory), DBM_BUILD_NUMBER="902")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.directory / "play.json").read_text().strip(), account)
+        self.assertEqual((self.directory / "play.json").stat().st_mode & 0o777, 0o600)
+        self.assertIn("scripts/play-upload.py dist/mobile/play/DBM-Android-Play.aab",
+                      (self.directory / "calls").read_text().splitlines())
+
+        (self.directory / "calls").unlink()
+        result = self.run_step(step["run"], SIGNING_SECRET='{"android": {}}',
+                               RUNNER_TEMP=str(self.directory), DBM_BUILD_NUMBER="902")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((self.directory / "calls").exists())
 
     def configure_curl(self):
         executable(self.bin / "curl", '''#!/usr/bin/env python3
