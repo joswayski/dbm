@@ -19,3 +19,18 @@ Install a matching Simulator runtime through Xcode's Components settings or `xco
 For the explicitly labelled, Debug-only Rust `DemoStore` launch, set the `DBM_DEMO=1` environment variable in the test plan or scheme. Release builds ignore it. The UI test does this and retains an `iphone-connection-form` screenshot in its `.xcresult`.
 
 The device workflow requires a valid signing team/profile; it does not install the resulting app automatically.
+
+## TestFlight
+
+`upload-testflight.sh` follows Caper's cloud-managed signing: it prepares the
+device Rust library/project, archives a **Release** app, and uploads through
+App Store Connect. It needs Xcode 26, `APPLE_TEAM_ID`, `NOTARY_KEY_PATH` (the
+API `.p8` file), `NOTARY_KEY_ID`, `NOTARY_ISSUER`, and a unique increasing
+`BUILD_NUMBER` in `<run number>.<attempt>` form. `DBM_IOS_BUNDLE_ID` defaults to
+`app.dbm.ios`; keep it consistent with the registered Apple app. Release builds
+ignore `DBM_DEMO`.
+
+The Mobile release workflow fetches those inputs from the same AWS signing
+secret as Caper, then waits for processing and assigns tester groups. No
+distribution certificate/profile is stored in Git. Register the DBM app and
+TestFlight group before uploading; see [one-time setup](../../../docs/mobile.md#one-time-setup-before-the-first-release).

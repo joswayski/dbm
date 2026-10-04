@@ -102,9 +102,9 @@ bash apps/native/ios/build.sh test
 The simulator app is `apps/native/ios/DerivedData/Build/Products/Debug-iphonesimulator/DBM.app`.
 **It cannot be installed on a physical iPhone.** A local `device` build requires
 your own bundle ID, Apple development team and provisioning; see the
-[iPhone guide](../apps/native/ios/README.md). TestFlight signing/upload and Play
-distribution require separate setup and authorization. Existing Caper signing
-secrets are not read or copied by DBM builds.
+[iPhone guide](../apps/native/ios/README.md). Development builds do not read
+signing secrets or upload to stores. The separate release workflow below uses
+the existing AWS signing material, as Caper does.
 
 `.github/workflows/mobile.yml` builds Android and iPhone Simulator development
 artifacts, records exact tested revisions/checksums, and runs native demo UI
@@ -118,31 +118,73 @@ These are configured workflows, not a record that any particular revision has
 passed. SwiftUI is not compiled on Linux. Physical-device behavior and live,
 verified-TLS database connections on both mobile platforms remain outstanding.
 
-## Distribution setup and next step
+## Signed mobile releases (Caper's distribution path)
 
-Unlike Caper, DBM needs no hosted API, gateway, server database, or infrastructure
-rollout. It needs **mobile signing and distribution**, separate from desktop
-releases:
+`.github/workflows/mobile-release.yml` follows Caper's release approval and
+signing setup. It does not deploy a DBM server or change desktop distribution.
+After **Mobile development builds** passes for a push to `main`,
+`mobile-ready.yml` posts **Deploy DBM mobile** in the existing Discord deploys
+channel. Godis dispatches the exact SHA; the release rejects commits outside
+`main` or without a successful mobile test run for that SHA. Merging alone does
+not upload or publish mobile apps.
 
-1. Install the development Android APK and build a provisioned iPhone device
-   app with your own Apple team/bundle ID. Run the physical-device acceptance
-   below through the existing private network/VPN before relying on either app.
-2. For repeatable Android installs/updates, choose the final application ID,
-   configure a stable signing key and increasing version codes, and publish
-   signed APKs to testers. Play distribution additionally needs its own app
-   record and signed AAB. Release assembly currently stops with an explicit
-   error until signing is configured. CI debug keys are not stable across
-   runners: installing another debug APK may require uninstalling the previous
-   one, which deletes its local profiles/history. Debug and release app IDs
-   are also separate installs.
-3. For repeatable iPhone installs, register DBM's bundle ID and App Store Connect
-   app, then add signed archive/upload automation and increasing build numbers
-   for TestFlight. A compiled device Rust library or Simulator app is not an
-   installable, signed iPhone package.
+The release reads `production/signing/release` through GitHub OIDC role
+`production-dbm-release-signer`; no signing files belong in this repository:
 
-Caper's release automation is a reference for this later work, not something
-DBM currently inherits. App registration, signing-secret access/configuration,
-and uploads require separate authorization; no Caper credentials are copied.
+- **Android:** the existing `android` upload key signs `com.dbm.nativeapp`.
+  APK updates retain profiles/history. The version code is `run number × 100 +
+  attempt` (attempts 1–99); even re-runs increase it. Release builds disable demo
+  mode and refuse packaging without all four `DBM_ANDROID_KEYSTORE`,
+  `DBM_ANDROID_KEYSTORE_PASSWORD`, `DBM_ANDROID_KEY_ALIAS`, and
+  `DBM_ANDROID_KEY_PASSWORD` inputs. Build locally with these variables and
+  `DBM_BUILD_NUMBER`, then `bash apps/native/android/build.sh assembleRelease bundleRelease`.
+  Debug `.debug` installs are separate, and CI debug keys are not stable.
+- **Downloads:** the signed `DBM-Android.apk`, revision/version `BUILD.json`
+  and `SHA256SUMS` go in the `mobile-latest` **prerelease**, never GitHub's
+  desktop `releases/latest` target. Once published, the APK is at
+  https://github.com/joswayski/dbm/releases/download/mobile-latest/DBM-Android.apk.
+  Allow installs from your browser on Android. The signed Play AAB is retained
+  as the run's `google-play-bundle` artifact for 30 days.
+- **iPhone:** `apps/native/ios/upload-testflight.sh` builds a Release device
+  archive for `app.dbm.ios` with Xcode 26 and build number `<run number>.<attempt>`.
+  The existing `apple` App Store Connect API key handles cloud-managed signing,
+  upload, processing, What to Test, and tester-group assignment. External groups
+  may still await Apple's beta review. Android publication does not wait for
+  Apple; Discord reports failure if either platform fails, including partial
+  uploads. A TestFlight success is not physical-device acceptance.
+- **Play:** automatic internal rollout is opt-in. Set repository variable
+  `DBM_PLAY_UPLOAD=true` only after registering `com.dbm.nativeapp` in Play
+  Console and granting the existing `google_play` service account DBM testing
+  release access. Otherwise the APK and AAB still build without Play uploads.
+
+### One-time setup before the first release
+
+1. Apply the DBM signer role in `joswayski/infrastructure` following its
+   `docs/release-signing.md`. Reuse the stored Apple/Android signing material;
+   do not regenerate or rotate Caper's keys. This creates no hosted DBM services.
+2. Add `joswayski/dbm` to the existing Godis deploy GitHub App installation
+   with **Actions: write** only, deploy Godis's `dbm-mobile` dispatch support,
+   and sync the existing notification secret from the infrastructure checkout:
+   `./scripts/store-deploy-notification-webhook.sh --profile production`.
+3. Register Apple App ID `app.dbm.ios` and its App Store Connect app. The shared
+   API key needs **Admin** access for cloud-managed distribution signing. Add
+   yourself to a TestFlight internal group; a public link is not required.
+   External testing additionally needs beta contact/review information.
+4. Merge the app workflow, wait for its exact `main` mobile tests, then use
+   **Deploy DBM mobile**, or dispatch the tested SHA explicitly:
+
+   ```sh
+   git fetch origin main
+   gh workflow run mobile-release.yml --repo joswayski/dbm --ref main \
+     -f git_sha="$(git rev-parse origin/main)"
+   gh run list --repo joswayski/dbm --workflow mobile-release.yml --limit 5
+   ```
+
+Check both platform jobs, install/upgrade the APK, and install DBM from TestFlight
+on the actual iPhone. For a regression, revert the app change and release a new,
+higher build number; do not rotate keys or downgrade installed versions.
+App registration, infrastructure apply, secret sync, and the first upload are
+operator actions, not steps performed by development CI.
 
 ## Before distributing to testers
 
