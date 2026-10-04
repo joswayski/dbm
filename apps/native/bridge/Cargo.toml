@@ -9,9 +9,13 @@ publish = false
 [lib]
 crate-type = ["cdylib", "staticlib", "rlib"]
 
+[features]
+default = ["desktop-updater"]
+desktop-updater = ["dep:dbm-update"]
+
 [dependencies]
 dbm-core = { path = "../../../crates/dbm-core" }
-dbm-update = { path = "../../../crates/dbm-update" }
+dbm-update = { path = "../../../crates/dbm-update", optional = true }
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true

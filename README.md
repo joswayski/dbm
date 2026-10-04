@@ -1,7 +1,8 @@
 # DBM
 
-A fast, local-first database manager for PostgreSQL, MySQL, and Redis on
-macOS, Windows, and Linux.
+A fast, local-first database manager for PostgreSQL, MySQL, and Redis. Native
+desktop apps are released for macOS, Windows, and Linux; Android Compose and
+iPhone SwiftUI clients are in development.
 
 ## Download
 
@@ -23,6 +24,7 @@ macOS, Windows, and Linux.
 
 ## Features
 
+- Released desktop apps use AppKit on macOS and egui on Windows/Linux.
 - Browse databases, schemas, tables, and Redis keys, with filters, sorting, and
   CSV export.
 - Edit rows safely: changes are staged, previewed, and saved together.
@@ -33,6 +35,12 @@ macOS, Windows, and Linux.
 - Your connections, history, and data stay on your machine: no telemetry,
   accounts, or sync.
 
+The mobile development clients are a deliberately smaller, read-only slice.
+They connect directly through the in-process Rust core, require verified TLS,
+and do not save passwords. They are not store releases. See
+[the mobile contract](docs/mobile.md) for capabilities, privacy, networking,
+builds, and validation status.
+
 See [docs/features.md](docs/features.md) for the full feature list and what is
 planned.
 
@@ -41,4 +49,5 @@ planned.
 - [Development](docs/development.md): build from source, run tests, local installs
 - [Releases](docs/releases.md): how releases and in-app updates work
 - [Design system](docs/design-system.md): the Graphite UI
-- [Native apps](docs/native.md): the shared Rust core, the macOS AppKit app, and the Windows/Linux egui app
+- [Native architecture](docs/native.md): the shared Rust core and native hosts
+- [Mobile development clients](docs/mobile.md): Android Compose and iPhone SwiftUI scope

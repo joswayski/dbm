@@ -554,10 +554,26 @@ async fn connect_client(profile: &ConnectionProfile, password: Option<&str>) -> 
         let pem = std::fs::read(path).map_err(|error| {
             AppError::InvalidInput(format!("could not read CA certificate {path}: {error}"))
         })?;
-        let certificate = native_tls::Certificate::from_pem(&pem).map_err(|error| {
+        let certificates = pem::parse_many(&pem).map_err(|error| {
             AppError::InvalidInput(format!("could not parse CA certificate {path}: {error}"))
         })?;
-        connector.add_root_certificate(certificate);
+        if certificates.is_empty() {
+            return Err(AppError::InvalidInput(
+                "CA bundle contains no certificates".into(),
+            ));
+        }
+        for certificate in certificates {
+            if certificate.tag() != "CERTIFICATE" {
+                return Err(AppError::InvalidInput(
+                    "CA bundle must contain certificates only".into(),
+                ));
+            }
+            connector.add_root_certificate(
+                native_tls::Certificate::from_der(certificate.contents()).map_err(|error| {
+                    AppError::InvalidInput(format!("could not parse CA certificate: {error}"))
+                })?,
+            );
+        }
     }
     let connector = connector
         .build()

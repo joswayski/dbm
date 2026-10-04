@@ -1,7 +1,4 @@
-use std::path::PathBuf;
-
-#[cfg(test)]
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 use directories::ProjectDirs;
@@ -32,7 +29,8 @@ impl LocalStore {
         Ok(store)
     }
 
-    #[cfg(test)]
+    /// Opens metadata/history in a host-managed sandbox. No passwords are stored.
+    /// The host creates and protects the parent directory before calling this.
     pub fn from_path(path: impl AsRef<Path>) -> AppResult<Self> {
         let store = Self {
             path: path.as_ref().to_path_buf(),
