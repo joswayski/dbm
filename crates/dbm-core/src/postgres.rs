@@ -1075,6 +1075,7 @@ mod tests {
                 ca_cert_path: None,
                 ssh: None,
                 read_only,
+                open_on_startup: true,
                 created_at: now,
                 updated_at: now,
             })

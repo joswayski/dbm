@@ -7,6 +7,14 @@ What the app does today, what is deliberately not built yet, and what it stores 
 - PostgreSQL, MySQL, and Redis direct connections with disabled, preferred, or
   required TLS. Connection attempts give up after 20 seconds.
 - Local connection profiles and query history in an application SQLite database.
+- Each connection remembers the database last successfully selected in the
+  sidebar, including Redis database indices. That selection becomes the saved
+  database used when reconnecting; failed switches leave it unchanged.
+- **Open on startup** in the connection editor automatically connects and opens
+  a SQL or Redis workbench tab when DBM launches, without running workbench queries.
+  It defaults to on for new and existing desktop profiles and can be turned off
+  per connection. Startup connection errors use the normal error banner; other
+  profiles still open. Mobile clients continue to connect manually.
 - Passwords through the macOS Keychain, Windows Credential Manager, or Linux
   secret service via `keyring`.
 - The connection editor displays the current URL with its password masked.

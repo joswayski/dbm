@@ -317,13 +317,11 @@ async fn dispatch(state: &AppState, request: Request) -> Result<Value, String> {
             profile_id,
             database,
         } => {
-            let database = database.trim();
-            if database.is_empty() {
-                return Err("database is required".into());
-            }
-            let mut profile = state.profile(profile_id).map_err(message)?;
-            profile.default_database = database.to_owned();
-            let session = state.connect(profile.clone()).await.map_err(message)?;
+            let session = state
+                .connect_database(profile_id, &database)
+                .await
+                .map_err(message)?;
+            let profile = session.profile().clone();
             let databases = session.list_databases().await.map_err(message)?;
             serde_json::to_value(WorkspaceInfo { profile, databases })
         }

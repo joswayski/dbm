@@ -1751,6 +1751,7 @@ mod tests {
             ca_cert_path: None,
             ssh: None,
             read_only,
+            open_on_startup: true,
             created_at: now,
             updated_at: now,
         }
@@ -2125,6 +2126,81 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn database_selection_survives_restart_but_failed_switch_does_not() {
+        use crate::models::SaveProfileInput;
+        use crate::state::AppState;
+
+        let Some((_server, writable)) = start_test_redis().await else {
+            eprintln!("skipping live Redis test because redis-server is unavailable");
+            return;
+        };
+        let path = std::env::temp_dir().join(format!("dbm-selection-{}.sqlite3", Uuid::new_v4()));
+        let state = AppState::mobile(&path).unwrap();
+        let input = SaveProfileInput {
+            id: None,
+            name: "Remember selection".into(),
+            color: None,
+            engine: DatabaseEngine::Redis,
+            host: "127.0.0.1".into(),
+            port: writable.profile().port,
+            username: String::new(),
+            default_database: "0".into(),
+            tls_mode: TlsMode::Disabled,
+            ca_cert_path: None,
+            ssh: None,
+            read_only: false,
+            open_on_startup: false,
+            password: None,
+        };
+        let profile = state.save_profile(input.clone()).unwrap();
+        let other = state.save_profile(input).unwrap();
+        let id = profile.id;
+        let original = state.connect(profile).await.unwrap();
+        original
+            .run_query("SET location original", None)
+            .await
+            .unwrap();
+        let selected = state.connect_database(id, " 3 ").await.unwrap();
+        selected
+            .run_query("SET location selected", None)
+            .await
+            .unwrap();
+        assert_eq!(state.profile(id).unwrap().default_database, "3");
+        assert!(!state.profile(id).unwrap().open_on_startup);
+        assert_eq!(state.profile(other.id).unwrap().default_database, "0");
+        assert!(state.connect_database(id, "9999").await.is_err());
+        assert!(state.connect_database(id, " ").await.is_err());
+        assert_eq!(state.profile(id).unwrap().default_database, "3");
+        assert_eq!(
+            state.session(id).await.unwrap().profile().default_database,
+            "3"
+        );
+        state.disconnect(id).await;
+        drop(state);
+
+        let restarted = AppState::mobile(&path).unwrap();
+        let session = restarted
+            .connect(restarted.profile(id).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(
+            session.run_query("GET location", None).await.unwrap().rows,
+            vec![vec![JsonValue::from("selected")]]
+        );
+        let session = restarted
+            .connect(restarted.profile(other.id).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(
+            session.run_query("GET location", None).await.unwrap().rows,
+            vec![vec![JsonValue::from("original")]]
+        );
+        restarted.disconnect(id).await;
+        restarted.disconnect(other.id).await;
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
     async fn shared_workbench_records_success_and_failure_in_active_database() {
         use crate::keyring_store::CredentialStore;
         use crate::models::{QueryRequest, SaveProfileInput};
@@ -2154,6 +2230,7 @@ mod tests {
                 ca_cert_path: None,
                 ssh: None,
                 read_only: true,
+                open_on_startup: true,
                 password: None,
             })
             .unwrap();

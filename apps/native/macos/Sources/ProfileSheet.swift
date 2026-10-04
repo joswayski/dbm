@@ -97,6 +97,7 @@ final class ProfileSheet: NSWindowController {
     private let tlsPopup = GPopUp(items: ["Preferred", "Required", "Disabled"])
     private let caField = GTextField("", placeholder: "/path/to/root-ca.pem")
     private let readOnlyBox = NSButton(checkboxWithTitle: "Read-only profile (blocks GUI edits and mutations)", target: nil, action: nil)
+    private let openOnStartupBox = NSButton(checkboxWithTitle: "Open on startup", target: nil, action: nil)
     private let usernameLabel = label("", font: Graphite.ui(12), color: Graphite.muted)
     private let databaseLabel = label("", font: Graphite.ui(12), color: Graphite.muted)
     private let feedback = label("", font: Graphite.ui(12), color: Graphite.accentText)
@@ -122,7 +123,7 @@ final class ProfileSheet: NSWindowController {
         self.onLoadURL = onLoadURL
         self.onSave = onSave
         self.onDelete = onDelete
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 640), styleMask: [.titled], backing: .buffered, defer: false)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 672), styleMask: [.titled], backing: .buffered, defer: false)
         window.appearance = NSAppearance(named: .darkAqua)
         window.backgroundColor = Graphite.popover
         window.titleVisibility = .hidden
@@ -233,6 +234,8 @@ final class ProfileSheet: NSWindowController {
         colorRow.addArrangedSubview(label("Custom", font: Graphite.ui(12.5), color: Graphite.muted))
 
         readOnlyBox.attributedTitle = NSAttributedString(string: readOnlyBox.title, attributes: [.font: Graphite.ui(12.5), .foregroundColor: Graphite.text])
+        openOnStartupBox.attributedTitle = NSAttributedString(string: openOnStartupBox.title, attributes: [.font: Graphite.ui(12.5), .foregroundColor: Graphite.text])
+        openOnStartupBox.toolTip = "Connect to this profile's saved database when DBM launches."
         feedback.maximumNumberOfLines = 6
         feedback.lineBreakMode = .byWordWrapping
         feedback.preferredMaxLayoutWidth = 494
@@ -263,10 +266,10 @@ final class ProfileSheet: NSWindowController {
             pair(labeledField(usernameLabel, usernameField), labeledField(databaseLabel, databaseField)),
             pair(field("Password", passwordRow), field("TLS", tlsPopup)),
             field("CA certificate path (optional)", caField),
-            readOnlyBox, feedbackBox, note, hstack(actions, spacing: 8),
+            readOnlyBox, openOnStartupBox, feedbackBox, note, hstack(actions, spacing: 8),
         ], spacing: 12)
         form.setCustomSpacing(16, after: header)
-        for view in form.arrangedSubviews where !(view === readOnlyBox) {
+        for view in form.arrangedSubviews where !(view === readOnlyBox) && !(view === openOnStartupBox) {
             view.widthAnchor.constraint(equalTo: form.widthAnchor).isActive = true
         }
         let background = PanelView(fill: Graphite.popover)
@@ -291,6 +294,7 @@ final class ProfileSheet: NSWindowController {
         tlsPopup.selectItem(withTitle: (original?.tlsMode ?? "preferred").capitalized)
         caField.stringValue = original?.caCertPath ?? ""
         readOnlyBox.state = original?.readOnly == true ? .on : .off
+        openOnStartupBox.state = (original?.openOnStartup ?? true) ? .on : .off
         updateEngineLabels()
         setColor(color)
         updateURLPreview()
@@ -470,6 +474,7 @@ final class ProfileSheet: NSWindowController {
             "tlsMode": tlsPopup.titleOfSelectedItem?.lowercased() ?? "preferred",
             "caCertPath": caField.stringValue.trimmingCharacters(in: .whitespaces).isEmpty ? NSNull() : caField.stringValue,
             "ssh": original?.raw["ssh"] ?? NSNull(), "readOnly": readOnlyBox.state == .on,
+            "openOnStartup": openOnStartupBox.state == .on,
         ]
         if let original { input["id"] = original.id }
         if original == nil || passwordWasLoaded || passwordWasEdited { input["password"] = passwordField.stringValue }

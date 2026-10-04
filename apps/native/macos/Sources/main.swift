@@ -52,7 +52,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, Qu
         NSApp.appearance = NSAppearance(named: .darkAqua)
         installMenu()
         buildWindow()
-        loadProfiles()
+        loadProfiles(openOnStartup: true)
         updater.onChange = { [weak self] in self?.updateChanged() }
         topBar.updateButton.handler = { [weak self] in self?.updateClicked() }
         topBar.showUpdate(updater)
@@ -230,7 +230,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, Qu
 
     // MARK: Profiles
 
-    func loadProfiles() {
+    func loadProfiles(openOnStartup: Bool = false) {
         send(["command": "listProfiles"]) { [weak self] result in
             guard let self else { return }
             switch result {
@@ -238,6 +238,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, Qu
                 self.profiles = array(value).map { Profile(raw: dictionary($0["profile"])) }
                     .sorted { $0.name.lowercased() < $1.name.lowercased() }
                 self.refresh()
+                if openOnStartup && !self.demo {
+                    for profile in self.profiles where profile.openOnStartup {
+                        self.connect(profile.id, activate: false)
+                    }
+                }
             case .failure(let error):
                 self.showError(error.localizedDescription)
             }
@@ -337,8 +342,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, Qu
         if workspaces[id] != nil { activate(id) } else { connect(id) }
     }
 
-    func connect(_ id: String) {
-        activeProfileID = id
+    func connect(_ id: String, activate: Bool = true) {
+        if activate { activeProfileID = id }
+        guard !connecting.contains(id) else { refresh(); return }
         connecting.insert(id)
         refresh()
         send(["command": "connect", "profile_id": id], profile: id) { [weak self] result in
@@ -359,9 +365,14 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, Qu
             // Table tabs were opened on the previous database.
             closeTableTabs(id)
         }
+        if let index = profiles.firstIndex(where: { $0.id == id }) { profiles[index] = profile }
         workspaces[id] = Workspace(profile: profile, databases: databases)
         collapsedProfiles.remove(id)
-        activate(id)
+        if activeProfileID == nil || activeProfileID == id {
+            activate(id)
+        } else if !tabs.contains(where: { $0.profileID == id }) {
+            openQuery(id, activate: false)
+        }
         loadSchema(id, announce: false)
     }
 
@@ -471,15 +482,17 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, Qu
 
     // MARK: Tabs
 
-    func openQuery(_ id: String) {
+    func openQuery(_ id: String, activate: Bool = true) {
         let titles = Set(tabs.filter { $0.profileID == id && $0.kind == .query }.map(\.title))
         var number = 1
         while titles.contains("Query \(number)") { number += 1 }
         let tab = WorkTab(profileID: id, kind: .query, title: "Query \(number)")
         tab.sql = profile(id)?.engine == .redis ? "PING" : "SELECT now();"
         tabs.append(tab)
-        activeTab = tab
-        activeProfileID = id
+        if activate {
+            activeTab = tab
+            activeProfileID = id
+        }
         refresh()
     }
 

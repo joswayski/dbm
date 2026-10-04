@@ -83,6 +83,7 @@ struct Profile {
     var colorHex: String { raw["color"] as? String ?? Graphite.defaultConnectionColor }
     var color: NSColor { NSColor(css: colorHex) ?? Graphite.accent }
     var readOnly: Bool { bool(raw["readOnly"]) }
+    var openOnStartup: Bool { raw["openOnStartup"] as? Bool ?? true }
     var tlsMode: String { string(raw["tlsMode"]).isEmpty ? "preferred" : string(raw["tlsMode"]) }
     var caCertPath: String { string(raw["caCertPath"]) }
     var subtitle: String { "\(engine.label) · \(username.isEmpty ? host : "\(username)@\(host)")" }

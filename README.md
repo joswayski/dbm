@@ -32,6 +32,7 @@ iPhone SwiftUI clients are in development.
   block writes.
 - SQL and Redis workbench tabs with per-connection history.
 - Color-coded saved connections, with passwords kept in your OS credential store.
+- Remembered database selections and per-connection **Open on startup** settings.
 - Your connections, history, and data stay on your machine: no telemetry,
   accounts, or sync.
 
