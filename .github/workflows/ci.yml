@@ -8,6 +8,12 @@ on:
 permissions:
   contents: read
 
+# A new push to a pull request supersedes its in-flight run. Pushes to main are
+# never cancelled: each gets its own group, keyed by run id.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   release-scripts:
     name: Release scripts
@@ -34,6 +40,10 @@ jobs:
       matrix:
         os: [macos-14, windows-2025, ubuntu-24.04]
     runs-on: ${{ matrix.os }}
+    env:
+      # CI-only: dev/test builds without debug info compile, link, and cache
+      # faster. Release builds and their artifacts are unaffected.
+      CARGO_PROFILE_DEV_DEBUG: 0
     steps:
       - uses: actions/checkout@v4
       - name: Install Linux dependencies
@@ -49,8 +59,14 @@ jobs:
         with:
           toolchain: 1.94.0
           components: rustfmt, clippy
+      # Dependencies only (workspace crates always rebuild). Pull requests
+      # restore main's cache but never save, so they cannot evict or poison it.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo fmt --all -- --check
-      - run: cargo check --workspace --all-targets
+      # No separate `cargo check --workspace --all-targets`: the clippy step
+      # below type-checks the same targets and fails on the same errors.
       - run: cargo test --workspace --all-targets
       - run: cargo test -p dbm-native-bridge --no-default-features
       - run: cargo clippy --workspace --all-targets -- -D warnings
@@ -64,6 +80,12 @@ jobs:
         with:
           toolchain: 1.94.0
           targets: aarch64-apple-darwin,x86_64-apple-darwin
+      # Shared with the release workflow's macOS job, which builds the same
+      # universal bridge and restores this cache without saving its own.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: appkit-universal
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       # Universal, like the release, so an Intel-only break fails here.
       - name: Build the AppKit app
         env:
@@ -90,6 +112,9 @@ jobs:
       matrix:
         os: [windows-2025, ubuntu-24.04]
     runs-on: ${{ matrix.os }}
+    env:
+      # CI-only, as in the Rust job; the release build below is unaffected.
+      CARGO_PROFILE_DEV_DEBUG: 0
     steps:
       - uses: actions/checkout@v4
       - name: Native Linux dependencies
@@ -101,6 +126,10 @@ jobs:
         with:
           toolchain: 1.94.0
           components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/native/workbench -> target
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo fmt --manifest-path apps/native/workbench/Cargo.toml --all -- --check
       - run: cargo test --manifest-path apps/native/workbench/Cargo.toml --locked
       - run: cargo clippy --manifest-path apps/native/workbench/Cargo.toml --locked --all-targets -- -D warnings
