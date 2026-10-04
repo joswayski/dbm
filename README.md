@@ -54,3 +54,4 @@ planned.
 - [Design system](docs/design-system.md): the Graphite UI
 - [Native architecture](docs/native.md): the shared Rust core and native hosts
 - [Mobile development clients](docs/mobile.md): Android Compose and iPhone SwiftUI scope
+- [AnyBase migration checklist](docs/anybase-migration.md): planned rename; not yet applied
