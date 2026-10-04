@@ -9,6 +9,7 @@ import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.ViewModelProvider
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.rules.ActivityScenarioRule
 import androidx.test.platform.app.InstrumentationRegistry
@@ -137,6 +138,7 @@ class DemoNavigationTest {
         awaitConnections()
         compose.onNodeWithTag("add").performClick()
         compose.onNodeWithTag("password").performScrollTo().performClick().performTextInput("memory-only")
+        activity.scenario.onActivity { assertEquals("memory-only", ViewModelProvider(it)[DbmViewModel::class.java].state.draft.password) }
         compose.waitUntil(10_000) {
             currentInputType()?.let { it and InputType.TYPE_MASK_VARIATION == InputType.TYPE_TEXT_VARIATION_PASSWORD } == true
         }
@@ -144,7 +146,7 @@ class DemoNavigationTest {
         assertEquals(InputType.TYPE_CLASS_TEXT, passwordType and InputType.TYPE_MASK_CLASS)
         assertEquals(InputType.TYPE_TEXT_VARIATION_PASSWORD, passwordType and InputType.TYPE_MASK_VARIATION)
         assertEquals(0, passwordType and InputType.TYPE_TEXT_FLAG_AUTO_CORRECT)
-        capture("password-keyboard", screen = true)
+        capture("password-input")
         compose.onNodeWithText("Cancel").performScrollTo().performClick()
         compose.onNodeWithText("Production").performClick()
         compose.waitUntil(10_000) { compose.onAllNodesWithTag("editor").fetchSemanticsNodes().isNotEmpty() }
@@ -182,10 +184,10 @@ class DemoNavigationTest {
         return Regex("inputType=0x([0-9a-fA-F]+)").find(dump)?.groupValues?.get(1)?.toIntOrNull(16)
     }
 
-    private fun capture(name: String, screen: Boolean = false) {
+    private fun capture(name: String) {
         val directory = File(requireNotNull(InstrumentationRegistry.getArguments().getString("additionalTestOutputDir")))
         check(directory.mkdirs() || directory.isDirectory)
-        val image = if (screen) requireNotNull(InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()) else compose.onRoot().captureToImage().asAndroidBitmap()
+        val image = compose.onRoot().captureToImage().asAndroidBitmap()
         try { File(directory, "$name.png").outputStream().use { check(image.compress(Bitmap.CompressFormat.PNG, 100, it)) } }
         finally { image.recycle() }
     }
