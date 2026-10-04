@@ -16,6 +16,10 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  route:
+    uses: ./.github/workflows/mac-route.yml
+    secrets: inherit
+
   release-scripts:
     name: Release scripts
     runs-on: ubuntu-24.04
@@ -46,7 +50,8 @@ jobs:
       fail-fast: false
       matrix:
         os: [macos-14, windows-2025, ubuntu-24.04]
-    runs-on: ${{ matrix.os }}
+    needs: route
+    runs-on: ${{ needs.route.outputs.mac == 'true' && matrix.os == 'macos-14' && fromJSON('["self-hosted","josemac"]') || matrix.os }}
     timeout-minutes: 30
     env:
       # CI-only: dev/test builds without debug info compile, link, and cache
@@ -81,7 +86,8 @@ jobs:
 
   appkit:
     name: AppKit (macos-14)
-    runs-on: macos-14
+    needs: route
+    runs-on: ${{ needs.route.outputs.mac == 'true' && fromJSON('["self-hosted","josemac"]') || 'macos-14' }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
