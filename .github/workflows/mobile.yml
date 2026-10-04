@@ -11,10 +11,11 @@ on:
 # No signing secrets, releases, store uploads, or production/database access.
 permissions:
   contents: read
-# A new push to a pull request supersedes its in-flight run; runs on main (and
-# manual runs) each get their own group and are never cancelled.
+# A new push to a pull request supersedes its in-flight run. On main (and manual
+# runs) the running build always finishes and only the newest waiting run goes
+# next (GitHub replaces older pending runs in the group), so nothing piles up.
 concurrency:
-  group: mobile-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  group: mobile-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
