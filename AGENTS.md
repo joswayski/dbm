@@ -5,6 +5,10 @@
 - DBM is a local-first database manager. AppKit macOS and egui Windows/Linux
   are released desktop apps; Compose Android and SwiftUI iPhone are development
   clients, not store releases or desktop-parity products.
+- Build for the maintainer's own use, without public support or roadmap
+  commitments. The final name, website, and mobile distribution are undecided;
+  do not start a rebrand, hosting, or store setup without a specific request.
+  Preserve existing data, credential, installer, and updater identities.
 - The current milestone is PostgreSQL, MySQL, and Redis: saved connections, schema or keyspace exploration, paginated table and key browsing, SQL/Redis workbench tabs, PK-backed or key-backed edits, and safe local profile storage.
 - Clearly separate current features from roadmap ideas. Do not present Redis Sentinel/Cluster, SSH jump hosts, encrypted profile sync, or other follow-ups as shipped unless the repository already implements them.
 - Prefer TablePlus/DataGrip-like defaults when UX is ambiguous: fast path to query, obvious refresh, non-destructive confirms for bulk writes.

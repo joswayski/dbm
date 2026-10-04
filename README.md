@@ -4,6 +4,10 @@ A fast, local-first database manager for PostgreSQL, MySQL, and Redis. Native
 desktop apps are released for macOS, Windows, and Linux; Android Compose and
 iPhone SwiftUI clients are in development.
 
+Built for the maintainer's own use, without public support or roadmap
+commitments. The final name and distribution plans remain open; see
+[personal-use direction and next decisions](docs/releases.md#personal-use-direction-and-next-decisions).
+
 ## Download
 
 | Platform | Direct download |

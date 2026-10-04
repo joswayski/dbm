@@ -17,6 +17,59 @@ These automatic releases are for the maintainer's own machines. Windows builds
 are not Authenticode-signed yet, so the gates below still apply before DBM is
 promoted to a wider audience.
 
+## Personal-use direction and next decisions
+
+DBM is a personal utility, not a commitment to maintain a product for other
+people. The repository and desktop downloads are already public; that does not
+create a support schedule or a promise to implement feature requests. Keep the
+existing desktop release/update path working and prioritize bugs that affect
+the maintainer's own workflow. No rebrand, website, or mobile store rollout has
+been chosen.
+
+The next steps are decisions and personal acceptance, not another feature phase:
+
+1. **Use the desktop app on the maintainer's machines.** Verify the usual
+   connection/query/browse workflows; exercise edits on disposable data before
+   trusting them with important databases, and keep database backups. Mobile
+   remains a smaller read-only development slice, not a replacement for desktop
+   editing or proof that live phone connections work.
+2. **Decide whether DBM stays the name.** It is the current working name, not a
+   finalized public brand. Personal use does not require a naming campaign.
+   If a public-facing name is wanted later, choose it before new long-lived
+   mobile identities or store records are established.
+3. **Decide whether a website adds anything.** GitHub Releases already supplies
+   desktop downloads. An optional static page on the maintainer's website can
+   link those downloads without moving the updater or hosting database access.
+   Turning DBM into a browser app would be a separate architecture project, not
+   deploying the current native app onto a website.
+4. **Decide whether phones are useful enough to maintain.** Personal Android
+   APKs and provisioned iPhone device builds do not require a public store
+   release. Follow the [personal mobile install path](mobile.md#personal-installs-before-store-distribution)
+   only if those clients are needed; TestFlight/Play automation remains optional.
+
+These decisions do not block using the existing desktop app. There is no need
+to add accounts, a hosted backend, sync, or a public support process to make
+personal installs useful.
+
+### A display name is not the installed identity
+
+A future label/icon change need not replace the identifiers that locate saved
+data and trusted updates. Keep these existing identities unless a separate,
+tested migration is explicitly planned:
+
+- Desktop data: `ProjectDirs::from("io", "github", "dbm")` and `dbm.sqlite3`.
+- Desktop credential service and macOS bundle ID: `io.github.joswayski.dbm`.
+- Windows install/uninstall identity: `%LOCALAPPDATA%\DBM`, `dbm.exe`, and the
+  `DBM` uninstall registry key, including compatibility with former Tauri installs.
+- Existing GitHub updater endpoints, legacy manifests, and trusted signing key.
+
+Android's `com.dbm.nativeapp` (`.debug` for development installs) and iPhone's
+default `app.dbm.ios` are development identifiers, not approved final store
+identities. Pick durable IDs before repeatable phone installs; changing them
+creates a separate app sandbox rather than automatically carrying profiles over.
+Changing a signing identity or release hosting likewise needs an explicit
+update-compatibility plan, not just a search-and-replace of the name.
+
 ## How a release is built
 
 1. **prepare** picks the next version and build number, pushes the tag, and
