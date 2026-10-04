@@ -159,9 +159,16 @@ final class DBMUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Edit connection"].waitForExistence(timeout: 5))
         let password = app.secureTextFields["password"]
         password.tap(); password.typeText("temporary-password")
+        XCTAssertFalse((password.value as? String ?? "").isEmpty)
+        XCTAssertNotEqual(password.value as? String, "Not saved on this device")
 
         XCUIDevice.shared.press(.home)
-        XCTAssertTrue(app.wait(for: .runningBackground, timeout: 5))
+        // A live background app can be suspended before XCTest polls its state.
+        expectation(for: NSPredicate(format: "state IN %@", [
+            XCUIApplication.State.runningBackground.rawValue,
+            XCUIApplication.State.runningBackgroundSuspended.rawValue
+        ] as NSArray), evaluatedWith: app)
+        waitForExpectations(timeout: 5)
         app.activate()
 
         XCTAssertTrue(app.staticTexts["Connections"].waitForExistence(timeout: 10))
