@@ -53,6 +53,9 @@ struct WorkspaceView: View {
             HStack(spacing: 12) {
                 Text(model.grid.rows.isEmpty ? "0 rows" : "Rows \(model.grid.offset + 1)–\(model.grid.offset + model.grid.rows.count)").foregroundStyle(Graphite.muted)
                 Spacer()
+                if model.grid.truncated {
+                    Text("Results truncated at 1,000 rows").foregroundStyle(Graphite.muted).accessibilityIdentifier("query-truncated")
+                }
                 if model.showingTable {
                     Button { model.previous() } label: { Image(systemName: "chevron.left").frame(width: 36, height: 44) }.disabled(model.grid.offset == 0).opacity(model.grid.offset == 0 ? 0.4 : 1).accessibilityLabel("Previous")
                     Text("Page \(model.grid.offset / model.grid.limit + 1)")
@@ -108,7 +111,7 @@ private struct SchemaTree: View {
     @EnvironmentObject var model: AppModel
     let items: [SchemaItem], filter: String
     let close: (() -> Void)?
-    @State private var expanded: Set<UUID> = []
+    @State private var expanded: Set<SchemaItem.ID> = []
     var body: some View { VStack(alignment: .leading, spacing: 2) { ForEach(items) { node in
         if filter.isEmpty || node.name.localizedCaseInsensitiveContains(filter) || node.children?.contains(where: { $0.name.localizedCaseInsensitiveContains(filter) }) == true {
             if let schema = node.schema, let table = node.table { Button { model.browse(schema: schema, table: table); close?() } label: { Label(node.name, systemImage: model.active?.engine == .redis ? "key" : "tablecells").frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 22).frame(height: 36).background(model.showingTable && model.selectedTable?.schema == schema && model.selectedTable?.table == table ? Color(hex: model.active?.color ?? "#4c9aff").opacity(0.18) : .clear) }.buttonStyle(.plain).accessibilityIdentifier("schema-item-\(node.name)") }

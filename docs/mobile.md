@@ -28,6 +28,10 @@ DBM has no server, account, pairing service, telemetry, or connection sync.
   last successful statement without replacing the editor draft; it stays
   disabled until a query succeeds. Grid headers stay visible while rows scroll
   vertically and move with their columns when scrolling horizontally.
+- Capped query results explicitly report truncation. Refreshing the schema
+  keeps expanded folders open. Connection fields and SQL/command editors
+  disable autocorrection; Android also tells the keyboard the password field
+  is a password, rather than only masking its display.
 
 No row editing, exports, desktop history browser, URL import, custom CA import,
 SSH tunnel, biometric unlock, profile sync or background queries are implemented.
@@ -113,6 +117,32 @@ still publishes desktop updates, not mobile store releases.
 These are configured workflows, not a record that any particular revision has
 passed. SwiftUI is not compiled on Linux. Physical-device behavior and live,
 verified-TLS database connections on both mobile platforms remain outstanding.
+
+## Distribution setup and next step
+
+Unlike Caper, DBM needs no hosted API, gateway, server database, or infrastructure
+rollout. It needs **mobile signing and distribution**, separate from desktop
+releases:
+
+1. Install the development Android APK and build a provisioned iPhone device
+   app with your own Apple team/bundle ID. Run the physical-device acceptance
+   below through the existing private network/VPN before relying on either app.
+2. For repeatable Android installs/updates, choose the final application ID,
+   configure a stable signing key and increasing version codes, and publish
+   signed APKs to testers. Play distribution additionally needs its own app
+   record and signed AAB. Release assembly currently stops with an explicit
+   error until signing is configured. CI debug keys are not stable across
+   runners: installing another debug APK may require uninstalling the previous
+   one, which deletes its local profiles/history. Debug and release app IDs
+   are also separate installs.
+3. For repeatable iPhone installs, register DBM's bundle ID and App Store Connect
+   app, then add signed archive/upload automation and increasing build numbers
+   for TestFlight. A compiled device Rust library or Simulator app is not an
+   installable, signed iPhone package.
+
+Caper's release automation is a reference for this later work, not something
+DBM currently inherits. App registration, signing-secret access/configuration,
+and uploads require separate authorization; no Caper credentials are copied.
 
 ## Before distributing to testers
 

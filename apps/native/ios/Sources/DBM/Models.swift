@@ -46,7 +46,8 @@ struct ProfileDraft {
 }
 
 struct SchemaItem: Identifiable {
-    let id = UUID(), name, kind: String
+    var id: [String?] { [kind, schema, table, name] }
+    let name, kind: String
     let schema, table: String?
     let children: [SchemaItem]?
     init(_ json: [String: Any]) {
@@ -59,11 +60,12 @@ struct SchemaItem: Identifiable {
 
 struct GridData {
     static let pageSize = 25
-    var columns: [String] = [], rows: [[Any]] = [], offset = 0, limit = GridData.pageSize, hasMore = false
+    var columns: [String] = [], rows: [[Any]] = [], offset = 0, limit = GridData.pageSize, hasMore = false, truncated = false
     init() {}
     init(query json: [String: Any]) {
         columns = (json["columns"] as? [[String: Any]] ?? []).map { $0["name"] as? String ?? "" }
         rows = json["rows"] as? [[Any]] ?? []
+        truncated = json["truncated"] as? Bool ?? false
     }
     init(page json: [String: Any]) {
         let metadata = json["metadata"] as? [String: Any] ?? [:]

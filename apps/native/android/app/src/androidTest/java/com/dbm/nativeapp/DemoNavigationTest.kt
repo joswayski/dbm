@@ -3,6 +3,8 @@ package com.dbm.nativeapp
 import android.app.UiAutomation
 import android.content.Intent
 import android.graphics.Bitmap
+import android.os.ParcelFileDescriptor
+import android.text.InputType
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
@@ -131,6 +133,31 @@ class DemoNavigationTest {
         compose.onNodeWithTag("editor").assertTextEquals("SELECT 1")
     }
 
+    @Test fun passwordKeyboardUsesPasswordTypeAndSqlDoesNotAutocorrect() {
+        awaitConnections()
+        compose.onNodeWithTag("add").performClick()
+        compose.onNodeWithTag("password").performScrollTo().performClick().performTextInput("memory-only")
+        compose.waitUntil(10_000) {
+            currentInputType()?.let { it and InputType.TYPE_MASK_VARIATION == InputType.TYPE_TEXT_VARIATION_PASSWORD } == true
+        }
+        val passwordType = requireNotNull(currentInputType())
+        assertEquals(InputType.TYPE_CLASS_TEXT, passwordType and InputType.TYPE_MASK_CLASS)
+        assertEquals(InputType.TYPE_TEXT_VARIATION_PASSWORD, passwordType and InputType.TYPE_MASK_VARIATION)
+        assertEquals(0, passwordType and InputType.TYPE_TEXT_FLAG_AUTO_CORRECT)
+        capture("password-keyboard", screen = true)
+        compose.onNodeWithText("Cancel").performScrollTo().performClick()
+        compose.onNodeWithText("Production").performClick()
+        compose.waitUntil(10_000) { compose.onAllNodesWithTag("editor").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithTag("editor").performClick()
+        compose.waitUntil(10_000) {
+            currentInputType()?.let { it and InputType.TYPE_TEXT_FLAG_MULTI_LINE != 0 } == true
+        }
+        val sqlType = requireNotNull(currentInputType())
+        assertEquals(InputType.TYPE_CLASS_TEXT, sqlType and InputType.TYPE_MASK_CLASS)
+        assertEquals(InputType.TYPE_TEXT_VARIATION_NORMAL, sqlType and InputType.TYPE_MASK_VARIATION)
+        assertEquals(0, sqlType and InputType.TYPE_TEXT_FLAG_AUTO_CORRECT)
+    }
+
     @Test fun deletingAConnectionRequiresConfirmation() {
         awaitConnections()
         compose.onAllNodesWithText("Delete")[0].performClick()
@@ -149,10 +176,16 @@ class DemoNavigationTest {
         }
     }
 
-    private fun capture(name: String) {
+    private fun currentInputType(): Int? {
+        val output = InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand("dumpsys input_method")
+        val dump = ParcelFileDescriptor.AutoCloseInputStream(output).bufferedReader().use { it.readText() }
+        return Regex("inputType=0x([0-9a-fA-F]+)").find(dump)?.groupValues?.get(1)?.toIntOrNull(16)
+    }
+
+    private fun capture(name: String, screen: Boolean = false) {
         val directory = File(requireNotNull(InstrumentationRegistry.getArguments().getString("additionalTestOutputDir")))
         check(directory.mkdirs() || directory.isDirectory)
-        val image = compose.onRoot().captureToImage().asAndroidBitmap()
+        val image = if (screen) requireNotNull(InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()) else compose.onRoot().captureToImage().asAndroidBitmap()
         try { File(directory, "$name.png").outputStream().use { check(image.compress(Bitmap.CompressFormat.PNG, 100, it)) } }
         finally { image.recycle() }
     }

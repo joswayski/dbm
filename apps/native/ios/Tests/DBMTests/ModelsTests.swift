@@ -1,5 +1,6 @@
 import XCTest
 import UIKit
+import SwiftUI
 @testable import DBM
 
 final class ModelsTests: XCTestCase {
@@ -22,7 +23,43 @@ final class ModelsTests: XCTestCase {
         XCTAssertEqual(GridData(query: ["columns": [["name": "id"]], "rows": [[1]]]).columns, ["id"])
         XCTAssertEqual(GridData(page: ["columns": ["key"], "rows": [["a"]]]).columns, ["key"])
     }
+    func testSchemaIdentitySurvivesRefreshAndDistinguishesSchemas() {
+        let json: [String: Any] = ["name": "public", "kind": "schema", "schema": "public", "children": [
+            ["name": "users", "kind": "table", "schema": "public", "table": "users"]
+        ]]
+        let original = SchemaItem(json)
+        let refreshed = SchemaItem(json)
+        XCTAssertEqual(original.id, refreshed.id)
+        XCTAssertEqual(original.children?.first?.id, refreshed.children?.first?.id)
+        XCTAssertTrue(Set([original.id]).contains(refreshed.id))
+        var updated = json
+        updated["children"] = [["name": "orders", "kind": "table", "schema": "public", "table": "orders"]]
+        XCTAssertEqual(original.id, SchemaItem(updated).id)
+        let privateUsers = SchemaItem(["name": "users", "kind": "table", "schema": "private", "table": "users"])
+        XCTAssertNotEqual(original.children?.first?.id, privateUsers.id)
+    }
     func testEngineDefaults() { var draft = ProfileDraft(); draft.select(.redis); XCTAssertEqual(draft.port, 6379); XCTAssertEqual(draft.database, "0") }
+
+    @MainActor func testQueryTruncationUsesMetadataAndStaysOnQueryTab() throws {
+        XCTAssertTrue(GridData(query: ["rows": [[73]], "truncated": true]).truncated)
+        XCTAssertFalse(GridData(query: ["rows": [[73]]]).truncated)
+        let rows: [[Any]] = (1...1000).map { [$0, "User \($0)"] }
+        XCTAssertFalse(GridData(query: ["rows": rows, "truncated": false]).truncated)
+        let model = AppModel()
+        model.route = .workspace
+        model.active = Profile(["id": "00000000-0000-0000-0000-000000000001", "name": "Production", "color": "#ff9f43", "engine": "postgres", "defaultDatabase": "warehouse"])
+        model.database = "warehouse"
+        model.sql = "SELECT id, full_name FROM public.users"
+        model.queryGrid = GridData(query: ["columns": [["name": "id"], ["name": "full_name"]], "rows": rows, "truncated": true])
+        XCTAssertTrue(model.grid.truncated)
+        try retainWorkbench(model, named: "iphone-truncated-query-results")
+        model.tableGrid = GridData(page: ["columns": ["id"], "rows": [[26]], "offset": 25, "hasMore": false])
+        model.selectedTable = ("public", "users")
+        model.showTable()
+        XCTAssertFalse(model.grid.truncated)
+        model.showQuery()
+        XCTAssertTrue(model.grid.truncated)
+    }
 
     @MainActor func testWorkbenchTabsKeepSeparateResultsAndTablePage() {
         let model = AppModel()
@@ -56,5 +93,22 @@ final class ModelsTests: XCTestCase {
         XCTAssertNil(model.selectedTable)
         XCTAssertFalse(model.showingTable)
         XCTAssertEqual(model.route, .connections)
+    }
+
+    @MainActor private func retainWorkbench(_ model: AppModel, named name: String) throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previous = scene.windows.first { $0.isKeyWindow }
+        let window = UIWindow(windowScene: scene)
+        window.frame = scene.coordinateSpace.bounds
+        window.rootViewController = UIHostingController(rootView: RootView().environmentObject(model).preferredColorScheme(.dark))
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true; previous?.makeKey() }
+        window.layoutIfNeeded()
+        let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
+            XCTAssertTrue(window.drawHierarchy(in: window.bounds, afterScreenUpdates: true))
+        }
+        let attachment = XCTAttachment(image: image)
+        attachment.name = name; attachment.lifetime = .keepAlways
+        add(attachment)
     }
 }

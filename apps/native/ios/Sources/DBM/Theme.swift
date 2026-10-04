@@ -16,7 +16,7 @@ extension Color {
 }
 
 struct GraphiteField: ViewModifier {
-    func body(content: Content) -> some View { content.padding(.horizontal, 10).frame(minHeight: 36).background(Graphite.control).clipShape(RoundedRectangle(cornerRadius: 6)).overlay(RoundedRectangle(cornerRadius: 6).stroke(Graphite.borderStrong)) }
+    func body(content: Content) -> some View { content.autocorrectionDisabled().padding(.horizontal, 10).frame(minHeight: 36).background(Graphite.control).clipShape(RoundedRectangle(cornerRadius: 6)).overlay(RoundedRectangle(cornerRadius: 6).stroke(Graphite.borderStrong)) }
 }
 
 extension View {

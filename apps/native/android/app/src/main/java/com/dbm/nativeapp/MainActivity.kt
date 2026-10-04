@@ -12,6 +12,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -31,6 +32,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -229,8 +231,8 @@ private fun matches(node: SchemaNode, filter: String): Boolean = node.name.conta
 }
 @Composable private fun Cell(value: String, header: Boolean) { Text(value, color = Text, fontFamily = MonoFont, fontSize = if(header) 11.sp else 12.sp, modifier = Modifier.width(160.dp).height(if(header) 34.dp else 32.dp).drawBehind { drawLine(if(header) Border else Color(0xff202023), Offset(0f, size.height), Offset(size.width, size.height), .5.dp.toPx()) }.padding(horizontal = 8.dp, vertical = 7.dp), maxLines = 1, overflow = TextOverflow.Ellipsis) }
 
-@Composable private fun GField(label: String, value: String, modifier: Modifier = Modifier, password: Boolean = false, tag: String? = null, changed: (String) -> Unit) { Column(modifier) { Label(label); TextField(value, changed, singleLine = true, visualTransformation = if(password) PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None, textStyle = TextStyle(Text, 13.sp, fontFamily = if(label == "Port" || label == "Custom") MonoFont else UiFont), colors = TextFieldDefaults.colors(focusedContainerColor = Control, unfocusedContainerColor = Control, focusedIndicatorColor = Accent, unfocusedIndicatorColor = BorderStrong, cursorColor = Accent), shape = RoundedCornerShape(6.dp), modifier = Modifier.fillMaxWidth().height(48.dp).then(if(tag != null) Modifier.testTag(tag) else Modifier)) } }
-@Composable private fun GEditor(value: String, changed: (String) -> Unit, modifier: Modifier) { TextField(value, changed, textStyle = TextStyle(Text, 12.sp, fontFamily = MonoFont), colors = TextFieldDefaults.colors(focusedContainerColor = Bg, unfocusedContainerColor = Bg, focusedIndicatorColor = Accent, unfocusedIndicatorColor = Border, cursorColor = Accent), shape = RoundedCornerShape(0.dp), modifier = modifier) }
+@Composable private fun GField(label: String, value: String, modifier: Modifier = Modifier, password: Boolean = false, tag: String? = null, changed: (String) -> Unit) { Column(modifier) { Label(label); TextField(value, changed, singleLine = true, keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, keyboardType = if(password) KeyboardType.Password else KeyboardType.Text), visualTransformation = if(password) PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None, textStyle = TextStyle(Text, 13.sp, fontFamily = if(label == "Port" || label == "Custom") MonoFont else UiFont), colors = TextFieldDefaults.colors(focusedContainerColor = Control, unfocusedContainerColor = Control, focusedIndicatorColor = Accent, unfocusedIndicatorColor = BorderStrong, cursorColor = Accent), shape = RoundedCornerShape(6.dp), modifier = Modifier.fillMaxWidth().height(48.dp).then(if(tag != null) Modifier.testTag(tag) else Modifier)) } }
+@Composable private fun GEditor(value: String, changed: (String) -> Unit, modifier: Modifier) { TextField(value, changed, keyboardOptions = KeyboardOptions(autoCorrectEnabled = false), textStyle = TextStyle(Text, 12.sp, fontFamily = MonoFont), colors = TextFieldDefaults.colors(focusedContainerColor = Bg, unfocusedContainerColor = Bg, focusedIndicatorColor = Accent, unfocusedIndicatorColor = Border, cursorColor = Accent), shape = RoundedCornerShape(0.dp), modifier = modifier) }
 @Composable private fun Label(value: String) { Text(value, color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(bottom = 5.dp)) }
 @Composable private fun ReadOnlyValue(value: String) { Text(value, Modifier.fillMaxWidth().background(Control, RoundedCornerShape(6.dp)).border(1.dp, BorderStrong, RoundedCornerShape(6.dp)).padding(11.dp), color = Text) }
 @Composable private fun Feedback(value: String, color: Color) { Text(value, Modifier.fillMaxWidth().background(color.copy(alpha = .1f), RoundedCornerShape(7.dp)).border(1.dp, color.copy(alpha = .45f), RoundedCornerShape(7.dp)).padding(10.dp), color = color, fontSize = 12.sp) }
