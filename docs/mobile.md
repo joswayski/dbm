@@ -118,31 +118,52 @@ These are configured workflows, not a record that any particular revision has
 passed. SwiftUI is not compiled on Linux. Physical-device behavior and live,
 verified-TLS database connections on both mobile platforms remain outstanding.
 
-## Distribution setup and next step
+## Personal installs before store distribution
 
 Unlike Caper, DBM needs no hosted API, gateway, server database, or infrastructure
-rollout. It needs **mobile signing and distribution**, separate from desktop
-releases:
+rollout. The maintainer's personal use is the priority; the name, website, and
+mobile distribution are still undecided. See the
+[next decisions](releases.md#personal-use-direction-and-next-decisions) before
+starting signing automation or store setup. Phones are optional, not a required
+next phase of the desktop tool.
 
-1. Install the development Android APK and build a provisioned iPhone device
-   app with your own Apple team/bundle ID. Run the physical-device acceptance
-   below through the existing private network/VPN before relying on either app.
-2. For repeatable Android installs/updates, choose the final application ID,
-   configure a stable signing key and increasing version codes, and publish
-   signed APKs to testers. Play distribution additionally needs its own app
-   record and signed AAB. Release assembly currently stops with an explicit
-   error until signing is configured. CI debug keys are not stable across
-   runners: installing another debug APK may require uninstalling the previous
-   one, which deletes its local profiles/history. Debug and release app IDs
-   are also separate installs.
-3. For repeatable iPhone installs, register DBM's bundle ID and App Store Connect
-   app, then add signed archive/upload automation and increasing build numbers
-   for TestFlight. A compiled device Rust library or Simulator app is not an
-   installable, signed iPhone package.
+If personal phone use is wanted:
 
-Caper's release automation is a reference for this later work, not something
-DBM currently inherits. App registration, signing-secret access/configuration,
-and uploads require separate authorization; no Caper credentials are copied.
+1. **Android:** install a locally built development APK. No Play account or
+   public listing is needed. Keep the same application ID and signing key for
+   updates: CI debug keys are not stable across runners, so another CI debug
+   APK may require uninstalling the previous one and losing local profiles and
+   history. Debug and release app IDs are separate installs. A durable private
+   release would need explicit signing/versioning setup; release assembly
+   currently stops with an error until signing is configured.
+2. **iPhone:** use the [device build](../apps/native/ios/README.md) with a valid
+   Apple development team, bundle ID, and device provisioning, then install
+   through Xcode. Personal development installs still depend on Apple's
+   [device signing/provisioning rules](https://developer.apple.com/documentation/xcode/running-your-app-on-simulated-or-physical-devices)
+   and may need re-provisioning. TestFlight and an App Store Connect app record
+   are not required for this local development route. Neither a Simulator app
+   nor a compiled device Rust library is a signed, installable iPhone app by itself.
+3. **Acceptance:** exercise the maintainer's actual phones against disposable
+   databases through the existing private network/VPN using restricted users
+   and verified TLS. The checks below apply before relying on a personal
+   install too; fixtures do not validate real phone/database access.
+
+## Optional store or tester distribution
+
+Only after choosing durable application IDs and an installation route:
+
+- Repeatable private Android APK delivery needs a stable signing key and
+  increasing version codes. Play additionally needs its own app record and
+  signed AAB; it is not necessary just to install an APK personally.
+- TestFlight is an optional iPhone delivery channel. It needs DBM bundle
+  registration, an App Store Connect app record, signed archive/upload
+  automation, and increasing build numbers. It does not commit the project to
+  a public App Store release.
+
+Caper's release automation is a reference if this work is chosen later, not
+something DBM inherits. Account/app registration, signing-secret access or
+configuration, and uploads need separate authorization. No Caper credentials
+are copied, and no store pipeline is currently configured.
 
 ## Before distributing to testers
 
