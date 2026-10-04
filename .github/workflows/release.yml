@@ -37,6 +37,7 @@ jobs:
     # Manual runs from other branches must not publish a release.
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     permissions:
       contents: write
     outputs:
@@ -106,6 +107,7 @@ jobs:
     needs: prepare
     environment: release
     runs-on: macos-14
+    timeout-minutes: 60
     env:
       DBM_NATIVE_BUILD: ${{ needs.prepare.outputs.build }}
       DBM_NATIVE_VERSION: ${{ needs.prepare.outputs.display_version }}
@@ -244,6 +246,7 @@ jobs:
             asset: DBM-Linux-x64
             signer: target/release/dbm-sign
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     env:
       DBM_NATIVE_BUILD: ${{ needs.prepare.outputs.build }}
       DBM_NATIVE_VERSION: ${{ needs.prepare.outputs.display_version }}
@@ -301,6 +304,7 @@ jobs:
     needs: [prepare, workbench]
     environment: release
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     env:
       APP_VERSION: ${{ needs.prepare.outputs.app_version }}
       DBM_UPDATE_SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -342,6 +346,7 @@ jobs:
     name: Validate and publish
     needs: [prepare, macos, workbench, windows-installer]
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     permissions:
       contents: write
       id-token: write
@@ -447,6 +452,7 @@ jobs:
     needs: [prepare, macos, workbench, windows-installer, publish]
     if: (failure() || cancelled()) && needs.prepare.outputs.release_id != ''
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     permissions:
       contents: write
     env:

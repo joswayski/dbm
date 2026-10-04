@@ -10,7 +10,7 @@ bash "$ROOT/prepare.sh" "$platform"
 
 if [[ "$MODE" == test ]]; then
   rm -rf "$ROOT/DerivedData-Tests/DBM.xcresult"
-  xcodebuild -project "$ROOT/DBM.xcodeproj" -scheme DBM -configuration Debug -destination "${DBM_IOS_TEST_DESTINATION:-platform=iOS Simulator,name=iPhone 16,OS=latest}" -derivedDataPath "$ROOT/DerivedData-Tests" -resultBundlePath "$ROOT/DerivedData-Tests/DBM.xcresult" DBM_IOS_BUNDLE_ID="$DBM_IOS_BUNDLE_ID" CODE_SIGNING_ALLOWED=NO test
+  xcodebuild -project "$ROOT/DBM.xcodeproj" -scheme DBM -configuration Debug -destination "${DBM_IOS_TEST_DESTINATION:-platform=iOS Simulator,name=iPhone 16,OS=latest}" -derivedDataPath "$ROOT/DerivedData-Tests" -resultBundlePath "$ROOT/DerivedData-Tests/DBM.xcresult" DBM_IOS_BUNDLE_ID="$DBM_IOS_BUNDLE_ID" CODE_SIGNING_ALLOWED=NO -test-timeouts-enabled YES -default-test-execution-time-allowance 300 -maximum-test-execution-time-allowance 600 test
 elif [[ "$MODE" == simulator ]]; then
   xcodebuild -project "$ROOT/DBM.xcodeproj" -scheme DBM -configuration Debug -destination 'generic/platform=iOS Simulator' -derivedDataPath "$ROOT/DerivedData" DBM_IOS_BUNDLE_ID="$DBM_IOS_BUNDLE_ID" ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO build
 else

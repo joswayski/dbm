@@ -19,6 +19,7 @@ jobs:
   release-scripts:
     name: Release scripts
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -46,6 +47,7 @@ jobs:
       matrix:
         os: [macos-14, windows-2025, ubuntu-24.04]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     env:
       # CI-only: dev/test builds without debug info compile, link, and cache
       # faster. Release builds and their artifacts are unaffected.
@@ -80,6 +82,7 @@ jobs:
   appkit:
     name: AppKit (macos-14)
     runs-on: macos-14
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
@@ -118,6 +121,7 @@ jobs:
       matrix:
         os: [windows-2025, ubuntu-24.04]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     env:
       # CI-only, as in the Rust job; the release build below is unaffected.
       CARGO_PROFILE_DEV_DEBUG: 0
