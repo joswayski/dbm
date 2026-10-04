@@ -199,9 +199,10 @@ async fn execute_live(state: &AppState, command: Command) -> Result<Payload, Str
             })
         }
         Command::SwitchDatabase(id, database) => {
-            let mut profile = state.profile(id).map_err(string_error)?;
-            profile.default_database = database;
-            let session = state.connect(profile).await.map_err(string_error)?;
+            let session = state
+                .connect_database(id, &database)
+                .await
+                .map_err(string_error)?;
             let databases = session.list_databases().await.map_err(string_error)?;
             Payload::Workspace(WorkspaceInfo {
                 profile: session.profile().clone(),

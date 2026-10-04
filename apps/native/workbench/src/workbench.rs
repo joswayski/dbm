@@ -110,6 +110,7 @@ struct ProfileForm {
     ssh: Option<dbm_core::models::SshConfig>,
     password: String,
     read_only: bool,
+    open_on_startup: bool,
     url: String,
     importing_url: bool,
     show_url_password: bool,
@@ -140,6 +141,7 @@ impl ProfileForm {
             ssh: None,
             password: String::new(),
             read_only: false,
+            open_on_startup: true,
             url: String::new(),
             importing_url: false,
             show_url_password: false,
@@ -170,6 +172,7 @@ impl ProfileForm {
             ssh: p.ssh.clone(),
             password: String::new(),
             read_only: p.read_only,
+            open_on_startup: p.open_on_startup,
             url: String::new(),
             importing_url: false,
             show_url_password: false,
@@ -247,6 +250,7 @@ impl ProfileForm {
             ca_cert_path: (!ca.is_empty()).then(|| ca.to_owned()),
             ssh: self.ssh.clone(),
             read_only: self.read_only,
+            open_on_startup: self.open_on_startup,
             password: if self.id.is_some() && !self.password_loaded {
                 None
             } else {
@@ -560,7 +564,20 @@ impl Workbench {
                     }
                 }
             }
-            Payload::Profiles(profiles) => self.profiles = profiles,
+            Payload::Profiles(profiles) => {
+                self.profiles = profiles;
+                if !self.demo {
+                    let startup: Vec<_> = self
+                        .profiles
+                        .iter()
+                        .filter(|profile| profile.open_on_startup)
+                        .map(|profile| profile.id)
+                        .collect();
+                    for id in startup {
+                        self.send(Command::Connect(id), "Connecting", Some(id));
+                    }
+                }
+            }
             Payload::Tested => {
                 let Some(form) = &mut self.profile_form else {
                     return;
@@ -714,9 +731,16 @@ impl Workbench {
             // Table tabs were opened on the previous database.
             self.close_table_tabs(id);
         }
+        if let Some(profile) = self.profiles.iter_mut().find(|profile| profile.id == id) {
+            *profile = workspace.profile.clone();
+        }
         self.workspaces.insert(id, workspace);
         self.collapsed_profiles.remove(&id);
-        self.activate_profile(id);
+        if self.active_profile.is_none() || self.active_profile == Some(id) {
+            self.activate_profile(id);
+        } else if !self.tabs.iter().any(|tab| tab.profile_id == id) {
+            self.open_query(id, false);
+        }
         self.dispatch(
             Command::Schema(id),
             "Loading schema",
@@ -804,10 +828,10 @@ impl Workbench {
             self.active_tab = Some(tab.id);
             return;
         }
-        self.open_query(profile);
+        self.open_query(profile, true);
     }
 
-    fn open_query(&mut self, profile: Uuid) {
+    fn open_query(&mut self, profile: Uuid, activate: bool) {
         let id = self.next_id;
         self.next_id += 1;
         let titles: HashSet<&str> = self
@@ -829,8 +853,10 @@ impl Workbench {
             embedded: None,
             collapsed: false,
         });
-        self.active_tab = Some(id);
-        self.active_profile = Some(profile);
+        if activate {
+            self.active_tab = Some(id);
+            self.active_profile = Some(profile);
+        }
     }
 
     fn open_table(&mut self, profile: Uuid, schema: String, table: String) {
@@ -1395,6 +1421,7 @@ impl Workbench {
         let connecting = self
             .pending_requests
             .values()
+            .chain(self.queued.iter().map(|request| &request.meta))
             .any(|m| m.profile == Some(id) && m.label == "Connecting");
         let width = ui.available_width();
         let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 44.0), Sense::click());
@@ -1454,7 +1481,9 @@ impl Workbench {
                 self.activate_profile(id);
             } else {
                 self.active_profile = Some(id);
-                self.send(Command::Connect(id), "Connecting", Some(id));
+                if !connecting {
+                    self.send(Command::Connect(id), "Connecting", Some(id));
+                }
             }
         }
         let actions = egui::Rect::from_min_max(
@@ -1758,7 +1787,7 @@ impl Workbench {
                                 .filter(|p| self.workspaces.contains_key(p))
                             {
                                 if icon_btn(ui, true, Icon::Plus, None, "New query") {
-                                    self.open_query(profile);
+                                    self.open_query(profile, true);
                                 }
                             }
                         });
@@ -3629,6 +3658,8 @@ impl Workbench {
                     &mut form.read_only,
                     "Read-only profile (blocks GUI edits and mutations)",
                 );
+                ui.checkbox(&mut form.open_on_startup, "Open on startup")
+                    .on_hover_text("Connect to this profile's saved database when DBM launches.");
             });
             if let Some((kind, message)) = &form.feedback {
                 // `.modal-feedback.{info,success,error}`: a tinted box.
@@ -3804,12 +3835,72 @@ mod tests {
     }
 
     #[test]
+    fn startup_opens_only_enabled_profiles_and_demo_stays_manual() {
+        let mut app = app();
+        let mut profiles = DemoStore::new().profiles();
+        profiles[1].open_on_startup = false;
+        profiles[3].open_on_startup = false;
+        let expected = [profiles[0].id, profiles[2].id];
+        app.apply(
+            Payload::Profiles(profiles.clone()),
+            &meta(None, RequestKind::Other),
+        );
+        assert!(app.pending_requests.is_empty() && app.queued.is_empty());
+        app.demo = false; // Worker still uses isolated fixtures, never real profiles.
+        app.apply(Payload::Profiles(profiles), &meta(None, RequestKind::Other));
+        let pending: Vec<_> = app
+            .pending_requests
+            .values()
+            .map(|request| request.profile)
+            .collect();
+        assert_eq!(pending, vec![Some(expected[0])]);
+        assert_eq!(app.queued.len(), 1);
+        assert!(matches!(app.queued[0].command, Command::Connect(id) if id == expected[1]));
+        assert!(app.active_profile.is_none());
+    }
+
+    #[test]
+    fn background_workspaces_keep_focus_and_remember_database_after_disconnect() {
+        let mut app = app();
+        let store = DemoStore::new();
+        app.profiles = store.profiles();
+        let a = app.profiles[0].id;
+        let b = app.profiles[1].id;
+        app.workspace_opened(store.workspace(a, None).unwrap());
+        let active = app.active_tab;
+        app.workspace_opened(store.workspace(b, Some("captures")).unwrap());
+        assert_eq!(app.active_profile, Some(a));
+        assert_eq!(app.active_tab, active);
+        assert!(
+            app.tabs
+                .iter()
+                .any(|tab| tab.profile_id == b && tab.kind == TabKind::Query)
+        );
+        assert!(app.query_results.is_empty());
+        app.close_profile(b);
+        assert_eq!(app.profile(b).unwrap().default_database, "captures");
+        app.workspace_opened(store.workspace(a, None).unwrap());
+        assert_eq!(app.tabs.len(), 1, "reconnect restores the existing tab");
+    }
+
+    #[test]
+    fn startup_setting_defaults_on_and_survives_profile_form_edits() {
+        assert!(ProfileForm::fresh().input().open_on_startup);
+        let mut profile = DemoStore::new().profiles().remove(0);
+        profile.open_on_startup = false;
+        let mut form = ProfileForm::from_profile(&profile);
+        assert!(!form.input().open_on_startup);
+        form.open_on_startup = true;
+        assert!(form.input().open_on_startup);
+    }
+
+    #[test]
     fn replies_follow_initiating_tab_and_dirty_profiles_are_guarded() {
         let mut app = app();
         let id = Uuid::from_u128(1);
-        app.open_query(id);
+        app.open_query(id, true);
         let first = app.active_tab.unwrap();
-        app.open_query(id);
+        app.open_query(id, true);
         let second = app.active_tab.unwrap();
         assert_eq!(app.tabs[1].title, "Query 2");
         let result = QueryResponse {
@@ -3850,7 +3941,7 @@ mod tests {
         let mut app = app();
         let a = Uuid::from_u128(1);
         let b = Uuid::from_u128(2);
-        app.open_query(a);
+        app.open_query(a, true);
         let tab = app.active_tab.unwrap();
         app.query_results.insert(
             tab,
@@ -3908,7 +3999,7 @@ mod tests {
                 }],
             }],
         );
-        app.open_query(id);
+        app.open_query(id, true);
         let tab = app.active_tab.unwrap();
         app.tabs[0].last_executed = Some("select * from customers;".into());
         let response = QueryResponse {

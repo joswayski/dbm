@@ -211,6 +211,7 @@ mod tests {
             ca_cert_path: None,
             ssh: None,
             read_only: false,
+            open_on_startup: true,
             password: Some("must not be included implicitly".into()),
         }
     }

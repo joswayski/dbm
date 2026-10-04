@@ -83,6 +83,12 @@ impl LocalStore {
             "engine",
             "TEXT NOT NULL DEFAULT 'postgres'",
         )?;
+        ensure_column(
+            &connection,
+            "profiles",
+            "open_on_startup",
+            "INTEGER NOT NULL DEFAULT 1",
+        )?;
         Ok(())
     }
 
@@ -90,7 +96,7 @@ impl LocalStore {
         let connection = self.open()?;
         let mut statement = connection.prepare(
             "SELECT id, name, color, engine, host, port, username, default_database,
-                    tls_mode, ca_cert_path, ssh_json, read_only, created_at, updated_at
+                    tls_mode, ca_cert_path, ssh_json, read_only, created_at, updated_at, open_on_startup
              FROM profiles ORDER BY name COLLATE NOCASE, id",
         )?;
         let rows = statement.query_map([], profile_from_row)?;
@@ -101,7 +107,7 @@ impl LocalStore {
         let connection = self.open()?;
         let mut statement = connection.prepare(
             "SELECT id, name, color, engine, host, port, username, default_database,
-                    tls_mode, ca_cert_path, ssh_json, read_only, created_at, updated_at
+                    tls_mode, ca_cert_path, ssh_json, read_only, created_at, updated_at, open_on_startup
              FROM profiles WHERE id = ?1",
         )?;
         statement
@@ -129,6 +135,7 @@ impl LocalStore {
             ca_cert_path: input.ca_cert_path.clone(),
             ssh: input.ssh.clone(),
             read_only: input.read_only,
+            open_on_startup: input.open_on_startup,
             created_at,
             updated_at: now,
         };
@@ -144,8 +151,8 @@ impl LocalStore {
         connection.execute(
             "INSERT INTO profiles (
                 id, name, color, engine, host, port, username, default_database, tls_mode,
-                ca_cert_path, ssh_json, read_only, created_at, updated_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+                ca_cert_path, ssh_json, read_only, created_at, updated_at, open_on_startup
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
              ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
                 color = excluded.color,
@@ -158,6 +165,7 @@ impl LocalStore {
                 ca_cert_path = excluded.ca_cert_path,
                 ssh_json = excluded.ssh_json,
                 read_only = excluded.read_only,
+                open_on_startup = excluded.open_on_startup,
                 updated_at = excluded.updated_at",
             params![
                 profile.id.to_string(),
@@ -174,9 +182,23 @@ impl LocalStore {
                 i64::from(u8::from(profile.read_only)),
                 profile.created_at.to_rfc3339(),
                 profile.updated_at.to_rfc3339(),
+                profile.open_on_startup,
             ],
         )?;
         Ok(profile)
+    }
+
+    /// The database selected in the sidebar becomes the next connection target.
+    pub fn remember_database(&self, id: Uuid, database: &str) -> AppResult<()> {
+        let connection = self.open()?;
+        let updated = connection.execute(
+            "UPDATE profiles SET default_database = ?2, updated_at = ?3 WHERE id = ?1",
+            params![id.to_string(), database, Utc::now().to_rfc3339()],
+        )?;
+        if updated == 0 {
+            return Err(AppError::ProfileNotFound);
+        }
+        Ok(())
     }
 
     pub fn delete_profile(&self, id: Uuid) -> AppResult<()> {
@@ -273,6 +295,7 @@ fn profile_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ConnectionProfi
         read_only: row.get::<_, i64>(11)? != 0,
         created_at: parse_datetime(row.get::<_, String>(12)?)?,
         updated_at: parse_datetime(row.get::<_, String>(13)?)?,
+        open_on_startup: row.get(14)?,
     })
 }
 
@@ -370,11 +393,77 @@ mod tests {
             ca_cert_path: None,
             ssh: None,
             read_only: false,
+            open_on_startup: false,
             password: None,
         };
         let profile = store.save_profile(&input).expect("save");
         let profiles = store.list_profiles().expect("list");
-        assert_eq!(profiles, vec![profile]);
+        assert_eq!(profiles, vec![profile.clone()]);
+        let other = store
+            .save_profile(&SaveProfileInput {
+                name: "Other".into(),
+                open_on_startup: true,
+                ..input.clone()
+            })
+            .unwrap();
+        store.remember_database(profile.id, "captures").unwrap();
+        let reopened = LocalStore::from_path(&path).unwrap();
+        let remembered = reopened.get_profile(profile.id).unwrap().unwrap();
+        assert_eq!(remembered.default_database, "captures");
+        assert!(!remembered.open_on_startup);
+        assert_eq!(remembered.created_at, profile.created_at);
+        assert_eq!(reopened.get_profile(other.id).unwrap(), Some(other));
+        for open_on_startup in [true, false] {
+            let updated = reopened
+                .save_profile(&SaveProfileInput {
+                    id: Some(profile.id),
+                    default_database: "captures".into(),
+                    open_on_startup,
+                    ..input.clone()
+                })
+                .unwrap();
+            assert_eq!(
+                reopened
+                    .get_profile(updated.id)
+                    .unwrap()
+                    .unwrap()
+                    .open_on_startup,
+                open_on_startup
+            );
+        }
+
+        // Simulate the pre-setting schema with existing rows, then migrate twice.
+        reopened
+            .open()
+            .unwrap()
+            .execute("ALTER TABLE profiles DROP COLUMN open_on_startup", [])
+            .unwrap();
+        LocalStore::from_path(&path).unwrap();
+        let migrated = LocalStore::from_path(&path).unwrap();
+        let legacy = migrated.get_profile(profile.id).unwrap().unwrap();
+        assert!(legacy.open_on_startup);
+        assert_eq!(legacy.default_database, "captures");
+
+        let mut legacy_input = serde_json::to_value(&input).unwrap();
+        legacy_input
+            .as_object_mut()
+            .unwrap()
+            .remove("openOnStartup");
+        assert!(
+            serde_json::from_value::<SaveProfileInput>(legacy_input)
+                .unwrap()
+                .open_on_startup
+        );
+        let mut legacy_profile = serde_json::to_value(&profile).unwrap();
+        legacy_profile
+            .as_object_mut()
+            .unwrap()
+            .remove("openOnStartup");
+        assert!(
+            serde_json::from_value::<ConnectionProfile>(legacy_profile)
+                .unwrap()
+                .open_on_startup
+        );
         std::fs::remove_file(path).expect("remove temp db");
     }
 
@@ -396,6 +485,7 @@ mod tests {
                 ca_cert_path: None,
                 ssh: None,
                 read_only: true,
+                open_on_startup: true,
                 password: None,
             })
             .expect("save mysql");
@@ -450,6 +540,7 @@ mod tests {
                 ca_cert_path: None,
                 ssh: None,
                 read_only: false,
+                open_on_startup: true,
                 password: None,
             })
             .expect("save redis");

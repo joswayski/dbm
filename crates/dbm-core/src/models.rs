@@ -50,6 +50,8 @@ pub struct ConnectionProfile {
     pub ca_cert_path: Option<String>,
     pub ssh: Option<SshConfig>,
     pub read_only: bool,
+    #[serde(default = "default_open_on_startup")]
+    pub open_on_startup: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -150,7 +152,13 @@ pub struct SaveProfileInput {
     pub ssh: Option<SshConfig>,
     #[serde(default)]
     pub read_only: bool,
+    #[serde(default = "default_open_on_startup")]
+    pub open_on_startup: bool,
     pub password: Option<String>,
+}
+
+fn default_open_on_startup() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

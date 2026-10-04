@@ -46,6 +46,7 @@ pub fn profile_from_input(input: &SaveProfileInput) -> AppResult<ConnectionProfi
         ca_cert_path: input.ca_cert_path.clone(),
         ssh: input.ssh.clone(),
         read_only: input.read_only,
+        open_on_startup: input.open_on_startup,
         created_at: now,
         updated_at: now,
     };
@@ -79,6 +80,7 @@ impl DemoStore {
                 ca_cert_path: None,
                 ssh: None,
                 read_only: false,
+                open_on_startup: true,
                 created_at: created,
                 updated_at: created,
             }

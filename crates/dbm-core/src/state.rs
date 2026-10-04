@@ -95,6 +95,21 @@ impl AppState {
         Ok(session)
     }
 
+    pub async fn connect_database(
+        &self,
+        profile_id: Uuid,
+        database: &str,
+    ) -> AppResult<Arc<DbSession>> {
+        let mut profile = self.profile(profile_id)?;
+        profile.default_database = database.trim().to_owned();
+        profile.validate()?;
+        let session = self.connect(profile).await?;
+        // Only a successful switch replaces the saved connection target.
+        self.store
+            .remember_database(profile_id, &session.profile().default_database)?;
+        Ok(session)
+    }
+
     pub async fn with_session_retry<T, F, Fut>(
         &self,
         profile_id: Uuid,
