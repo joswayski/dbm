@@ -11,9 +11,11 @@ on:
 # No signing secrets, releases, store uploads, or production/database access.
 permissions:
   contents: read
+# A new push to a pull request supersedes its in-flight run; runs on main (and
+# manual runs) each get their own group and are never cancelled.
 concurrency:
-  group: mobile-${{ github.ref }}
-  cancel-in-progress: true
+  group: mobile-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   android:
@@ -25,10 +27,21 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      # Gradle User Home (dependencies, wrapper distribution, build cache).
+      # The open-source provider over actions/cache; it saves only from the
+      # default branch and is read-only elsewhere.
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-provider: basic
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.94.0
           targets: aarch64-linux-android,x86_64-linux-android
+      # Rust dependencies plus ~/.cargo/bin, so the pinned cargo-ndk below is
+      # found already installed instead of compiled from source.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: android-actions/setup-android@v3
         with:
           cmdline-tools-version: '13114758'
@@ -79,6 +92,9 @@ jobs:
         with:
           toolchain: 1.94.0
           targets: aarch64-apple-ios-sim,aarch64-apple-ios
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Provision the SDK-matched iPhone test simulator
         run: |
           sudo xcodebuild -runFirstLaunch
@@ -92,10 +108,32 @@ jobs:
             xcrun simctl list
           fi
           device="$(xcrun simctl create 'DBM UI Tests' com.apple.CoreSimulator.SimDeviceType.iPhone-16 "$runtime")"
+          # Boot in the background while the app builds; the wait for a
+          # finished boot happens right before the UI tests.
           xcrun simctl boot "$device"
-          xcrun simctl bootstatus "$device" -b
+          echo "DBM_IOS_SIMULATOR_ID=$device" >> "$GITHUB_ENV"
           echo "DBM_IOS_TEST_DESTINATION=platform=iOS Simulator,id=$device" >> "$GITHUB_ENV"
+      # build.sh compiles XcodeGen from source at a pinned commit; reuse that
+      # build. Keyed by the commit and the Xcode version, and still checked
+      # out and verified against the commit by build.sh.
+      - name: Identify the XcodeGen build
+        id: xcodegen
+        run: |
+          commit="$(sed -n 's/^XCODEGEN_COMMIT=//p' apps/native/ios/build.sh)"
+          test -n "$commit"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          echo "xcode=$(xcodebuild -version | tr -s '\n ' '-')" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache/restore@v4
+        id: xcodegen-cache
+        with:
+          path: apps/native/ios/.build/xcodegen-${{ steps.xcodegen.outputs.commit }}
+          key: xcodegen-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcodegen.outputs.commit }}-${{ steps.xcodegen.outputs.xcode }}
       - run: bash apps/native/ios/build.sh simulator
+      - uses: actions/cache/save@v4
+        if: github.ref == 'refs/heads/main' && steps.xcodegen-cache.outputs.cache-hit != 'true'
+        with:
+          path: apps/native/ios/.build/xcodegen-${{ steps.xcodegen.outputs.commit }}
+          key: xcodegen-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcodegen.outputs.commit }}-${{ steps.xcodegen.outputs.xcode }}
       - name: Record simulator-only package, exact revision and checksums
         run: |
           mkdir -p dist/mobile/ios
@@ -108,6 +146,8 @@ jobs:
           path: dist/mobile/ios/
           if-no-files-found: error
           retention-days: 14
+      - name: Wait for the test simulator to finish booting
+        run: xcrun simctl bootstatus "$DBM_IOS_SIMULATOR_ID" -b
       - run: bash apps/native/ios/build.sh test
       - name: Compile device Rust core without provisioning or uploading
         run: cargo build --locked --release -p dbm-native-bridge --no-default-features --target aarch64-apple-ios

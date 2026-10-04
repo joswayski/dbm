@@ -120,6 +120,13 @@ jobs:
         with:
           toolchain: 1.94.0
           targets: aarch64-apple-darwin,x86_64-apple-darwin
+      # Restores the dependency cache CI's AppKit job saves from main (same
+      # universal bridge build). Workspace crates, which compile in the version
+      # and build number, are never cached and always rebuild.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: appkit-universal
+          save-if: false
       - name: Prepare Apple signing and notarization credentials
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -254,6 +261,15 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.94.0
+      # Third-party dependencies are reused. dbm-core and dbm-update still
+      # rebuild: a fresh checkout's sources are newer than any cached output,
+      # and Cargo tracks the DBM_NATIVE_* values they compile in. This workflow
+      # runs only on main, so it reads and writes main's cache.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            apps/native/workbench -> target
+            . -> target
       - run: cargo build --manifest-path apps/native/workbench/Cargo.toml --locked --release
       - run: cargo build --locked --release -p dbm-sign
       - name: Stage and sign the executable
@@ -300,6 +316,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.94.0
+      - uses: Swatinem/rust-cache@v2
       - name: Build and sign DBM-Windows-x64-setup.exe
         shell: bash
         run: |
