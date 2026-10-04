@@ -131,13 +131,13 @@ jobs:
           xcrun simctl boot "$device"
           echo "DBM_IOS_SIMULATOR_ID=$device" >> "$GITHUB_ENV"
           echo "DBM_IOS_TEST_DESTINATION=platform=iOS Simulator,id=$device" >> "$GITHUB_ENV"
-      # build.sh compiles XcodeGen from source at a pinned commit; reuse that
-      # build. Keyed by the commit and the Xcode version, and still checked
-      # out and verified against the commit by build.sh.
+      # prepare.sh (run by build.sh) compiles XcodeGen from source at a pinned
+      # commit; reuse that build. Keyed by the commit and the Xcode version, and
+      # still checked out and verified against the commit by prepare.sh.
       - name: Identify the XcodeGen build
         id: xcodegen
         run: |
-          commit="$(sed -n 's/^XCODEGEN_COMMIT=//p' apps/native/ios/build.sh)"
+          commit="$(sed -n 's/^XCODEGEN_COMMIT=//p' apps/native/ios/prepare.sh)"
           test -n "$commit"
           echo "commit=$commit" >> "$GITHUB_OUTPUT"
           echo "xcode=$(xcodebuild -version | tr -s '\n ' '-')" >> "$GITHUB_OUTPUT"
