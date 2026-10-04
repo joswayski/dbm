@@ -2,10 +2,10 @@ name: Mobile development builds
 
 on:
   pull_request:
-    paths: ['apps/native/android/**', 'apps/native/ios/**', 'apps/native/bridge/**', 'crates/dbm-core/**', 'Cargo.*', '.github/workflows/mobile.yml']
+    paths: ['apps/native/android/**', 'apps/native/ios/**', 'apps/native/bridge/**', 'crates/dbm-core/**', 'Cargo.*', '.github/workflows/mobile*.yml', 'scripts/*mobile*', 'scripts/testflight-distribute.py', 'scripts/play-upload.py']
   push:
     branches: [main]
-    paths: ['apps/native/android/**', 'apps/native/ios/**', 'apps/native/bridge/**', 'crates/dbm-core/**', 'Cargo.*', '.github/workflows/mobile.yml']
+    paths: ['apps/native/android/**', 'apps/native/ios/**', 'apps/native/bridge/**', 'crates/dbm-core/**', 'Cargo.*', '.github/workflows/mobile*.yml', 'scripts/*mobile*', 'scripts/testflight-distribute.py', 'scripts/play-upload.py']
   workflow_dispatch:
 
 # No signing secrets, releases, store uploads, or production/database access.
@@ -37,6 +37,23 @@ jobs:
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
           cargo install cargo-ndk --version 4.1.2 --locked
       - run: bash apps/native/android/build.sh
+      - name: Check release packaging with a disposable signing key
+        run: |
+          set -euo pipefail
+          export DBM_ANDROID_KEYSTORE="$RUNNER_TEMP/dbm-fixture.jks"
+          export DBM_ANDROID_KEYSTORE_PASSWORD=fixture-only DBM_ANDROID_KEY_PASSWORD=fixture-only
+          export DBM_ANDROID_KEY_ALIAS=fixture DBM_BUILD_NUMBER=703
+          trap 'rm -f "$DBM_ANDROID_KEYSTORE"' EXIT
+          keytool -genkeypair -keystore "$DBM_ANDROID_KEYSTORE" -storepass fixture-only \
+            -keypass fixture-only -alias fixture -dname 'CN=Disposable CI fixture' \
+            -keyalg RSA -keysize 2048 -validity 2 -storetype JKS
+          apps/native/android/gradlew -p apps/native/android --no-daemon --max-workers=2 lintRelease assembleRelease bundleRelease
+          apk=apps/native/android/app/build/outputs/apk/release/app-release.apk
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify "$apk"
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$apk" | grep "package: name='com.dbm.nativeapp' versionCode='703'"
+          jarsigner -verify apps/native/android/app/build/outputs/bundle/release/app-release.aab | tee "$RUNNER_TEMP/dbm-fixture-verification.txt"
+          grep -q 'jar verified' "$RUNNER_TEMP/dbm-fixture-verification.txt"
+          grep -q 'ALLOW_DEMO = false' apps/native/android/app/build/generated/source/buildConfig/release/com/dbm/nativeapp/BuildConfig.java
       - name: Record exact tested revision and checksums
         run: |
           mkdir -p dist/mobile/android
@@ -109,8 +126,13 @@ jobs:
           if-no-files-found: error
           retention-days: 14
       - run: bash apps/native/ios/build.sh test
-      - name: Compile device Rust core without provisioning or uploading
-        run: cargo build --locked --release -p dbm-native-bridge --no-default-features --target aarch64-apple-ios
+      - name: Check the Release device archive without signing or uploading
+        run: |
+          bash apps/native/ios/prepare.sh iphoneos
+          xcodebuild -project apps/native/ios/DBM.xcodeproj -scheme DBM -configuration Release \
+            -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/DBM-unsigned.xcarchive" \
+            -derivedDataPath apps/native/ios/DerivedData-Release \
+            DBM_IOS_BUNDLE_ID=app.dbm.ios CODE_SIGNING_ALLOWED=NO archive
       - name: Export native UI screenshots for review
         if: always()
         run: |

@@ -163,12 +163,13 @@ final class DBMUITests: XCTestCase {
         XCTAssertNotEqual(password.value as? String, "Not saved on this device")
 
         XCUIDevice.shared.press(.home)
-        // A live background app can be suspended before XCTest polls its state.
-        expectation(for: NSPredicate(format: "state IN %@", [
-            XCUIApplication.State.runningBackground.rawValue,
-            XCUIApplication.State.runningBackgroundSuspended.rawValue
-        ] as NSArray), evaluatedWith: app)
-        waitForExpectations(timeout: 5)
+        // Poll process state directly and report it if backgrounding fails.
+        // Require a live background process so a crash/relaunch cannot pass.
+        let background = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            app.state == .runningBackground || app.state == .runningBackgroundSuspended
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [background], timeout: 5), .completed,
+                       "Expected a live background app; actual process state: \(app.state.rawValue)")
         app.activate()
 
         XCTAssertTrue(app.staticTexts["Connections"].waitForExistence(timeout: 10))

@@ -1,0 +1,271 @@
+name: Mobile release
+
+# Caper's approval/signing flow, separate from DBM's automatic desktop updater.
+on:
+  workflow_dispatch:
+    inputs:
+      git_sha:
+        description: Full main commit to release (blank uses newest main).
+        type: string
+        default: ""
+      discord_message_id:
+        description: Source Discord notification (set by Godis).
+        type: string
+        default: ""
+      discord_started_at:
+        description: Release start timestamp (set by Godis).
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+concurrency:
+  group: dbm-mobile-release
+  cancel-in-progress: false
+env:
+  AWS_REGION: us-east-1
+  RELEASE_SIGNER_ROLE: arn:aws:iam::395451633568:role/production-dbm-release-signer
+  DBM_IOS_BUNDLE_ID: app.dbm.ios
+
+jobs:
+  resolve:
+    name: Resolve tested main commit
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      sha: ${{ steps.release.outputs.sha }}
+      android_build: ${{ steps.release.outputs.android_build }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: release
+        env:
+          REQUESTED_SHA: ${{ inputs.git_sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sha="${REQUESTED_SHA:-$GITHUB_SHA}"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "git_sha must be a full lowercase SHA." >&2; exit 1; }
+          git merge-base --is-ancestor "$sha" "$GITHUB_SHA" || { echo "Commit is not on main." >&2; exit 1; }
+          tested="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/mobile.yml/runs?head_sha=$sha&branch=main&event=push&status=success&per_page=1" --jq '.workflow_runs | length')"
+          [[ "$tested" -gt 0 ]] || { echo "This exact main commit needs passing Mobile development builds before release." >&2; exit 1; }
+          # Re-runs also upgrade an installed APK; reserve two digits for attempts.
+          [[ "$GITHUB_RUN_ATTEMPT" -lt 100 ]] || { echo "Start a new release run after attempt 99." >&2; exit 1; }
+          build=$((GITHUB_RUN_NUMBER * 100 + GITHUB_RUN_ATTEMPT))
+          [[ "$build" -le 2100000000 ]] || { echo "Android version code overflow." >&2; exit 1; }
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "android_build=$build" >> "$GITHUB_OUTPUT"
+
+  android:
+    name: Android / signed APK and Play bundle
+    needs: resolve
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      DBM_BUILD_NUMBER: ${{ needs.resolve.outputs.android_build }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.94.0
+          targets: aarch64-linux-android,x86_64-linux-android
+      - uses: android-actions/setup-android@v3
+        with:
+          cmdline-tools-version: '13114758'
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0 ndk;27.2.12479018 cmake;3.22.1'
+      - run: |
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+          cargo install cargo-ndk --version 4.1.2 --locked
+      - uses: aws-actions/configure-aws-credentials@v6.2.3
+        with:
+          role-to-assume: ${{ env.RELEASE_SIGNER_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Load the existing upload key
+        run: |
+          set -euo pipefail
+          umask 077
+          secret="$RUNNER_TEMP/android.json"
+          aws secretsmanager get-secret-value --secret-id production/signing/release \
+            --query SecretString --output text | jq -e '.android | objects' > "$secret"
+          jq -e 'all(.keystore_base64, .keystore_password, .key_alias, .key_password; type == "string" and length > 0)' "$secret" > /dev/null
+          for key in keystore_password key_password; do
+            echo "::add-mask::$(jq -r ".$key" "$secret")"
+          done
+          jq -r .keystore_base64 "$secret" | base64 --decode > "$RUNNER_TEMP/dbm-release.jks"
+          {
+            echo "DBM_ANDROID_KEYSTORE=$RUNNER_TEMP/dbm-release.jks"
+            echo "DBM_ANDROID_KEYSTORE_PASSWORD=$(jq -r .keystore_password "$secret")"
+            echo "DBM_ANDROID_KEY_ALIAS=$(jq -r .key_alias "$secret")"
+            echo "DBM_ANDROID_KEY_PASSWORD=$(jq -r .key_password "$secret")"
+          } >> "$GITHUB_ENV"
+          rm -f "$secret"
+      - name: Build and verify the signed packages
+        run: |
+          set -euo pipefail
+          bash apps/native/android/build.sh lintRelease assembleRelease bundleRelease
+          apk=apps/native/android/app/build/outputs/apk/release/app-release.apk
+          aab=apps/native/android/app/build/outputs/bundle/release/app-release.aab
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$apk"
+          jarsigner -verify "$aab" | tee "$RUNNER_TEMP/bundle-verification.txt"
+          grep -q 'jar verified' "$RUNNER_TEMP/bundle-verification.txt"
+          unzip -l "$apk" | grep 'lib/arm64-v8a/libdbm_android.so'
+          unzip -l "$apk" | grep 'lib/x86_64/libdbm_android.so'
+          unzip -l "$apk" | grep 'assets/Geist-LICENSE.txt'
+          mkdir -p dist/mobile/release dist/mobile/play
+          cp "$apk" dist/mobile/release/DBM-Android.apk
+          cp "$aab" dist/mobile/play/DBM-Android-Play.aab
+          printf '{"revision":"%s","versionCode":%s,"releaseSigned":true}\n' "$(git rev-parse HEAD)" "$DBM_BUILD_NUMBER" > dist/mobile/release/BUILD.json
+          (cd dist/mobile/release && sha256sum DBM-Android.apk > SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mobile-release-android
+          path: dist/mobile/release/
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        with:
+          name: google-play-bundle
+          path: dist/mobile/play/DBM-Android-Play.aab
+          if-no-files-found: error
+          retention-days: 30
+      - name: Optional Google Play internal rollout
+        if: vars.DBM_PLAY_UPLOAD == 'true'
+        run: |
+          set -euo pipefail
+          umask 077
+          aws secretsmanager get-secret-value --secret-id production/signing/release \
+            --query SecretString --output text | jq -er '.google_play.service_account_json | strings' > "$RUNNER_TEMP/play.json"
+          python3 -m pip install --quiet 'pyjwt[crypto]==2.10.1'
+          export GOOGLE_PLAY_SERVICE_ACCOUNT="$RUNNER_TEMP/play.json"
+          export PLAY_RELEASE_NAME="0.1.$DBM_BUILD_NUMBER"
+          export PLAY_RELEASE_NOTES="$(git log -1 --format=%s)"
+          python3 scripts/play-upload.py dist/mobile/play/DBM-Android-Play.aab
+      - name: Remove signing material
+        if: always()
+        run: rm -f "$RUNNER_TEMP/dbm-release.jks" "$RUNNER_TEMP/android.json" "$RUNNER_TEMP/play.json"
+
+  testflight:
+    name: iPhone / TestFlight
+    needs: resolve
+    runs-on: macos-15
+    timeout-minutes: 110
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      BUILD_NUMBER: ${{ github.run_number }}.${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.94.0
+          targets: aarch64-apple-ios
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Use Xcode 26 (App Store Connect SDK requirement)
+        run: |
+          set -euo pipefail
+          xcode="$(ls -d /Applications/Xcode_26*.app 2>/dev/null | grep -vi beta | sort -V | tail -1 || true)"
+          [[ -n "$xcode" ]] || { echo "Xcode 26 is required." >&2; exit 1; }
+          sudo xcode-select -s "$xcode/Contents/Developer"
+          xcodebuild -version
+      - uses: aws-actions/configure-aws-credentials@v6.2.3
+        with:
+          role-to-assume: ${{ env.RELEASE_SIGNER_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Load the existing App Store Connect API key
+        run: |
+          set -euo pipefail
+          umask 077
+          secret="$RUNNER_TEMP/apple.json"
+          aws secretsmanager get-secret-value --secret-id production/signing/release \
+            --query SecretString --output text | jq -e '.apple | objects' > "$secret"
+          jq -e 'all(.app_store_connect_private_key, .app_store_connect_key_id, .app_store_connect_issuer_id, .team_id; type == "string" and length > 0)' "$secret" > /dev/null
+          jq -r .app_store_connect_private_key "$secret" > "$RUNNER_TEMP/asc.p8"
+          {
+            echo "NOTARY_KEY_PATH=$RUNNER_TEMP/asc.p8"
+            echo "NOTARY_KEY_ID=$(jq -r .app_store_connect_key_id "$secret")"
+            echo "NOTARY_ISSUER=$(jq -r .app_store_connect_issuer_id "$secret")"
+            echo "APPLE_TEAM_ID=$(jq -r .team_id "$secret")"
+          } >> "$GITHUB_ENV"
+          rm -f "$secret"
+      - name: Archive and upload
+        run: bash apps/native/ios/upload-testflight.sh
+      - name: Wait for processing and assign tester groups
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet 'pyjwt[crypto]==2.10.1'
+          export WHAT_TO_TEST="$(git log -1 --format=%s)"
+          python3 scripts/testflight-distribute.py
+      - name: Remove signing material
+        if: always()
+        run: rm -f "$RUNNER_TEMP/asc.p8" "$RUNNER_TEMP/apple.json"
+
+  publish:
+    name: Update the Android download
+    needs: [resolve, android]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: mobile-release-android
+          path: release
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ needs.resolve.outputs.sha }}
+        run: |
+          set -euo pipefail
+          # A prerelease is never the desktop updaters' releases/latest target.
+          if gh release view mobile-latest --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release delete mobile-latest --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes
+          fi
+          gh release create mobile-latest --repo "$GITHUB_REPOSITORY" --target "$RELEASE_SHA" \
+            --prerelease --latest=false --title 'DBM mobile (latest)' \
+            --notes "Signed Android build from $RELEASE_SHA. Install DBM-Android.apk and allow installs from your browser. Updates use the same signing key. iPhone delivery runs separately through TestFlight; check this run's iPhone job for its result. Native clients remain read-only and require verified TLS. Desktop downloads and updates are unchanged." \
+            release/DBM-Android.apk release/BUILD.json release/SHA256SUMS
+
+  notify-discord:
+    name: Update the Discord result
+    needs: [resolve, android, testflight, publish]
+    if: ${{ always() && github.ref == 'refs/heads/main' && inputs.discord_message_id != '' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - env:
+          DEPLOY_NOTIFICATION_WEBHOOK_URL: ${{ secrets.DEPLOY_NOTIFICATION_WEBHOOK_URL }}
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+          RELEASE_SHA: ${{ needs.resolve.outputs.sha || inputs.git_sha || github.sha }}
+          DISCORD_MESSAGE_ID: ${{ inputs.discord_message_id }}
+          DISCORD_STARTED_AT: ${{ inputs.discord_started_at }}
+        run: |
+          set -euo pipefail
+          result=success
+          for job_result in $RESULTS; do
+            case "$job_result" in
+              success) ;;
+              failure) result=failure ;;
+              *) [[ "$result" == failure ]] || result=cancelled ;;
+            esac
+          done
+          bash scripts/update-discord-mobile-release.sh \
+            --git-sha "$RELEASE_SHA" --message-id "$DISCORD_MESSAGE_ID" --result "$result" \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --started-at "$DISCORD_STARTED_AT" --finished-at "$(date +%s)"

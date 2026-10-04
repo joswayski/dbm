@@ -5,17 +5,34 @@ plugins {
     id("org.jetbrains.kotlin.plugin.serialization")
 }
 
+val releaseStore = providers.environmentVariable("DBM_ANDROID_KEYSTORE")
+val releaseStorePassword = providers.environmentVariable("DBM_ANDROID_KEYSTORE_PASSWORD")
+val releaseKeyAlias = providers.environmentVariable("DBM_ANDROID_KEY_ALIAS")
+val releaseKeyPassword = providers.environmentVariable("DBM_ANDROID_KEY_PASSWORD")
+val releaseSigningAvailable = listOf(releaseStore, releaseStorePassword, releaseKeyAlias, releaseKeyPassword)
+    .all { it.isPresent && it.get().isNotBlank() }
+val buildNumber = providers.environmentVariable("DBM_BUILD_NUMBER").map { it.toInt() }.orElse(1)
+require(buildNumber.get() in 1..2_100_000_000) { "DBM_BUILD_NUMBER must be a positive Android version code." }
+
 android {
     namespace = "com.dbm.nativeapp"
     compileSdk = 36
     buildToolsVersion = "36.0.0"
     ndkVersion = "27.2.12479018"
+    signingConfigs {
+        if (releaseSigningAvailable) create("release") {
+            storeFile = file(releaseStore.get())
+            storePassword = releaseStorePassword.get()
+            keyAlias = releaseKeyAlias.get()
+            keyPassword = releaseKeyPassword.get()
+        }
+    }
     defaultConfig {
         applicationId = "com.dbm.nativeapp"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0-dev"
+        versionCode = buildNumber.get()
+        versionName = if (buildNumber.get() > 1) "0.1.${buildNumber.get()}" else "0.1.0-dev"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
         externalNativeBuild { cmake { cppFlags += "-std=c++17" } }
@@ -29,6 +46,7 @@ android {
             buildConfigField("boolean", "ALLOW_DEMO", "false")
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            signingConfig = if (releaseSigningAvailable) signingConfigs.getByName("release") else null
         }
     }
     buildFeatures { compose = true; buildConfig = true }
@@ -40,9 +58,11 @@ android {
 }
 
 // Store distribution is separate; never silently assemble an unsigned release.
-tasks.configureEach {
-    if (name in setOf("assembleRelease", "bundleRelease")) doFirst {
-        error("Mobile release signing/distribution is not configured; use the development debug APK.")
+if (!releaseSigningAvailable) {
+    tasks.configureEach {
+        if (name in setOf("assembleRelease", "bundleRelease", "packageRelease", "packageReleaseBundle")) doFirst {
+            error("All four DBM_ANDROID release-signing variables are required; refusing an unsigned release.")
+        }
     }
 }
 

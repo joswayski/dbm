@@ -6,6 +6,11 @@ DBM distributes the native apps directly through GitHub Releases:
 - Windows: the egui app as an NSIS `.exe` installer; and
 - Linux: the egui app as an AppImage.
 
+Mobile distribution uses a separate, manually approved Caper-style workflow:
+signed Android APK/AAB builds and iPhone TestFlight uploads. Its `mobile-latest`
+prerelease cannot replace the desktop latest release or updater manifests.
+See [mobile signing and first-release setup](mobile.md#signed-mobile-releases-capers-distribution-path).
+
 Every merge to `main` that changes the app runs `.github/workflows/release.yml`,
 which builds all three platforms and publishes the result as the latest GitHub
 Release. Installed release builds find it through the updater manifest and
