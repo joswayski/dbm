@@ -7,6 +7,14 @@ fi
 root="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
 output="$root/target/native/DBM.app"
 export MACOSX_DEPLOYMENT_TARGET=13.0
+# Cargo's release profile strips debuginfo, and rustc before 1.98 does that on
+# Apple targets with its bundled llvm-objcopy, which can leave the LINKEDIT
+# string pool only 4-byte aligned (rust-lang/rust#157750). Xcode 27's ld and
+# macOS 27's dyld reject such dylibs ("mis-aligned LINKEDIT string pool"), so
+# rustc does not strip here and Apple's strip does it below. The build-script
+# override covers proc-macro dylibs, which rustc itself loads.
+export CARGO_PROFILE_RELEASE_STRIP=none
+export CARGO_PROFILE_RELEASE_BUILD_OVERRIDE_STRIP=none
 # DBM_UNIVERSAL=1 (release builds) produces one bundle for Apple Silicon and
 # Intel; development builds target only this Mac's architecture.
 if [[ "${DBM_UNIVERSAL:-}" == 1 ]]; then
@@ -23,14 +31,22 @@ for arch in "${arches[@]}"; do
   cargo build --manifest-path "$root/Cargo.toml" --target-dir "$root/target" --locked --release \
     -p dbm-native-bridge --target "$triple"
   dylib_dir="$root/target/$triple/release"
-  xcrun install_name_tool -id @rpath/libdbm_native_bridge.dylib "$dylib_dir/libdbm_native_bridge.dylib"
+  dylib="$dylib_dir/libdbm_native_bridge.dylib"
+  xcrun strip -S "$dylib"
+  xcrun install_name_tool -id @rpath/libdbm_native_bridge.dylib "$dylib"
+  # Fail here, naming the cause, rather than in the Swift link or at launch.
+  stroff="$(xcrun otool -l "$dylib" | awk '$1 == "stroff" { print $2; exit }')"
+  if [[ -z "$stroff" ]] || (( stroff % 8 != 0 )); then
+    echo "$dylib: LINKEDIT string pool offset '${stroff}' is not 8-byte aligned." >&2
+    exit 1
+  fi
   xcrun swiftc -swift-version 5 -O -framework AppKit -target "$arch-apple-macosx13.0" \
     -import-objc-header "$root/apps/native/bridge/include/dbm_bridge.h" \
     -L "$dylib_dir" -ldbm_native_bridge \
     -Xlinker -rpath -Xlinker @executable_path/../Frameworks \
     "$root"/apps/native/macos/Sources/*.swift \
     -o "$dylib_dir/dbm"
-  dylibs+=("$dylib_dir/libdbm_native_bridge.dylib")
+  dylibs+=("$dylib")
   executables+=("$dylib_dir/dbm")
 done
 xcrun lipo -create "${dylibs[@]}" -output "$output/Contents/Frameworks/libdbm_native_bridge.dylib"
