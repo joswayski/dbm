@@ -12,7 +12,7 @@ when, and which identifiers must never change.
 | 1. Website and branding | anyba.se site in `apps/web`; README; josevalerio.com links to anyba.se | In progress |
 | 2. App display name | What users see inside and around the installed app | Planned |
 | 3. Download names | Anybase-named first-install downloads | Planned |
-| 4. Repository rename | `joswayski/dbm` to `joswayski/anybase`, and every hard-coded reference | Planned |
+| 4. Repository rename (optional) | `joswayski/dbm` to `joswayski/anybase`, and every hard-coded reference | Planned |
 | 5. Internal names | Crates, env vars, script names | Optional |
 
 ### 1. Website and branding
@@ -52,23 +52,39 @@ updater assets listed in [Never change](#never-change).
 
 ### 4. Repository rename
 
-GitHub redirects git, API, and release-download URLs from a renamed repository as
-long as nothing new is ever created at `joswayski/dbm`. Installed apps therefore
-keep updating through the old manifest URL. In the same window as the rename:
+Optional: the product name doesn't depend on it. GitHub redirects git, web, and
+release-download URLs from a renamed repository as long as nothing new is ever
+created at `joswayski/dbm`, so installed apps keep updating through the old
+manifest URL (the updater follows redirects). Repository settings, secrets,
+runners, and GitHub App installations follow the repository.
+
+Three things match the repository **name** and break on rename. Make each accept
+both names and roll it out **before** renaming:
+
+- **Mobile release signing.** The AWS trust policy in the infrastructure repo's
+  `infra/environments/production/release-signing.tf` only accepts
+  `repo:joswayski@22891173/dbm@1300057641`. After a rename GitHub sends the new
+  name, AWS refuses the role, and Play/TestFlight releases fail. Add the new
+  subject and `tofu apply`.
+- **Self-hosted Mac runner.** The job hook written by `scripts/mac-ci-runner.sh`
+  only allows `joswayski/dbm`, so main-branch macOS jobs, including release
+  builds, fail on `josemac`. Add the new name and rerun the setup on the Mac.
+- **Godis mobile Deploy button.** `src/deployments.rs` requests a GitHub App
+  token scoped to the repository named `dbm` (`DBM_REPOSITORY`), which no longer
+  exists after a rename. Update it and deploy Godis right after the rename. Keep
+  the `dbm-mobile` button slug: buttons already posted in Discord carry it.
+
+After the rename, update the remaining references (these keep working through
+redirects meanwhile):
 
 - `apps/web/src/site.ts` (`REPOSITORY`) and the download URLs in
   `apps/web/src/downloads.ts`.
 - `crates/dbm-update/src/lib.rs` manifest URL (new installs only; old ones rely on
   the redirect).
-- Godis `src/deployments.rs` `DBM_REPOSITORY`. Keep the `dbm-mobile` button slug:
-  buttons already posted in Discord carry it in their custom IDs.
-- Infrastructure: `scripts/store-release-signing-secrets.sh`,
-  `scripts/store-deploy-notification-webhook.sh`, `scripts/mac-ci-runner.sh`,
-  `infra/environments/production/release-signing.tf`, and their docs and tests.
-- Confirm the self-hosted `josemac` runner and the GitHub App installations still
-  list the repository.
-- Cloudflare Workers Builds: reconnect the repository if the build stops
-  triggering.
+- Infrastructure `scripts/store-release-signing-secrets.sh` and
+  `scripts/store-deploy-notification-webhook.sh`, plus their docs and tests.
+- Local clones: `git remote set-url origin https://github.com/joswayski/anybase`.
+- Remove the old name from the signing trust policy and runner hook.
 
 ### 5. Internal names
 
