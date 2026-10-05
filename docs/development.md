@@ -136,6 +136,27 @@ DBM never uploads connection profiles, query history, or database results.
 Desktop passwords use the operating system credential store; mobile passwords
 remain in memory only. See [mobile privacy and lifecycle](mobile.md#storage-and-lifecycle).
 
+## Website
+
+`apps/web` is [anyba.se](https://anyba.se): a TanStack Start site prerendered to
+static files and served by the `anybase-web` Cloudflare Worker. It uses the
+Graphite tokens and the README screenshots (resized to WebP in
+`apps/web/public/screenshots`). The build fetches the newest commits on `main`
+from the GitHub API for **Latest changes**, so it needs network access; set
+`GITHUB_TOKEN` to avoid the unauthenticated rate limit.
+
+```sh
+cd apps/web
+npm ci
+npm run dev        # http://localhost:5175
+npm test
+npm run typecheck
+npm run build      # dist/client
+```
+
+Changes under `apps/web` do not publish a desktop release. Deployment is covered
+in [the rename plan](anybase-migration.md#website).
+
 ## Screenshots
 
 The README screenshots in `docs/screenshots/` are captured from the native
@@ -145,4 +166,14 @@ states to PNG files without interaction:
 ```sh
 mkdir -p target/native/snapshots
 target/native/DBM.app/Contents/MacOS/dbm --demo --snapshot-dir target/native/snapshots
+```
+
+The website serves 1600-pixel WebP copies. After replacing a README screenshot,
+regenerate them with ImageMagick:
+
+```sh
+for f in docs/screenshots/*.png; do
+  convert "$f" -resize 1600x -quality 84 -define webp:method=6 \
+    "apps/web/public/screenshots/$(basename "${f%.png}").webp"
+done
 ```

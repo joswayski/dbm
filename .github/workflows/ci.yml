@@ -57,6 +57,28 @@ jobs:
             "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/cancel" >/dev/null \
             || echo "::warning::Could not cancel the rest of this run"
 
+  web:
+    name: Website
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - name: Build (fetches Latest changes from the GitHub API)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: npm run build
+
   rust:
     name: Rust (${{ matrix.os }})
     strategy:

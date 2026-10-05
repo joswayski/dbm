@@ -1,0 +1,15 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "anybase-web",
+  "compatibility_date": "2026-10-01",
+  // Keep dashboard plaintext vars. wrangler deploy deletes them otherwise.
+  "keep_vars": true,
+  // The anyba.se zone is in this Cloudflare account, so deploy creates the DNS
+  // record and certificate for the apex domain.
+  "routes": [{ "pattern": "anyba.se", "custom_domain": true }],
+  "assets": {
+    "directory": "./dist/client",
+    "html_handling": "drop-trailing-slash",
+    "not_found_handling": "404-page"
+  }
+}

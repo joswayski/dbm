@@ -1,8 +1,12 @@
-# DBM
+# Anybase
 
 A fast, local-first database manager for PostgreSQL, MySQL, and Redis. Native
 desktop apps are released for macOS, Windows, and Linux; Android Compose and
 iPhone SwiftUI clients are in development.
+
+**[anyba.se](https://anyba.se)**. Formerly DBM: the apps, downloads, and this
+repository still use the DBM name while [the rename](docs/anybase-migration.md)
+rolls out.
 
 ## Download
 
@@ -54,3 +58,4 @@ planned.
 - [Design system](docs/design-system.md): the Graphite UI
 - [Native architecture](docs/native.md): the shared Rust core and native hosts
 - [Mobile development clients](docs/mobile.md): Android Compose and iPhone SwiftUI scope
+- [Anybase rename](docs/anybase-migration.md): the DBM to Anybase migration plan and the website
