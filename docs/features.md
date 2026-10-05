@@ -48,7 +48,7 @@ What the app does today, what is deliberately not built yet, and what it stores 
   row and can stage edits or a delete for it, plus a pending-changes bar with
   Discard and Save.
 - The Graphite dark interface described in
-  [docs/design-system.md](design-system.md). Its Geist fonts are bundled
+  [docs/design-system.md](design-system.md). Its Space Mono fonts are bundled
   with the app and never downloaded at runtime.
 - Inline edits and staged deletes for primary-key-backed tables. PostgreSQL
   edits are guarded by `xmin` optimistic concurrency; MySQL edits match on the

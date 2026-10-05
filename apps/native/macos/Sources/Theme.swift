@@ -46,9 +46,9 @@ enum Graphite {
     static let string = NSColor(hex: 0x9fd88a)
     static let number = NSColor(hex: 0xf0b14c)
 
-    /// Registers the bundled Geist fonts once; falls back to the system font.
+    /// Registers the bundled Space Mono faces at launch.
     static func registerFonts() {
-        for name in ["geist", "geist-mono"] {
+        for name in ["SpaceMono-Regular", "SpaceMono-Bold", "SpaceMono-Italic", "SpaceMono-BoldItalic"] {
             if let url = Bundle.main.url(forResource: name, withExtension: "ttf") {
                 CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
             }
@@ -56,21 +56,12 @@ enum Graphite {
     }
 
     static func ui(_ size: CGFloat, _ weight: NSFont.Weight = .regular) -> NSFont {
-        font(family: "Geist", size: size, weight: weight) ?? .systemFont(ofSize: size, weight: weight)
+        let name = weight.rawValue >= NSFont.Weight.semibold.rawValue ? "SpaceMono-Bold" : "SpaceMono-Regular"
+        return NSFont(name: name, size: size) ?? .monospacedSystemFont(ofSize: size, weight: weight)
     }
 
     static func mono(_ size: CGFloat, _ weight: NSFont.Weight = .regular) -> NSFont {
-        font(family: "Geist Mono", size: size, weight: weight)
-            ?? .monospacedSystemFont(ofSize: size, weight: weight)
-    }
-
-    private static func font(family: String, size: CGFloat, weight: NSFont.Weight) -> NSFont? {
-        let descriptor = NSFontDescriptor(fontAttributes: [
-            .family: family,
-            .traits: [NSFontDescriptor.TraitKey.weight: weight.rawValue],
-        ])
-        guard let font = NSFont(descriptor: descriptor, size: size), font.familyName == family else { return nil }
-        return font
+        ui(size, weight)
     }
 }
 

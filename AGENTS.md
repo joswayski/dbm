@@ -37,7 +37,7 @@
 
 ## Visual design
 
-- DBM uses the Graphite design system (`docs/design-system.md`): neutral graphite surfaces, hairline borders, Geist / Geist Mono (bundled, never fetched at runtime), and a system-blue accent for focus, selection, and the single primary action. Keep the AppKit and egui themes and the doc in sync.
+- DBM uses the Graphite design system (`docs/design-system.md`): neutral graphite surfaces, hairline borders, Space Mono for UI and code (bundled, never fetched from a font service at runtime), and a system-blue accent for focus, selection, and the single primary action. Use real regular/bold faces; keep all clients, the website, and the doc in sync.
 - Connection identity is multi-color: each profile has its own color for sidebar, tabs, and main-pane theming. Do not force a single accent across all connections.
 - Establish hierarchy with typography, spacing, and dense-but-readable layout before adding color. Prefer restrained shadows, small corner radii, and concise UI copy.
 - Preserve accessible contrast on dark surfaces. State colors keep stable meanings: `--modified` for staged edits, `--danger` for staged deletes and destructive actions, `--success` for success (and future inserts).

@@ -58,23 +58,26 @@ Connection palette offered in the profile editor: `#4c9aff`, `#ff9f43`,
 
 ## Typography
 
-- UI: **Geist** (OFL 1.1), falling back to the platform system font.
-- Data and code: **Geist Mono**, tabular numerals in grids.
-- The font files live in `apps/native/workbench/assets` and ship inside both
-  apps (`build.sh` copies them into the macOS bundle); nothing is fetched at
-  runtime.
+- UI, data, and code: **Space Mono** (OFL 1.1), with monospaced numerals in grids.
+- Use the real regular (400) and bold (700) faces: former medium roles use
+  regular, and semibold roles use bold. Keep the existing size scale.
+- Desktop font files live in `apps/native/workbench/assets`; macOS `build.sh`
+  copies them into its bundle. Android and iPhone bundle the same TTFs in their
+  resources, and the website bundles WOFF2 faces from `@fontsource/space-mono`.
+  No client fetches fonts from an external service at runtime.
+- Native system dialogs, menus, and SF Symbol icons retain platform rendering.
 
 | Role | Size / weight |
 | --- | --- |
-| Dialog title | 17 / 600 |
-| Query title | 15 / 600 |
-| Body, buttons, tree | 13 or 12.5 / 400–500 |
-| Section label | 11 / 600, sentence case |
+| Dialog title | 17 / 700 |
+| Query title | 15 / 700 |
+| Body, buttons, tree | 13 or 12.5 / 400 |
+| Section label | 11 / 700, sentence case |
 | Grid cells, inspector values | 12 mono |
 | Column type, metadata | 11 mono |
 
-A host may substitute SF Pro / SF Mono (macOS) or Segoe UI Variable /
-Cascadia Mono (Windows) if matching Geist is impractical; keep the size scale.
+System monospace fonts are failure fallbacks only; missing glyphs may use
+platform or egui fallback fonts.
 
 ## Spacing, radius, elevation
 
@@ -113,7 +116,7 @@ Cascadia Mono (Windows) if matching Geist is impractical; keep the size scale.
 
 ## Components
 
-- **Buttons:** primary (`--accent-strong`, white, 600), secondary (`--control`
+- **Buttons:** primary (`--accent-strong`, white, 700), secondary (`--control`
   with `--border-strong`), toolbar (transparent, icon + label), icon (26 px),
   danger text. One primary per surface.
 - **Segmented control:** `--control` track, `--control-active` selected segment

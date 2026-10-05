@@ -3163,6 +3163,8 @@ fn modal<R>(
         .order(egui::Order::Foreground)
         .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
         .fixed_size([width, 0.0])
+        .max_height((ctx.content_rect().height() - 80.0).max(0.0))
+        .vscroll(true)
         .frame(
             Frame::new()
                 .fill(theme::POPOVER)

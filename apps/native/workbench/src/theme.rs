@@ -60,59 +60,42 @@ pub fn ui_font(size: f32) -> FontId {
     FontId::proportional(size)
 }
 
-/// Geist at weight 500. egui draws a variable font's default instance only,
-/// so the heavier weights are bundled as static instances.
+/// Space Mono has regular and bold faces; medium UI text uses regular.
 pub fn medium(size: f32) -> FontId {
-    FontId::new(size, egui::FontFamily::Name("medium".into()))
+    ui_font(size)
 }
 
-/// Geist at weight 600, for headings and primary buttons.
+/// Space Mono Bold, for headings and primary buttons.
 pub fn semibold(size: f32) -> FontId {
-    FontId::new(size, egui::FontFamily::Name("semibold".into()))
+    FontId::new(size, egui::FontFamily::Name("bold".into()))
 }
 
 pub fn configure(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
     fonts.font_data.insert(
-        "Geist".into(),
-        egui::FontData::from_static(include_bytes!("../assets/geist.ttf")).into(),
+        "Space Mono".into(),
+        egui::FontData::from_static(include_bytes!("../assets/SpaceMono-Regular.ttf")).into(),
     );
     fonts.font_data.insert(
-        "Geist Mono".into(),
-        egui::FontData::from_static(include_bytes!("../assets/geist-mono.ttf")).into(),
+        "Space Mono Bold".into(),
+        egui::FontData::from_static(include_bytes!("../assets/SpaceMono-Bold.ttf")).into(),
     );
     fonts
         .families
         .entry(egui::FontFamily::Proportional)
         .or_default()
-        .insert(0, "Geist".into());
+        .insert(0, "Space Mono".into());
     fonts
         .families
         .entry(egui::FontFamily::Monospace)
         .or_default()
-        .insert(0, "Geist Mono".into());
+        .insert(0, "Space Mono".into());
     let fallbacks = fonts.families[&egui::FontFamily::Proportional][1..].to_vec();
-    for (family, name, bytes) in [
-        (
-            "medium",
-            "Geist Medium",
-            &include_bytes!("../assets/geist-medium.ttf")[..],
-        ),
-        (
-            "semibold",
-            "Geist SemiBold",
-            &include_bytes!("../assets/geist-semibold.ttf")[..],
-        ),
-    ] {
-        fonts
-            .font_data
-            .insert(name.into(), egui::FontData::from_static(bytes).into());
-        let mut list = vec![name.to_owned()];
-        list.extend(fallbacks.iter().cloned());
-        fonts
-            .families
-            .insert(egui::FontFamily::Name(family.into()), list);
-    }
+    let mut bold = vec!["Space Mono Bold".to_owned()];
+    bold.extend(fallbacks);
+    fonts
+        .families
+        .insert(egui::FontFamily::Name("bold".into()), bold);
     ctx.set_fonts(fonts);
 
     let mut visuals = egui::Visuals::dark();
@@ -534,6 +517,37 @@ pub fn eyebrow(text: &str) -> egui::RichText {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn ui_and_code_use_matching_monospaced_faces() {
+        let ctx = super::egui::Context::default();
+        super::configure(&ctx);
+        let _ = ctx.run(super::egui::RawInput::default(), |ctx| {
+            ctx.fonts_mut(|fonts| {
+                let mut width = |text: &str, font| {
+                    fonts
+                        .layout_no_wrap(text.to_owned(), font, super::TEXT)
+                        .size()
+                        .x
+                };
+                for font in [
+                    super::ui_font(13.0),
+                    super::mono(13.0),
+                    super::semibold(13.0),
+                ] {
+                    assert_eq!(
+                        width("WW11", font.clone()),
+                        width("ii00", font),
+                        "UI, code, and headings must all use monospaced text"
+                    );
+                }
+                assert_eq!(
+                    width("SELECT id, name", super::ui_font(13.0)),
+                    width("SELECT id, name", super::mono(13.0))
+                );
+            });
+        });
+    }
+
     #[test]
     fn counts_use_thousands_separators() {
         assert_eq!(super::count(0u32), "0");

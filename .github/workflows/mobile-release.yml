@@ -135,7 +135,7 @@ jobs:
           grep -q 'jar verified' "$RUNNER_TEMP/bundle-verification.txt"
           unzip -l "$apk" | grep 'lib/arm64-v8a/libdbm_android.so'
           unzip -l "$apk" | grep 'lib/x86_64/libdbm_android.so'
-          unzip -l "$apk" | grep 'assets/Geist-LICENSE.txt'
+          unzip -l "$apk" | grep 'assets/SpaceMono-LICENSE.txt'
           mkdir -p dist/mobile/release dist/mobile/play
           cp "$apk" dist/mobile/release/DBM-Android.apk
           cp "$aab" dist/mobile/play/DBM-Android-Play.aab

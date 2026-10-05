@@ -16,7 +16,7 @@ DBM has no server, account, pairing service, telemetry, or connection sync.
 - Connect opens the SQL/Redis workbench. Query results are capped at 1,000 rows;
   schema/key exploration and read-only table/key pages use 25 rows per page.
 - Database selection, refresh, loading/errors, and explicit local demo fixtures.
-- The desktop Graphite workbench layout and bundled Geist/Geist Mono fonts:
+- The desktop Graphite workbench layout and bundled Space Mono fonts:
   connection identity, colored tab edges, compact controls and dense grids.
   The source list opens as a drawer/sheet on portrait phones and stays visible
   at widths of 700 dp/pt or more. Orientation changes keep the workbench open;
