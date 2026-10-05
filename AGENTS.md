@@ -19,6 +19,8 @@
 - `crates/dbm-core` owns database adapters, sessions, keyring, and local SQLite storage; `crates/dbm-update` is the self-updater; `tools/dbm-sign` signs release artifacts.
 - `docs/` holds features, development setup, releases (signing, notarization, publishing), the native architecture, the design system, and screenshots.
 - `scripts/release.mjs` picks release versions and notes for the release workflow.
+- `apps/web` is the anyba.se website (static TanStack Start on a Cloudflare Worker). Changes there do not publish a desktop release.
+- DBM is being renamed Anybase; follow `docs/anybase-migration.md`, and never change the identifiers it lists under "Never change".
 - The Tauri/React app was removed; its installs update onto the native apps through `latest.json` (see `docs/releases.md`). Keep that path working.
 
 ## Working conventions

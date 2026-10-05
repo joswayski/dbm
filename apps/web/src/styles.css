@@ -1,0 +1,130 @@
+@import "tailwindcss";
+
+/* Geist and Geist Mono are bundled with the site, never fetched from a font CDN. */
+@font-face {
+  font-family: "Geist";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400;
+  src: url("@fontsource/geist/files/geist-latin-400-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Geist";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 500;
+  src: url("@fontsource/geist/files/geist-latin-500-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Geist";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 600;
+  src: url("@fontsource/geist/files/geist-latin-600-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Geist Mono";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400;
+  src: url("@fontsource/geist-mono/files/geist-mono-latin-400-normal.woff2") format("woff2");
+}
+
+/* Graphite tokens, from docs/design-system.md. */
+:root {
+  color-scheme: dark;
+  --bg: #161618;
+  --chrome: #1c1c1e;
+  --control: #2a2a2d;
+  --control-hover: #323235;
+  --control-active: #3a3a3d;
+  --border: #2a2a2d;
+  --border-strong: #353538;
+  --text-strong: #f5f5f7;
+  --text: #e8e8ea;
+  --secondary: #c7c7cc;
+  --muted: #a0a0a6;
+  --faint: #808087;
+  --accent: #4c9aff;
+  --accent-strong: #3b78c7;
+  --accent-text: #7db6ff;
+  --accent-soft: rgba(76, 154, 255, 0.14);
+}
+
+@theme {
+  --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --color-canvas: var(--bg);
+  --color-chrome: var(--chrome);
+  --color-control: var(--control);
+  --color-control-hover: var(--control-hover);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-ink-strong: var(--text-strong);
+  --color-ink: var(--text);
+  --color-ink-secondary: var(--secondary);
+  --color-ink-muted: var(--muted);
+  --color-ink-faint: var(--faint);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-text: var(--accent-text);
+  --color-accent-soft: var(--accent-soft);
+}
+
+@layer base {
+  body {
+    @apply m-0 min-h-dvh bg-canvas font-sans text-ink antialiased;
+    background-image: radial-gradient(
+      ellipse 80% 40% at 50% -14%,
+      rgba(76, 154, 255, 0.08),
+      transparent 60%
+    );
+  }
+
+  ::selection {
+    color: var(--text-strong);
+    background: var(--accent-soft);
+  }
+
+  a {
+    @apply rounded-[5px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent;
+  }
+}
+
+@layer components {
+  .text-link {
+    @apply font-medium text-ink-strong no-underline underline-offset-4 transition-colors duration-150 ease-out hover:text-accent-text hover:underline;
+  }
+
+  .section-label {
+    @apply font-mono text-[0.6875rem] font-normal tracking-[0.12em] text-accent-text uppercase;
+  }
+
+  .download-button {
+    @apply inline-flex min-h-11 w-full items-center gap-3 rounded-[7px] border border-border-strong bg-control px-4 py-2.5 text-left text-ink no-underline transition-colors duration-150 ease-out hover:bg-control-hover sm:w-auto;
+  }
+
+  .download-button[data-primary="true"] {
+    @apply border-transparent bg-accent-strong text-white hover:bg-[#4585d6];
+  }
+
+  .download-button:focus-visible {
+    box-shadow: 0 0 0 3px rgba(76, 154, 255, 0.18);
+  }
+
+  .screenshot {
+    @apply block overflow-hidden rounded-[10px] border border-border bg-chrome transition-colors duration-150 ease-out hover:border-border-strong;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .text-link,
+    .download-button,
+    .screenshot {
+      transition: none;
+    }
+  }
+}
