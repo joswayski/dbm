@@ -52,8 +52,19 @@ jobs:
           sha="${REQUESTED_SHA:-$GITHUB_SHA}"
           [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "git_sha must be a full lowercase SHA." >&2; exit 1; }
           git merge-base --is-ancestor "$sha" "$GITHUB_SHA" || { echo "Commit is not on main." >&2; exit 1; }
-          tested="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/mobile.yml/runs?head_sha=$sha&branch=main&event=push&status=success&per_page=1" --jq '.workflow_runs | length')"
-          [[ "$tested" -gt 0 ]] || { echo "This exact main commit needs passing Mobile development builds before release." >&2; exit 1; }
+          # Mobile development builds only run when mobile files change (these
+          # paths match mobile.yml's push filter), so a later commit that changes
+          # none of them is releasable from the newest passing build before it.
+          mobile_paths=(':(glob)apps/native/android/**' ':(glob)apps/native/ios/**' ':(glob)apps/native/bridge/**'
+            ':(glob)crates/dbm-core/**' ':(glob)Cargo.*' ':(glob).github/workflows/mobile*.yml'
+            ':(glob)scripts/*mobile*' 'scripts/testflight-distribute.py' 'scripts/play-upload.py')
+          tested=""
+          for candidate in $(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/mobile.yml/runs?branch=main&event=push&status=success&per_page=100" --jq '.workflow_runs[].head_sha'); do
+            git merge-base --is-ancestor "$candidate" "$sha" || continue
+            if git diff --quiet "$candidate" "$sha" -- "${mobile_paths[@]}"; then tested="$candidate"; break; fi
+          done
+          [[ -n "$tested" ]] || { echo "Mobile files at this commit need passing Mobile development builds on main before release." >&2; exit 1; }
+          [[ "$tested" == "$sha" ]] || echo "Mobile files are unchanged since $tested, which passed Mobile development builds."
           # Re-runs also upgrade an installed APK; reserve two digits for attempts.
           [[ "$GITHUB_RUN_ATTEMPT" -lt 100 ]] || { echo "Start a new release run after attempt 99." >&2; exit 1; }
           build=$((GITHUB_RUN_NUMBER * 100 + GITHUB_RUN_ATTEMPT))
@@ -238,7 +249,10 @@ jobs:
           if gh release view mobile-latest --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             gh release delete mobile-latest --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes
           fi
-          gh release create mobile-latest --repo "$GITHUB_REPOSITORY" --target "$RELEASE_SHA" \
+          # The tag goes on main's head: GITHUB_TOKEN may not create a tag on an older
+          # commit whose workflow files differ from main (HTTP 403). The notes and
+          # BUILD.json name the released commit.
+          gh release create mobile-latest --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
             --prerelease --latest=false --title 'DBM mobile (latest)' \
             --notes "Signed Android build from $RELEASE_SHA. Install and update through Google Play internal testing: https://play.google.com/apps/testing/com.dbm.nativeapp (tester enrollment required). If the Play upload was saved as a draft, roll it out in Play Console first. The APK below is an alternative download, not the Play install. iPhone delivery runs separately through TestFlight; check this run's iPhone job for its result. Native clients remain read-only and require verified TLS. Desktop downloads and updates are unchanged." \
             release/DBM-Android.apk release/BUILD.json release/SHA256SUMS
