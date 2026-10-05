@@ -133,8 +133,10 @@ jobs:
 
   appkit:
     name: AppKit (macos-14)
-    needs: route
-    runs-on: ${{ needs.route.outputs.mac == 'true' && fromJSON('["self-hosted","josemac"]') || 'macos-14' }}
+    # Stays on GitHub-hosted macOS: the self-hosted VM's Xcode 27 linker rejects
+    # the x86_64 bridge dylib ("mis-aligned LINKEDIT string pool") while the
+    # hosted macos-14 toolchain links it. Route it again once that is fixed.
+    runs-on: macos-14
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
