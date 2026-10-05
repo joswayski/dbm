@@ -1,8 +1,7 @@
 name: Mobile development builds
 
+# Runs on main only; pull requests get no CI. Use "Run workflow" to test a branch.
 on:
-  pull_request:
-    paths: ['apps/native/android/**', 'apps/native/ios/**', 'apps/native/bridge/**', 'crates/dbm-core/**', 'Cargo.*', '.github/workflows/mobile*.yml', 'scripts/*mobile*', 'scripts/testflight-distribute.py', 'scripts/play-upload.py']
   push:
     branches: [main]
     paths: ['apps/native/android/**', 'apps/native/ios/**', 'apps/native/bridge/**', 'crates/dbm-core/**', 'Cargo.*', '.github/workflows/mobile*.yml', 'scripts/*mobile*', 'scripts/testflight-distribute.py', 'scripts/play-upload.py']
@@ -12,12 +11,11 @@ on:
 permissions:
   contents: read
   actions: write
-# A new push to a pull request supersedes its in-flight run. On main (and manual
-# runs) the running build always finishes and only the newest waiting run goes
+# On main (and manual runs) the running build always finishes and only the newest waiting run goes
 # next (GitHub replaces older pending runs in the group), so nothing piles up.
 concurrency:
-  group: mobile-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: mobile-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   route:

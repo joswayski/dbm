@@ -85,6 +85,10 @@ CI (`.github/workflows/ci.yml`) runs these on macOS, Windows, and Linux, builds
 the universal AppKit app with fixture snapshots, and builds the Windows NSIS
 installer from a stand-in executable.
 
+CI runs on pushes to `main` only, not on pull requests, so run these checks
+locally before merging. To run CI on another branch, use "Run workflow" on the
+CI or mobile workflow in GitHub Actions.
+
 The separate [mobile workflow](../.github/workflows/mobile.yml) is configured to
 build/lint/test Android, run its emulator UI test, build/test the iPhone
 Simulator client, compile the iPhone Rust archive, and retain development
