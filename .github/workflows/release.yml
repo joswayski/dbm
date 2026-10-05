@@ -96,7 +96,7 @@ jobs:
             gh api --method POST "repos/${GITHUB_REPOSITORY}/releases" \
               -f tag_name="$TAG" \
               -f target_commitish="$RELEASE_SHA" \
-              -f name="DBM $DISPLAY_VERSION" \
+              -f name="Anybase $DISPLAY_VERSION" \
               -F body=@"$notes_file" \
               -F draft=true \
               --jq .id
@@ -177,18 +177,18 @@ jobs:
             printf 'APPLE_API_KEY=%s\n' "$APPLE_API_KEY"
             printf 'APPLE_API_KEY_PATH=%s\n' "$api_key_path"
           } >> "$GITHUB_ENV"
-      - name: Build and sign DBM.app (Apple Silicon and Intel)
+      - name: Build and sign Anybase.app (Apple Silicon and Intel)
         env:
           DBM_UNIVERSAL: 1
         run: |
           bash apps/native/macos/build.sh
-          lipo -archs target/native/DBM.app/Contents/MacOS/dbm | grep -qw x86_64
-          lipo -archs target/native/DBM.app/Contents/MacOS/dbm | grep -qw arm64
+          lipo -archs target/native/Anybase.app/Contents/MacOS/dbm | grep -qw x86_64
+          lipo -archs target/native/Anybase.app/Contents/MacOS/dbm | grep -qw arm64
       - name: Notarize and staple the app, then package it
         shell: bash
         run: |
           set -euo pipefail
-          app="target/native/DBM.app"
+          app="target/native/Anybase.app"
           out="target/native/release"
           mkdir -p "$out"
           notarize() {
@@ -203,17 +203,22 @@ jobs:
           xcrun stapler validate "$app"
           spctl --assess --type execute --verbose=2 "$app"
 
-          # The native updater's archive, and the one the Tauri updater
-          # extracts over an installed DBM.app.
+          # The native updater's archive (it installs whichever .app it holds
+          # at the existing install's path), and the one the Tauri updater
+          # extracts over an installed DBM.app. That tarball keeps its DBM.app
+          # folder name, exactly as those installs expect.
           ditto -c -k --keepParent "$app" "$out/DBM-macOS.zip"
-          COPYFILE_DISABLE=1 tar --no-mac-metadata -C target/native -czf "$out/DBM.app.tar.gz" DBM.app
+          COPYFILE_DISABLE=1 tar --no-mac-metadata -s '|^Anybase\.app|DBM.app|' \
+            -C target/native -czf "$out/DBM.app.tar.gz" Anybase.app
+          outside="$(tar -tzf "$out/DBM.app.tar.gz" | grep -cv '^DBM\.app/' || true)"
+          [[ "$outside" == 0 ]] || { echo "DBM.app.tar.gz has entries outside DBM.app/" >&2; exit 1; }
 
           # A drag-to-Applications disk image for first installs.
           staging="$RUNNER_TEMP/dmg"
           mkdir -p "$staging"
           cp -R "$app" "$staging/"
           ln -s /Applications "$staging/Applications"
-          hdiutil create -volname "DBM" -srcfolder "$staging" -ov \
+          hdiutil create -volname "Anybase" -srcfolder "$staging" -ov \
             -format UDZO "$out/DBM-macOS.dmg"
           codesign --force --timestamp --sign "$DBM_SIGNING_IDENTITY" "$out/DBM-macOS.dmg"
           notarize "$out/DBM-macOS.dmg"

@@ -4,7 +4,7 @@ A fast database client for PostgreSQL, MySQL, and Redis. Native desktop apps
 are released for macOS, Windows, and Linux; Android Compose and iPhone SwiftUI
 clients are in development.
 
-**[anyba.se](https://anyba.se)**. Formerly DBM: the apps, downloads, and this
+**[anyba.se](https://anyba.se)**. Formerly DBM: download file names and this
 repository still use the DBM name while [the rename](docs/anybase-migration.md)
 rolls out.
 
@@ -19,7 +19,7 @@ rolls out.
 > The Windows installer is not code-signed yet, so SmartScreen may warn on
 > first install. The macOS app is signed and notarized.
 
-![Editing a table in DBM, with a before/after preview of a staged change](docs/screenshots/change-preview.png)
+![Editing a table in Anybase, with a before/after preview of a staged change](docs/screenshots/change-preview.png)
 
 | | |
 | --- | --- |

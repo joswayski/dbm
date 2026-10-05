@@ -6,7 +6,7 @@ struct ConnectionsView: View {
     @State private var deleting: Profile?
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 9) { Image(systemName: "cylinder").foregroundStyle(Graphite.accent); Text("DBM").font(.custom("Geist-Regular", size: 17).weight(.semibold)); Spacer(); if model.isDemo { Text("DEMO").font(.custom("Geist-Regular", size: 10).weight(.semibold)).foregroundStyle(Graphite.accent) } }.padding(.horizontal, 16).frame(height: 50).graphitePanel(Graphite.sidebar)
+            HStack(spacing: 9) { Image(systemName: "cylinder").foregroundStyle(Graphite.accent); Text("Anybase").font(.custom("Geist-Regular", size: 17).weight(.semibold)); Spacer(); if model.isDemo { Text("DEMO").font(.custom("Geist-Regular", size: 10).weight(.semibold)).foregroundStyle(Graphite.accent) } }.padding(.horizontal, 16).frame(height: 50).graphitePanel(Graphite.sidebar)
             HStack { Text("Connections").font(.custom("Geist-Regular", size: 11).weight(.semibold)).foregroundStyle(Graphite.muted); Spacer() }.padding(.horizontal, 16).frame(height: 34)
             ScrollView {
                 LazyVStack(spacing: 3) {

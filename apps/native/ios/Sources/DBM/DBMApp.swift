@@ -18,7 +18,7 @@ struct DBMApp: App {
 }
 
 struct PrivacyCover: View {
-    var body: some View { ZStack { Graphite.bg.ignoresSafeArea(); VStack(spacing: 12) { Image(systemName: "lock.fill").font(.largeTitle); Text("DBM Locked").font(.custom("Geist-Regular", size: 20).weight(.semibold)) } }.accessibilityLabel("DBM content hidden") }
+    var body: some View { ZStack { Graphite.bg.ignoresSafeArea(); VStack(spacing: 12) { Image(systemName: "lock.fill").font(.largeTitle); Text("Anybase Locked").font(.custom("Geist-Regular", size: 20).weight(.semibold)) } }.accessibilityLabel("Anybase content hidden") }
 }
 
 struct RootView: View {
@@ -30,6 +30,6 @@ struct RootView: View {
             if model.loading { ProgressView().padding(20).background(.ultraThinMaterial).clipShape(RoundedRectangle(cornerRadius: 12)).accessibilityLabel("Loading") }
         }
         .font(.custom("Geist-Regular", size: 13)).foregroundStyle(Graphite.text)
-        .alert("DBM", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) { Button("OK") { model.error = nil } } message: { Text(model.error ?? "") }
+        .alert("Anybase", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) { Button("OK") { model.error = nil } } message: { Text(model.error ?? "") }
     }
 }

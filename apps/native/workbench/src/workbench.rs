@@ -1226,9 +1226,9 @@ impl eframe::App for Workbench {
             if dirty || writing {
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
                 self.show_error(if dirty {
-                    "Save or discard staged changes before closing DBM."
+                    "Save or discard staged changes before closing Anybase."
                 } else {
-                    "Wait for the save or export to finish before closing DBM."
+                    "Wait for the save or export to finish before closing Anybase."
                 });
             }
         }
@@ -1339,7 +1339,7 @@ impl Workbench {
                         theme::ACCENT_TEXT,
                     );
                     ui.label(
-                        RichText::new("DBM")
+                        RichText::new("Anybase")
                             .font(theme::semibold(13.0))
                             .color(theme::TEXT_STRONG),
                     );
@@ -2993,7 +2993,7 @@ impl Workbench {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if !result.columns.is_empty() {
                             chip(ui, "Read-only result", theme::MUTED).on_hover_text(
-                                "This query does not resolve to one complete table, so DBM cannot safely map edits back to rows.",
+                                "This query does not resolve to one complete table, so Anybase cannot safely map edits back to rows.",
                             );
                         }
                         if result.truncated {
@@ -3290,7 +3290,7 @@ impl Workbench {
                 dialog_title(
                     ui,
                     None,
-                    &format!("Install DBM {} and restart now?", update.version),
+                    &format!("Install Anybase {} and restart now?", update.version),
                 );
                 ui.label(
                     RichText::new("Unsaved query text and pending table edits will be lost.")
@@ -3659,7 +3659,9 @@ impl Workbench {
                     "Read-only profile (blocks GUI edits and mutations)",
                 );
                 ui.checkbox(&mut form.open_on_startup, "Open on startup")
-                    .on_hover_text("Connect to this profile's saved database when DBM launches.");
+                    .on_hover_text(
+                        "Connect to this profile's saved database when Anybase launches.",
+                    );
             });
             if let Some((kind, message)) = &form.feedback {
                 // `.modal-feedback.{info,success,error}`: a tinted box.
@@ -3700,7 +3702,7 @@ impl Workbench {
                 .show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     ui.label(
-                        RichText::new("Passwords are stored in your operating system credential manager and are never written to DBM's profile database.")
+                        RichText::new("Passwords are stored in your operating system credential manager and are never written to Anybase's profile database.")
                             .font(ui_font(11.5))
                             .color(theme::FAINT),
                     );

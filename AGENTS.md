@@ -2,7 +2,7 @@
 
 ## Product
 
-- DBM (being renamed Anybase) is a database client. AppKit macOS and egui Windows/Linux
+- Anybase (formerly DBM) is a database client. AppKit macOS and egui Windows/Linux
   are released desktop apps; Compose Android and SwiftUI iPhone are development
   clients, not store releases or desktop-parity products.
 - The current milestone is PostgreSQL, MySQL, and Redis: saved connections, schema or keyspace exploration, paginated table and key browsing, SQL/Redis workbench tabs, PK-backed or key-backed edits, and safe local profile storage.
@@ -21,7 +21,7 @@
 - `docs/` holds features, development setup, releases (signing, notarization, publishing), the native architecture, the design system, and screenshots.
 - `scripts/release.mjs` picks release versions and notes for the release workflow.
 - `apps/web` is the anyba.se website (static TanStack Start on a Cloudflare Worker). Changes there do not publish a desktop release.
-- DBM is being renamed Anybase; follow `docs/anybase-migration.md`, and never change the identifiers it lists under "Never change".
+- The app is named Anybase in everything users see; many internal identifiers still say DBM. Follow `docs/anybase-migration.md`, and never change the identifiers it lists under "Never change".
 - The Tauri/React app was removed; its installs update onto the native apps through `latest.json` (see `docs/releases.md`). Keep that path working.
 
 ## Working conventions
@@ -37,7 +37,7 @@
 
 ## Visual design
 
-- DBM uses the Graphite design system (`docs/design-system.md`): neutral graphite surfaces, hairline borders, Geist / Geist Mono (bundled, never fetched at runtime), and a system-blue accent for focus, selection, and the single primary action. Keep the AppKit and egui themes and the doc in sync.
+- Anybase uses the Graphite design system (`docs/design-system.md`): neutral graphite surfaces, hairline borders, Geist / Geist Mono (bundled, never fetched at runtime), and a system-blue accent for focus, selection, and the single primary action. Keep the AppKit and egui themes and the doc in sync.
 - Connection identity is multi-color: each profile has its own color for sidebar, tabs, and main-pane theming. Do not force a single accent across all connections.
 - Establish hierarchy with typography, spacing, and dense-but-readable layout before adding color. Prefer restrained shadows, small corner radii, and concise UI copy.
 - Preserve accessible contrast on dark surfaces. State colors keep stable meanings: `--modified` for staged edits, `--danger` for staged deletes and destructive actions, `--success` for success (and future inserts).
@@ -78,7 +78,7 @@
   ```sh
   cargo test --workspace
   cargo run --manifest-path apps/native/workbench/Cargo.toml --release -- --demo   # Windows/Linux app, fixture data
-  bash apps/native/macos/build.sh && open target/native/DBM.app                    # macOS app
+  bash apps/native/macos/build.sh && open target/native/Anybase.app                # macOS app
   node --test scripts/release.test.mjs                                             # release versioning
   ```
 

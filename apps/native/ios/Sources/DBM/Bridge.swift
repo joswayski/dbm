@@ -87,6 +87,7 @@ final class Bridge: @unchecked Sendable {
     private static func storeURL() throws -> URL {
         let support = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
                                                   appropriateFor: nil, create: true)
+        // Profiles and history live here; keep the pre-rename name (docs/anybase-migration.md).
         let directory = support.appending(path: "DBM", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
                                                 attributes: [.protectionKey: FileProtectionType.complete])

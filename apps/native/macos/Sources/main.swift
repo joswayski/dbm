@@ -76,7 +76,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, Qu
             return
         }
         let alert = NSAlert()
-        alert.messageText = "Install DBM \(string(update["version"])) and restart now?"
+        alert.messageText = "Install Anybase \(string(update["version"])) and restart now?"
         alert.informativeText = "Unsaved query text and pending table edits will be lost."
         alert.addButton(withTitle: "Install and Restart")
         alert.addButton(withTitle: "Later")
@@ -88,7 +88,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, Qu
     private func buildWindow() {
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 800),
                           styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
-        window.title = demo ? "DBM — DEMO" : "DBM"
+        window.title = demo ? "Anybase — DEMO" : "Anybase"
         window.minSize = NSSize(width: 900, height: 600)
         window.backgroundColor = Graphite.bg
         window.delegate = self
@@ -146,12 +146,12 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, Qu
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if tabs.contains(where: \.dirty) {
-            showError("Save or discard staged changes before closing DBM.")
+            showError("Save or discard staged changes before closing Anybase.")
             return .terminateCancel
         }
         // Reads can be abandoned; a save or export stopped halfway can't.
         if !saving.isEmpty || !exporting.isEmpty {
-            showError("Wait for the save or export to finish before closing DBM.")
+            showError("Wait for the save or export to finish before closing Anybase.")
             return .terminateCancel
         }
         return .terminateNow
@@ -771,10 +771,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, Qu
         let appItem = NSMenuItem()
         menu.addItem(appItem)
         let appMenu = NSMenu()
-        appMenu.addItem(withTitle: "About DBM", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(withTitle: "About Anybase", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "Hide DBM", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
-        appMenu.addItem(withTitle: "Quit DBM", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenu.addItem(withTitle: "Hide Anybase", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        appMenu.addItem(withTitle: "Quit Anybase", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appItem.submenu = appMenu
 
         let fileItem = NSMenuItem()

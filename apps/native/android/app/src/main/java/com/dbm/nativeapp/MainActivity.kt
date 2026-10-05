@@ -110,7 +110,7 @@ private fun engineTitle(value: String) = when(value) { "postgres" -> "PostgreSQL
     var deleting by remember { mutableStateOf<Profile?>(null) }
     Column(Modifier.fillMaxSize().background(Sidebar)) {
         Row(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-            DbIcon(Icon.Database, Accent); Spacer(Modifier.width(9.dp)); Text("DBM", color = TextStrong, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+            DbIcon(Icon.Database, Accent); Spacer(Modifier.width(9.dp)); Text("Anybase", color = TextStrong, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
         }
         Text("Connections", color = Muted, fontWeight = FontWeight.SemiBold, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
         LazyColumn(Modifier.weight(1f).padding(horizontal = 8.dp)) {
@@ -137,10 +137,10 @@ private fun engineTitle(value: String) = when(value) { "postgres" -> "PostgreSQL
         item { Label("Connection color"); Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) { Palette.forEach { hex -> val selected = d.color.equals(hex, true); Box(Modifier.size(30.dp).clip(RoundedCornerShape(15.dp)).then(if(selected) Modifier.border(2.dp, Text, RoundedCornerShape(15.dp)) else Modifier).clickable { vm.editDraft { it.copy(color = hex) } }.testTag("color-$hex"), contentAlignment = Alignment.Center) { Dot(profileColor(hex), true) } }; GField("Custom", d.color, Modifier.width(112.dp)) { vm.editDraft { x -> x.copy(color = it) } } } }
         item { Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) { GField("Host", d.host, Modifier.weight(2f)) { vm.editDraft { x -> x.copy(host = it) } }; GField("Port", d.port, Modifier.weight(1f)) { vm.editDraft { x -> x.copy(port = it) } } } }
         item { Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) { GField(if(d.engine == "redis") "Username (optional)" else "User", d.username, Modifier.weight(1f)) { vm.editDraft { x -> x.copy(username = it) } }; GField(if(d.engine == "redis") "Database index" else "Database", d.database, Modifier.weight(1f)) { vm.editDraft { x -> x.copy(database = it) } } } }
-        item { GField("Password", d.password, password = true, tag = "password") { vm.editDraft { x -> x.copy(password = it) } }; Text("Session only — cleared when DBM leaves the foreground.", color = Faint, fontSize = 11.sp, modifier = Modifier.padding(top = 5.dp)) }
+        item { GField("Password", d.password, password = true, tag = "password") { vm.editDraft { x -> x.copy(password = it) } }; Text("Session only — cleared when Anybase leaves the foreground.", color = Faint, fontSize = 11.sp, modifier = Modifier.padding(top = 5.dp)) }
         item { Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) { Column(Modifier.weight(1f)) { Label("TLS"); ReadOnlyValue("Required") }; Column(Modifier.weight(1f)) { Label("Access"); ReadOnlyValue("Read-only") } } }
         vm.state.error?.let { item { Feedback(it, Danger) } }; vm.state.message?.let { item { Feedback(it, Success) } }
-        item { Text("Passwords stay in memory and are never written to DBM's profile database.", color = Faint, fontSize = 11.sp) }
+        item { Text("Passwords stay in memory and are never written to Anybase's profile database.", color = Faint, fontSize = 11.sp) }
         item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) { SecondaryButton("Test", enabled = !vm.state.busy, action = vm::test); SecondaryButton("Save", modifier = Modifier.testTag("save"), enabled = !vm.state.busy) { vm.save() }; PrimaryButton("Save & connect", enabled = !vm.state.busy) { vm.save(true) } } }
     }
 }
@@ -156,7 +156,7 @@ private fun engineTitle(value: String) = when(value) { "postgres" -> "PostgreSQL
 @Composable private fun SourceList(vm: DbmViewModel, modifier: Modifier = Modifier, onNavigate: () -> Unit = {}) {
     var filter by remember { mutableStateOf("") }; var databaseMenu by remember { mutableStateOf(false) }; val s = vm.state
     Column(modifier.fillMaxHeight().background(Sidebar).border(0.5.dp, Border)) {
-        Row(Modifier.height(48.dp).fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) { DbIcon(Icon.Database, Accent); Spacer(Modifier.width(8.dp)); Text("DBM", color = TextStrong, fontWeight = FontWeight.SemiBold) }
+        Row(Modifier.height(48.dp).fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) { DbIcon(Icon.Database, Accent); Spacer(Modifier.width(8.dp)); Text("Anybase", color = TextStrong, fontWeight = FontWeight.SemiBold) }
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).testTag("schema")) {
         Text("Connections", color = Muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
         s.profiles.sortedBy { it.id != s.active?.id }.forEach { p ->

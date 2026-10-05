@@ -122,15 +122,15 @@ class DemoNavigationTest {
         compose.waitUntil(10_000) { compose.onAllNodes(hasTestTag("refresh-query") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithTag("editor").assertTextEquals("SHOW DATABASES")
         compose.onNodeWithText("Maya Okafor").assertExists()
-        compose.onNodeWithText("DBM demo").assertDoesNotExist()
+        compose.onNodeWithText("Anybase demo").assertDoesNotExist()
         capture("query-refresh")
         compose.onNodeWithTag("run").performClick()
-        compose.waitUntil(10_000) { compose.onAllNodesWithText("DBM demo").fetchSemanticsNodes().isNotEmpty() }
+        compose.waitUntil(10_000) { compose.onAllNodesWithText("Anybase demo").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("Maya Okafor").assertDoesNotExist()
         compose.onNodeWithTag("editor").performTextReplacement("SELECT 1")
         compose.onNodeWithTag("refresh-query").performClick()
         compose.waitUntil(10_000) { compose.onAllNodes(hasTestTag("refresh-query") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
-        compose.onNodeWithText("DBM demo").assertExists()
+        compose.onNodeWithText("Anybase demo").assertExists()
         compose.onNodeWithTag("editor").assertTextEquals("SELECT 1")
     }
 

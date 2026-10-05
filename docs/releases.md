@@ -1,6 +1,6 @@
-# DBM releases
+# Anybase releases
 
-DBM distributes the native apps directly through GitHub Releases:
+Anybase distributes the native apps directly through GitHub Releases:
 
 - macOS: the AppKit app as a DMG (Apple Silicon and Intel in one app);
 - Windows: the egui app as an NSIS `.exe` installer; and
@@ -19,7 +19,7 @@ the CI workflow do not release. Run the workflow manually from the Actions tab
 (**Release → Run workflow** on `main`) to release without a new merge.
 
 These automatic releases are for the maintainer's own machines. Windows builds
-are not Authenticode-signed yet, so the gates below still apply before DBM is
+are not Authenticode-signed yet, so the gates below still apply before Anybase is
 promoted to a wider audience.
 
 ## How a release is built
@@ -65,8 +65,17 @@ for it and then releases everything merged since.
 | `SHA256SUMS` | Checksums of every asset |
 
 The Windows installer needs no administrator rights: it installs to
-`%LOCALAPPDATA%\DBM\dbm.exe`, adds a Start menu shortcut, and registers an
-uninstaller. There is no `.deb` package.
+`%LOCALAPPDATA%\DBM\dbm.exe`, adds an **Anybase** Start menu shortcut, and
+registers an uninstaller. There is no `.deb` package.
+
+Asset names, the Windows folder and executable, and the uninstall key keep
+their DBM names from before the Anybase rename, so installed copies keep
+updating (see [the rename plan](anybase-migration.md#never-change)). The
+macOS archives hold `Anybase.app`, except `DBM.app.tar.gz`, which keeps the
+`DBM.app` folder name the Tauri updater expects. Updates install over the
+existing copy, so a macOS install made before the rename stays in
+`DBM.app`, and a Windows one keeps its DBM Start menu entry until the
+installer runs again; the app itself shows Anybase either way.
 
 ### Versions
 
@@ -94,7 +103,7 @@ then downloads the platform's artifact, verifies its minisign signature
 against the public key in `crates/dbm-update`, swaps it in, and restarts.
 
 - **macOS:** the new bundle must also pass `codesign --verify`, and is swapped
-  in after DBM quits. The app must sit in a folder the user can write to, such
+  in after Anybase quits. The app must sit in a folder the user can write to, such
   as `/Applications`.
 - **Windows:** the running executable is renamed aside and removed on the next
   launch.
@@ -116,7 +125,7 @@ the manifests and made it the latest release.
 
 ## Migrating from the Tauri app
 
-DBM previously shipped as a Tauri app, while the native apps were published on
+Anybase, as DBM, previously shipped as a Tauri app, while the native apps were published on
 a separate `native-preview` channel. Installs from either move onto the native
 releases without reinstalling:
 
@@ -168,7 +177,7 @@ exported certificates, or temporary signing files.
 
 ## Updater signing
 
-DBM uses a dedicated updater keypair (a minisign key, the format the Tauri
+Anybase uses a dedicated updater keypair (a minisign key, the format the Tauri
 updater used); it does not reuse Captures' key. The public key is committed in
 `crates/dbm-update/src/lib.rs`. It is the key the Tauri app shipped with, so
 Tauri installs accept these updates too. The secrets keep their Tauri-era
@@ -178,11 +187,11 @@ names; the workflow passes them to
 
 | Secret | Value |
 | --- | --- |
-| `TAURI_SIGNING_PRIVATE_KEY` | Complete contents of DBM's dedicated updater private key |
+| `TAURI_SIGNING_PRIVATE_KEY` | Complete contents of Anybase's dedicated updater private key |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Password protecting that private key |
 
 Back up the private key and its password separately in encrypted storage.
-Losing the private key prevents every installed DBM release from authenticating
+Losing the private key prevents every installed Anybase release from authenticating
 future updates. Do not replace the public key after shipping unless an existing
 trusted release first implements a deliberate key rotation.
 
@@ -191,7 +200,7 @@ trusted release first implements a deliberate key rotation.
 Direct distribution outside the Mac App Store requires a Developer ID
 Application signature and Apple notarization. A Developer ID Installer
 certificate is not needed for the DMG; it is used for signed `.pkg` installers.
-The same Developer ID Application identity can sign DBM and Captures, although
+The same Developer ID Application identity can sign Anybase and Captures, although
 each repository must independently protect its release environment and validate
 its output.
 
@@ -229,9 +238,9 @@ credential or validation is missing.
 To check a downloaded release by hand:
 
 ```sh
-codesign --verify --deep --strict --verbose=2 DBM.app
-spctl --assess --type execute --verbose=2 DBM.app
-xcrun stapler validate DBM.app
+codesign --verify --deep --strict --verbose=2 Anybase.app
+spctl --assess --type execute --verbose=2 Anybase.app
+xcrun stapler validate Anybase.app
 codesign --verify --strict --verbose=2 DBM-macOS.dmg
 spctl --assess --type open --context context:primary-signature --verbose=2 DBM-macOS.dmg
 xcrun stapler validate DBM-macOS.dmg
@@ -248,7 +257,7 @@ Trust** because its private signing keys stay in Microsoft's managed service
 instead of being exported into GitHub.
 
 One Artifact Signing account, validated identity, and Public Trust certificate
-profile can serve both DBM and Captures.
+profile can serve both Anybase and Captures.
 
 ### Account setup
 
@@ -311,7 +320,7 @@ exportable `.pfx` is permitted.
 ## Linux publication integrity
 
 Linux has no single platform-wide publisher certificate comparable to Apple
-Developer ID or Windows Authenticode. For DBM's direct GitHub Release downloads,
+Developer ID or Windows Authenticode. For Anybase's direct GitHub Release downloads,
 the publication gate is verifiable integrity and provenance. The release
 workflow builds every artifact from the tagged commit, writes `SHA256SUMS`
 over the final assets, and attests build provenance for all of them with
@@ -333,7 +342,7 @@ replacement for checksums and build provenance.
 
 ## Promoting to a public release
 
-Automatic releases skip the checks below. Before recommending DBM to others:
+Automatic releases skip the checks below. Before recommending Anybase to others:
 
 1. Configure Windows Authenticode signing in the build jobs.
 2. Perform the clean-machine installation checks for macOS, Windows, and

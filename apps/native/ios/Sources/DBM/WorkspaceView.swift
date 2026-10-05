@@ -21,7 +21,7 @@ struct WorkspaceView: View {
             HStack(spacing: 9) {
                 Circle().fill(Color(hex: model.active?.color ?? "#4c9aff")).frame(width: 8, height: 8)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(model.active?.name ?? "DBM").font(.custom("Geist-Regular", size: 13).weight(.semibold))
+                    Text(model.active?.name ?? "Anybase").font(.custom("Geist-Regular", size: 13).weight(.semibold))
                     Text("\(model.active?.engine.title ?? "") · \(model.database)").font(.custom("Geist-Regular", size: 11)).foregroundStyle(Graphite.faint)
                 }
                 Spacer()
@@ -79,7 +79,7 @@ struct SourceList: View {
     @State private var editor: ProfileDraft?
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack { Image(systemName: "cylinder").foregroundStyle(Graphite.accent); Text("DBM").font(.custom("Geist-Regular", size: 14).weight(.semibold)); Spacer(); if let close { Button("Done", action: close) } }.padding(12)
+            HStack { Image(systemName: "cylinder").foregroundStyle(Graphite.accent); Text("Anybase").font(.custom("Geist-Regular", size: 14).weight(.semibold)); Spacer(); if let close { Button("Done", action: close) } }.padding(12)
             ScrollView {
             VStack(alignment: .leading, spacing: 0) {
             Text("Connections").sectionLabel()

@@ -257,7 +257,7 @@ impl DemoStore {
             let ping = sql.trim() == "ping";
             (
                 vec![column(if ping { "value" } else { "result" }, "text")],
-                vec![vec![json!(if ping { "PONG" } else { "DBM demo" })]],
+                vec![vec![json!(if ping { "PONG" } else { "Anybase demo" })]],
                 None,
                 2,
             )

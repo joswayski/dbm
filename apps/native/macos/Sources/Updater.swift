@@ -71,7 +71,7 @@ final class Updater {
     func install(_ update: [String: Any]) {
         let current = Bundle.main.bundleURL
         guard FileManager.default.isWritableFile(atPath: current.deletingLastPathComponent().path) else {
-            state = .failed("Move DBM into a folder you can write to, such as Applications, to update it.")
+            state = .failed("Move Anybase into a folder you can write to, such as Applications, to update it.")
             return
         }
         state = .installing

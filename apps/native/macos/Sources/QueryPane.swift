@@ -651,7 +651,7 @@ final class QueryPane: NSView, NSTextViewDelegate, NSSplitViewDelegate {
         resultMeta.stringValue = "\(int(result["rowCount"])) rows\(affected) · \(duration) ms"
         truncatedChip.isHidden = !bool(result["truncated"])
         readOnlyChip.isHidden = columns.isEmpty
-        readOnlyChip.toolTip = "This query does not resolve to one complete table, so DBM cannot safely map edits back to rows."
+        readOnlyChip.toolTip = "This query does not resolve to one complete table, so Anybase cannot safely map edits back to rows."
         resultCard.isHidden = columns.isEmpty
         if columns.isEmpty {
             placeholder.stringValue = "Statement completed without a result set."

@@ -152,11 +152,11 @@ jobs:
           DBM_UNIVERSAL: 1
         run: bash apps/native/macos/build.sh
       - name: Archive the AppKit app
-        run: ditto -c -k --keepParent target/native/DBM.app target/native/DBM-macos.zip
+        run: ditto -c -k --keepParent target/native/Anybase.app target/native/DBM-macos.zip
       - name: Render isolated AppKit fixture states
         run: |
           mkdir -p target/native/snapshots
-          python3 -c 'import subprocess; subprocess.run(["target/native/DBM.app/Contents/MacOS/dbm", "--demo", "--snapshot-dir", "target/native/snapshots"], check=True, timeout=120)'
+          python3 -c 'import subprocess; subprocess.run(["target/native/Anybase.app/Contents/MacOS/dbm", "--demo", "--snapshot-dir", "target/native/snapshots"], check=True, timeout=120)'
       - uses: actions/upload-artifact@v4
         if: always()
         with:

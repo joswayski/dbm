@@ -153,7 +153,7 @@ final class SidebarView: PanelView {
         badge.radius = 6
         badge.pin(IconView(.database, size: 14, color: .white), insets: NSEdgeInsets(top: 4, left: 4, bottom: 4, right: 4))
         let collapse = GButton("", icon: .sidebar, style: .icon, tooltip: "Collapse sidebar") { [weak self] in self?.setCollapsed(true) }
-        let brand = hstack([badge, label("DBM", font: Graphite.ui(14, .semibold), color: Graphite.textStrong), spacer(), collapse], spacing: 8)
+        let brand = hstack([badge, label("Anybase", font: Graphite.ui(14, .semibold), color: Graphite.textStrong), spacer(), collapse], spacing: 8)
         let connections = label("Connections", font: Graphite.ui(11, .semibold), color: Graphite.muted)
         let scroll = verticalScroll(list)
         let newConnection = GButton("New connection", icon: .plus, style: .secondary) { [weak app] in app?.newProfile() }
