@@ -1,8 +1,8 @@
 # Anybase
 
-A fast, local-first database manager for PostgreSQL, MySQL, and Redis. Native
-desktop apps are released for macOS, Windows, and Linux; Android Compose and
-iPhone SwiftUI clients are in development.
+A fast database client for PostgreSQL, MySQL, and Redis. Native desktop apps
+are released for macOS, Windows, and Linux; Android Compose and iPhone SwiftUI
+clients are in development.
 
 **[anyba.se](https://anyba.se)**. Formerly DBM: the apps, downloads, and this
 repository still use the DBM name while [the rename](docs/anybase-migration.md)

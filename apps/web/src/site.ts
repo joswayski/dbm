@@ -1,20 +1,17 @@
 export const PRODUCT_NAME = "Anybase";
 export const SITE_URL = "https://anyba.se";
-export const SITE_DESCRIPTION =
-  "A fast, local-first database manager for PostgreSQL, MySQL, and Redis.";
+export const SITE_DESCRIPTION = "A fast database client for PostgreSQL, MySQL, and Redis.";
 
 /** The repository keeps its old name until the GitHub rename (docs/anybase-migration.md). */
 export const REPOSITORY = "joswayski/dbm";
 export const REPO_URL = `https://github.com/${REPOSITORY}`;
-export const RELEASES_URL = `${REPO_URL}/releases`;
 export const AUTHOR_URL = "https://josevalerio.com";
 
 export const FEATURES = [
   "Browse databases, schemas, tables, and Redis keys, with filters, sorting, and CSV export.",
   "Edit rows safely: changes are staged, previewed, and saved together.",
   "SQL and Redis workbench tabs with per-connection history.",
-  "Passwords stay in your OS credential store.",
-  "Your connections, history, and data stay on your machine. No telemetry, accounts, or sync.",
+  "Color-coded connections, with passwords kept in your OS keychain.",
 ] as const;
 
 export const SCREENSHOTS = [

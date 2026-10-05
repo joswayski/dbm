@@ -35,7 +35,8 @@ Change only what people read; keep every identifier in
   (`%LOCALAPPDATA%\DBM`), the `UNINSTALL_KEY`, and `dbm.exe`, so upgrades land on
   top of existing installs instead of beside them. Delete the old `DBM.lnk` when
   writing the new shortcut.
-- Linux: `Name=` in the AppImage desktop entry (`apps/native/workbench/appimage.sh`).
+- Linux: `Name=` and `Comment=` (now "Database manager"; make it "Database client")
+  in the AppImage desktop entry (`apps/native/workbench/appimage.sh`).
 - egui window title and About text; update and release-note copy.
 - Mobile display names (`app_name` on Android, `CFBundleDisplayName` on iPhone).
 - Refresh `docs/screenshots` (and the website's WebP copies) once the sidebar

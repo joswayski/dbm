@@ -104,26 +104,43 @@
   }
 
   .download-button {
-    @apply inline-flex min-h-11 w-full items-center gap-3 rounded-[7px] border border-border-strong bg-control px-4 py-2.5 text-left text-ink no-underline transition-colors duration-150 ease-out hover:bg-control-hover sm:w-auto;
+    @apply inline-flex min-h-11 w-full items-center justify-center gap-2.5 rounded-[7px] bg-accent-strong px-5 py-2.5 text-sm font-semibold text-white no-underline transition-colors duration-150 ease-out hover:bg-[#4585d6] sm:w-auto;
   }
 
-  .download-button[data-primary="true"] {
-    @apply border-transparent bg-accent-strong text-white hover:bg-[#4585d6];
-  }
-
-  .download-button:focus-visible {
-    box-shadow: 0 0 0 3px rgba(76, 154, 255, 0.18);
+  .download-button:focus-visible,
+  .viewer-button:focus-visible,
+  .screenshot:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
   }
 
   .screenshot {
-    @apply block overflow-hidden rounded-[10px] border border-border bg-chrome transition-colors duration-150 ease-out hover:border-border-strong;
+    @apply block cursor-zoom-in overflow-hidden rounded-[10px] border border-border bg-chrome p-0 transition-colors duration-150 ease-out hover:border-border-strong;
     box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+  }
+
+  .screenshot-viewer {
+    @apply fixed inset-0 m-0 h-dvh max-h-none w-full max-w-none border-0 bg-transparent p-0 text-ink;
+  }
+
+  .screenshot-viewer::backdrop {
+    background: rgba(12, 12, 14, 0.88);
+    backdrop-filter: blur(6px);
+  }
+
+  .screenshot-viewer-body {
+    @apply relative flex h-full w-full items-center justify-center px-4 py-16 sm:px-10;
+  }
+
+  .viewer-button {
+    @apply inline-flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full border border-border-strong bg-control text-ink-secondary transition-colors duration-150 ease-out hover:bg-control-hover hover:text-ink-strong;
   }
 
   @media (prefers-reduced-motion: reduce) {
     .text-link,
     .download-button,
-    .screenshot {
+    .screenshot,
+    .viewer-button {
       transition: none;
     }
   }

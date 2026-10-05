@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { detectDownload, DOWNLOADS, type DownloadId } from "../downloads";
 import { formatRelativeTime, type LatestChange } from "../latestChanges";
-import { AUTHOR_URL, FEATURES, PRODUCT_NAME, RELEASES_URL, REPO_URL, SCREENSHOTS } from "../site";
+import { AUTHOR_URL, FEATURES, PRODUCT_NAME, REPO_URL, SCREENSHOTS } from "../site";
 import { AppleIcon, GitHubIcon, LinuxIcon, WindowsIcon } from "./icons";
+import { ScreenshotViewer } from "./ScreenshotViewer";
 
 type HomeProps = {
   latestChanges: readonly LatestChange[];
@@ -11,11 +12,14 @@ type HomeProps = {
 
 export function Home({ latestChanges, builtAt }: HomeProps) {
   const [now, setNow] = useState(builtAt);
-  const [detected, setDetected] = useState<DownloadId | null>(null);
+  // undefined until the browser has been checked; null for phones and unknown systems.
+  const [platform, setPlatform] = useState<DownloadId | null | undefined>(undefined);
+  const [viewing, setViewing] = useState<number | null>(null);
+  const closeViewer = useCallback(() => setViewing(null), []);
 
   useEffect(() => {
     const nav = navigator as Navigator & { userAgentData?: { platform?: string } };
-    setDetected(
+    setPlatform(
       detectDownload({
         userAgent: nav.userAgent,
         platform: nav.userAgentData?.platform,
@@ -52,62 +56,36 @@ export function Home({ latestChanges, builtAt }: HomeProps) {
         </div>
 
         <p className="mt-5 max-w-xl text-[0.9375rem] leading-relaxed text-ink-secondary">
-          A fast, local-first database manager for PostgreSQL, MySQL, and Redis, by{" "}
+          A fast database client for PostgreSQL, MySQL, and Redis, by{" "}
           <a href={AUTHOR_URL} target="_blank" rel="noreferrer" className="text-link">
             Jose Valerio
           </a>
           .
         </p>
-        <p className="mt-2 font-mono text-xs text-ink-faint">Formerly DBM.</p>
+
+        <div className="mt-8 min-h-11">
+          <DownloadAction platform={platform} />
+        </div>
       </header>
 
-      <section aria-labelledby="download-heading" className="mt-12 border-t border-border pt-10">
-        <h2 id="download-heading" className="text-base font-semibold tracking-tight text-ink-strong sm:text-lg">
-          Download
-        </h2>
-        <p className="mt-3 max-w-xl text-sm leading-relaxed text-ink-muted">
-          Native desktop apps for macOS, Windows, and Linux. Each merge to <code className="font-mono text-[0.8125rem] text-ink-secondary">main</code>{" "}
-          ships a new release, and installed apps update themselves.
-        </p>
-
-        <div className="mt-6 flex flex-col gap-2.5 sm:flex-row sm:flex-wrap">
-          {DOWNLOADS.map((download) => (
-            <a
-              key={download.id}
-              href={download.href}
-              className="download-button"
-              data-primary={download.id === detected}
-            >
-              <PlatformIcon id={download.id} />
-              <span className="flex flex-col leading-tight">
-                <span className="text-sm font-semibold">{download.platform}</span>
-                <span
-                  className={`font-mono text-[0.6875rem] ${download.id === detected ? "text-white/75" : "text-ink-faint"}`}
-                >
-                  {download.detail}
-                </span>
-              </span>
-            </a>
-          ))}
-        </div>
-
-        <p className="mt-4 text-xs leading-relaxed text-ink-faint">
-          The macOS app is signed and notarized. The Windows installer isn't code-signed yet, so
-          SmartScreen may warn on first install.{" "}
-          <a href={RELEASES_URL} target="_blank" rel="noreferrer" className="text-ink-muted underline-offset-4 hover:text-accent-text hover:underline">
-            All releases
-          </a>
-        </p>
-      </section>
-
       <section aria-label="Screenshots" className="mt-12">
-        <a href={hero.src} target="_blank" rel="noreferrer" className="screenshot">
+        <button
+          type="button"
+          className="screenshot w-full"
+          aria-label={`View screenshot: ${hero.caption}`}
+          onClick={() => setViewing(0)}
+        >
           <img src={hero.src} alt={hero.alt} width={1600} height={1000} className="block h-auto w-full" />
-        </a>
+        </button>
         <ul className="mt-3 grid grid-cols-2 gap-3">
-          {gallery.map((shot) => (
+          {gallery.map((shot, index) => (
             <li key={shot.src}>
-              <a href={shot.src} target="_blank" rel="noreferrer" className="screenshot">
+              <button
+                type="button"
+                className="screenshot w-full"
+                aria-label={`View screenshot: ${shot.caption}`}
+                onClick={() => setViewing(index + 1)}
+              >
                 <img
                   src={shot.src}
                   alt={shot.alt}
@@ -116,11 +94,12 @@ export function Home({ latestChanges, builtAt }: HomeProps) {
                   loading="lazy"
                   className="block h-auto w-full"
                 />
-              </a>
+              </button>
               <p className="mt-2 text-xs text-ink-faint">{shot.caption}</p>
             </li>
           ))}
         </ul>
+        <ScreenshotViewer shots={SCREENSHOTS} index={viewing} onIndexChange={setViewing} onClose={closeViewer} />
       </section>
 
       <section aria-labelledby="features-heading" className="mt-14 border-t border-border pt-10">
@@ -159,18 +138,30 @@ export function Home({ latestChanges, builtAt }: HomeProps) {
           ))}
         </ol>
       </section>
-
-      <footer className="mt-16 border-t border-border pt-6 font-mono text-[0.6875rem] text-ink-faint">
-        Apache-2.0 ·{" "}
-        <a href={REPO_URL} target="_blank" rel="noreferrer" className="hover:text-ink-secondary">
-          source
-        </a>{" "}
-        ·{" "}
-        <a href={AUTHOR_URL} target="_blank" rel="noreferrer" className="hover:text-ink-secondary">
-          josevalerio.com
-        </a>
-      </footer>
     </main>
+  );
+}
+
+/** One button for the visitor's desktop; phones get a note instead. */
+function DownloadAction({ platform }: { platform: DownloadId | null | undefined }) {
+  // Prerendered HTML can't know the visitor's system; hold the space until it does.
+  if (platform === undefined) return null;
+
+  const download = DOWNLOADS.find((item) => item.id === platform);
+  if (!download) {
+    return (
+      <p className="text-sm leading-relaxed text-ink-muted">
+        {PRODUCT_NAME} is a desktop app for macOS, Windows, and Linux. Open this page on your
+        computer to download it.
+      </p>
+    );
+  }
+
+  return (
+    <a href={download.href} className="download-button">
+      <PlatformIcon id={download.id} />
+      Download for {download.platform}
+    </a>
   );
 }
 

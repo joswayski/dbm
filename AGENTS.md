@@ -2,12 +2,13 @@
 
 ## Product
 
-- DBM is a local-first database manager. AppKit macOS and egui Windows/Linux
+- DBM (being renamed Anybase) is a database client. AppKit macOS and egui Windows/Linux
   are released desktop apps; Compose Android and SwiftUI iPhone are development
   clients, not store releases or desktop-parity products.
 - The current milestone is PostgreSQL, MySQL, and Redis: saved connections, schema or keyspace exploration, paginated table and key browsing, SQL/Redis workbench tabs, PK-backed or key-backed edits, and safe local profile storage.
 - Clearly separate current features from roadmap ideas. Do not present Redis Sentinel/Cluster, SSH jump hosts, encrypted profile sync, or other follow-ups as shipped unless the repository already implements them.
 - Prefer TablePlus/DataGrip-like defaults when UX is ambiguous: fast path to query, obvious refresh, non-destructive confirms for bulk writes.
+- Public copy (README, anyba.se, store listings, the GitHub description) calls it "a fast database client for PostgreSQL, MySQL, and Redis". Don't market it as local-first or as a database manager; the local-only behavior below still applies.
 
 ## Repository map
 

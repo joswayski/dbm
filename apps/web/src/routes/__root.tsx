@@ -12,7 +12,7 @@ export const Route = createRootRoute({
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { name: "theme-color", content: "#161618" },
-      { title: `${PRODUCT_NAME} — local-first database manager` },
+      { title: `${PRODUCT_NAME} — database client for PostgreSQL, MySQL, and Redis` },
       { name: "description", content: SITE_DESCRIPTION },
       { property: "og:site_name", content: PRODUCT_NAME },
       { property: "og:type", content: "website" },

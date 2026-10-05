@@ -7,19 +7,16 @@ export const DOWNLOADS = [
   {
     id: "macos",
     platform: "macOS",
-    detail: "Apple silicon and Intel",
     href: `${DOWNLOAD_BASE}/DBM-macOS.dmg`,
   },
   {
     id: "windows",
     platform: "Windows",
-    detail: "x64 installer",
     href: `${DOWNLOAD_BASE}/DBM-Windows-x64-setup.exe`,
   },
   {
     id: "linux",
     platform: "Linux",
-    detail: "x86_64 AppImage",
     href: `${DOWNLOAD_BASE}/DBM-Linux-x86_64.AppImage`,
   },
 ] as const;
