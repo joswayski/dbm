@@ -14,8 +14,8 @@ type BuildData = { latestChanges: LatestChange[]; builtAt: number };
 const buildCache = globalThis as typeof globalThis & { __anybaseBuildData?: Promise<BuildData> };
 
 async function loadBuildData(): Promise<BuildData> {
-  const latestChanges = await fetchLatestChanges(REPOSITORY, process.env.GITHUB_TOKEN?.trim());
-  console.log(`Fetched ${latestChanges.length} latest changes from the GitHub API.`);
+  const latestChanges = await fetchLatestChanges(REPOSITORY);
+  console.log(`Fetched ${latestChanges.length} latest changes from GitHub.`);
   return { latestChanges, builtAt: Date.now() };
 }
 

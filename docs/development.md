@@ -139,11 +139,11 @@ remain in memory only. See [mobile privacy and lifecycle](mobile.md#storage-and-
 ## Website
 
 `apps/web` is [anyba.se](https://anyba.se): a TanStack Start site prerendered to
-static files and served by the `anybase-web` Cloudflare Worker. It uses the
+static files and served by the `anybase` Cloudflare Worker. It uses the
 Graphite tokens and the README screenshots (resized to WebP in
-`apps/web/public/screenshots`). The build fetches the newest commits on `main`
-from the GitHub API for **Latest changes**, so it needs network access; set
-`GITHUB_TOKEN` to avoid the unauthenticated rate limit.
+`apps/web/public/screenshots`). The build reads the newest commits on `main` from
+GitHub's public commit feed for **Latest changes**, so it needs network access
+but no token.
 
 ```sh
 cd apps/web

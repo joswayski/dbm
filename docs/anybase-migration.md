@@ -120,7 +120,7 @@ new signing entries in the release pipeline, but no users to move.
 ## Website
 
 `apps/web` is a static [TanStack Start](https://tanstack.com/start) site deployed as
-the Cloudflare Worker `anybase-web`. `wrangler.jsonc` attaches the `anyba.se`
+the Cloudflare Worker `anybase`. `wrangler.jsonc` attaches the `anyba.se`
 custom domain, so the first deploy creates its DNS record and certificate.
 Development commands are in [Development](development.md#website).
 
@@ -129,10 +129,12 @@ zone):
 
 1. Workers & Pages → Create → Import a repository → `joswayski/dbm`.
 2. Root directory `apps/web`, build command `npm run build`, deploy command
-   `npx wrangler deploy`, production branch `main`.
-3. Optional: add a `GITHUB_TOKEN` build variable (a fine-grained token with
-   read-only access to public repositories). Unauthenticated GitHub API calls are
-   limited to 60 an hour per IP, and build machines share IPs.
+   `npx wrangler deploy`, production branch `main`. No build variables are
+   needed: **Latest changes** comes from GitHub's public commit feed.
+
+Keep `name` in `wrangler.jsonc` equal to the dashboard Worker's name (`anybase`).
+Other branches and pull requests get a preview build: Workers Builds runs
+`npx wrangler preview`, which needs the `previews` block in `wrangler.jsonc`.
 
 Every push to `main` then rebuilds the site, which refreshes **Latest changes**.
 Leave build watch paths unrestricted so app-only merges still refresh the list.

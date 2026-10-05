@@ -74,9 +74,7 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
-      - name: Build (fetches Latest changes from the GitHub API)
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
+      - name: Build (fetches Latest changes from GitHub)
         run: npm run build
 
   rust:
