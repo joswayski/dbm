@@ -1,32 +1,30 @@
-# Bundled Geist fonts
+# Bundled Space Mono fonts
 
-These TTF files are the Latin variable Geist/Geist Mono fonts from
-`@fontsource-variable/geist` and `@fontsource-variable/geist-mono`, decompressed
-from WOFF2 without changing glyphs or names. OFL licenses are included
-alongside them. No fonts are fetched at runtime.
+These are unmodified static Space Mono TTFs from
+[Google Fonts](https://github.com/google/fonts/tree/9710da1eacb3be272583c3224dcb70f9da6eadbb/ofl/spacemono),
+licensed under SIL OFL 1.1 (`SpaceMono-LICENSE`). Regular (400) and bold (700)
+serve both UI and code; medium roles use regular, semibold roles use bold.
+macOS also registers the italic and bold italic faces. No fonts are fetched
+at runtime.
 
-To regenerate, download those packages' `files/<name>-latin-wght-normal.woff2`
-into this folder, then:
-
-```sh
-uv run --with fonttools --with brotli python -c '
-from fontTools.ttLib import TTFont
-for name in ("geist", "geist-mono"):
-    font = TTFont(f"{name}-latin-wght-normal.woff2")
-    font.flavor = None
-    font.save(f"{name}.ttf")
-'
-```
-
-`geist-medium.ttf` and `geist-semibold.ttf` are static weight 500 and 600
-instances of `geist.ttf`; egui only draws a variable font's default instance.
+To refresh the assets from the repository root:
 
 ```sh
-uv run --with fonttools python -c '
-from fontTools.ttLib import TTFont
-from fontTools.varLib.instancer import instantiateVariableFont
-for weight, name in ((500, "medium"), (600, "semibold")):
-    font = instantiateVariableFont(TTFont("geist.ttf"), {"wght": weight}, updateFontNames=False)
-    font.save(f"geist-{name}.ttf")
-'
+source=https://raw.githubusercontent.com/google/fonts/9710da1eacb3be272583c3224dcb70f9da6eadbb/ofl/spacemono
+assets=apps/native/workbench/assets
+for face in Regular Bold Italic BoldItalic; do
+  curl -fsSL "$source/SpaceMono-$face.ttf" -o "$assets/SpaceMono-$face.ttf"
+  cp "$assets/SpaceMono-$face.ttf" "apps/native/ios/Resources/Fonts/SpaceMono-$face.ttf"
+  case "$face" in
+    Regular) resource=regular ;; Bold) resource=bold ;;
+    Italic) resource=italic ;; BoldItalic) resource=bold_italic ;;
+  esac
+  cp "$assets/SpaceMono-$face.ttf" "apps/native/android/app/src/main/res/font/space_mono_$resource.ttf"
+done
+curl -fsSL "$source/OFL.txt" -o "$assets/SpaceMono-LICENSE"
+cp "$assets/SpaceMono-LICENSE" apps/native/ios/Resources/SpaceMono-LICENSE.txt
+cp "$assets/SpaceMono-LICENSE" apps/native/android/app/src/main/assets/SpaceMono-LICENSE.txt
 ```
+
+Android and iPhone bundle identical copies. The website uses locally bundled
+WOFF2 faces from `@fontsource/space-mono` instead of a font CDN.

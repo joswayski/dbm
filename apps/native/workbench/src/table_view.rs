@@ -1655,7 +1655,7 @@ fn change_diff(ui: &mut egui::Ui, name: &str, before: &str, after: &str) {
             theme::MUTED,
             Color32::from_rgba_unmultiplied(255, 107, 97, 56),
         );
-        // Geist has no arrow glyph, so the arrow is drawn.
+        // Draw the arrow independently of font glyph coverage.
         ui.vertical(|ui| {
             ui.add_space(26.0);
             icons::show(ui, Icon::ArrowRight, 14.0, theme::FAINT);
