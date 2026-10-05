@@ -124,6 +124,9 @@ the Cloudflare Worker `anybase`. `wrangler.jsonc` attaches the `anyba.se`
 custom domain, so the first deploy creates its DNS record and certificate.
 Development commands are in [Development](development.md#website).
 
+Tap a screenshot to open the in-page viewer. On mobile, pinch to zoom and drag
+to pan while zoomed; swipe between screenshots when zoomed out.
+
 **One-time setup** (Cloudflare dashboard, the account that holds the anyba.se
 zone):
 
