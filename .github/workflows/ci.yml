@@ -1,20 +1,20 @@
 name: CI
 
+# Runs on main only; pull requests get no CI. Use "Run workflow" to test a branch.
 on:
   push:
     branches: [main]
-  pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
   actions: write
 
-# A new push to a pull request supersedes its in-flight run. On main the running
-# build always finishes and only the newest waiting push runs next (GitHub
+# The running build always finishes and only the newest waiting push runs next (GitHub
 # replaces older pending runs in the group), so fast pushes don't pile up.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   route:
@@ -105,8 +105,8 @@ jobs:
         with:
           toolchain: 1.94.0
           components: rustfmt, clippy
-      # Dependencies only (workspace crates always rebuild). Pull requests
-      # restore main's cache but never save, so they cannot evict or poison it.
+      # Dependencies only (workspace crates always rebuild). Manual runs on
+      # other branches restore main's cache but never save, so they cannot evict or poison it.
       - uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
