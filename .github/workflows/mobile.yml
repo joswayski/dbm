@@ -11,6 +11,7 @@ on:
 # No signing secrets, releases, store uploads, or production/database access.
 permissions:
   contents: read
+  actions: write
 # A new push to a pull request supersedes its in-flight run. On main (and manual
 # runs) the running build always finishes and only the newest waiting run goes
 # next (GitHub replaces older pending runs in the group), so nothing piles up.
@@ -104,6 +105,18 @@ jobs:
             apps/native/android/app/build/reports/
             apps/native/android/app/build/outputs/connected_android_test_additional_output/
           retention-days: 14
+      - name: Stop the rest of this run after a failure
+        # One failed job already fails the run; cancel the other jobs instead of
+        # letting them hold runners (and block newer pushes) until they finish.
+        if: failure()
+        shell: bash
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/cancel" >/dev/null \
+            || echo "::warning::Could not cancel the rest of this run"
 
   iphone:
     needs: route
@@ -193,3 +206,15 @@ jobs:
             apps/native/ios/DerivedData-Tests/DBM.xcresult
             dist/mobile/ios-ui/
           retention-days: 14
+      - name: Stop the rest of this run after a failure
+        # One failed job already fails the run; cancel the other jobs instead of
+        # letting them hold runners (and block newer pushes) until they finish.
+        if: failure()
+        shell: bash
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/cancel" >/dev/null \
+            || echo "::warning::Could not cancel the rest of this run"
