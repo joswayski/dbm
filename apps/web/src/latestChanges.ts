@@ -1,6 +1,10 @@
 /**
  * The "Latest changes" list is fetched from GitHub when the site is built, the
  * same way captur.es and caper.chat build theirs. Every deploy refreshes it.
+ *
+ * It reads the public Atom feed of `main` rather than the REST API: the API's
+ * unauthenticated limit is 60 requests an hour per IP, and Cloudflare's build
+ * machines share IPs, so API-based builds fail there without a token.
  */
 
 export type LatestChange = {
@@ -10,78 +14,89 @@ export type LatestChange = {
   committedAt: string;
 };
 
-export type GitHubCommit = {
-  sha: string;
-  html_url: string;
-  author: { login: string } | null;
-  commit: {
-    message: string;
-    committer: { date: string } | null;
-    author: { name?: string; date: string } | null;
-  };
+export type FeedEntry = {
+  link: string;
+  title: string;
+  updated: string;
+  author: string;
 };
 
 export const CHANGE_COUNT = 10;
-/** Fetch extra commits so Dependabot merges can be dropped without under-filling the list. */
-const FETCH_COUNT = 30;
 
-/** Dependency maintenance belongs in GitHub history, not the product change list. */
-export function isDependencyUpdateCommit(entry: GitHubCommit): boolean {
-  const title = entry.commit.message.split("\n", 1)[0]?.trim() ?? "";
-  if (/^Bump\b/iu.test(title)) return true;
+const XML_ENTITIES: Record<string, string> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+};
 
-  const login = entry.author?.login?.toLowerCase() ?? "";
-  const authorName = entry.commit.author?.name?.toLowerCase() ?? "";
-  return login.startsWith("dependabot") || authorName.startsWith("dependabot");
+function decodeXml(text: string): string {
+  return text.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/giu, (entity, name: string) => {
+    if (name.startsWith("#x") || name.startsWith("#X")) return String.fromCodePoint(Number.parseInt(name.slice(2), 16));
+    if (name.startsWith("#")) return String.fromCodePoint(Number.parseInt(name.slice(1), 10));
+    return XML_ENTITIES[name.toLowerCase()] ?? entity;
+  });
 }
 
-export function toLatestChange(entry: GitHubCommit, repository: string): LatestChange {
-  const title = entry.commit.message.split("\n", 1)[0]?.trim();
-  const committedAt = entry.commit.committer?.date ?? entry.commit.author?.date;
-  if (!entry.sha || !entry.html_url || !title || !committedAt) {
-    throw new Error("GitHub returned an incomplete commit entry");
-  }
+/** Parses GitHub's `commits/<branch>.atom` feed, newest first. */
+export function parseCommitFeed(xml: string): FeedEntry[] {
+  return Array.from(xml.matchAll(/<entry>([\s\S]*?)<\/entry>/gu), ([, body = ""]) => {
+    const link = body.match(/<link\b[^>]*\bhref="([^"]+)"/u)?.[1];
+    const title = body.match(/<title>([\s\S]*?)<\/title>/u)?.[1];
+    const updated = body.match(/<updated>([^<]+)<\/updated>/u)?.[1];
+    const author = body.match(/<author>\s*<name>([^<]*)<\/name>/u)?.[1] ?? "";
+    if (!link || !title?.trim() || !updated) {
+      throw new Error("GitHub returned an incomplete commit feed entry");
+    }
+    return {
+      link: decodeXml(link),
+      title: decodeXml(title).trim(),
+      updated: updated.trim(),
+      author: decodeXml(author).trim(),
+    };
+  });
+}
+
+/** Dependency maintenance belongs in GitHub history, not the product change list. */
+export function isDependencyUpdate(entry: FeedEntry): boolean {
+  return /^Bump\b/iu.test(entry.title) || entry.author.toLowerCase().startsWith("dependabot");
+}
+
+export function toLatestChange(entry: FeedEntry, repository: string): LatestChange {
+  const sha = entry.link.match(/\/commit\/([0-9a-f]{7,40})$/iu)?.[1];
+  if (!sha) throw new Error(`Unexpected commit link in GitHub feed: ${entry.link}`);
 
   const pullRequest =
-    title.match(/\(#(\d+)\)$/u)?.[1] ?? title.match(/^Merge pull request #(\d+)/u)?.[1];
+    entry.title.match(/\(#(\d+)\)$/u)?.[1] ?? entry.title.match(/^Merge pull request #(\d+)/u)?.[1];
 
   return {
-    sha: entry.sha,
-    title: pullRequest ? title.replace(/\s+\(#\d+\)$/u, "") : title,
-    url: pullRequest ? `https://github.com/${repository}/pull/${pullRequest}` : entry.html_url,
-    committedAt,
+    sha,
+    title: pullRequest ? entry.title.replace(/\s+\(#\d+\)$/u, "") : entry.title,
+    url: pullRequest ? `https://github.com/${repository}/pull/${pullRequest}` : entry.link,
+    committedAt: entry.updated,
   };
 }
 
-export function selectLatestChanges(entries: GitHubCommit[], repository: string): LatestChange[] {
+export function selectLatestChanges(entries: FeedEntry[], repository: string): LatestChange[] {
   return entries
-    .filter((entry) => !isDependencyUpdateCommit(entry))
+    .filter((entry) => !isDependencyUpdate(entry))
     .map((entry) => toLatestChange(entry, repository))
     .slice(0, CHANGE_COUNT);
 }
 
 /** Fails the build rather than deploying an empty list; the previous deploy stays live. */
-export async function fetchLatestChanges(repository: string, token?: string): Promise<LatestChange[]> {
-  const url = new URL(`https://api.github.com/repos/${repository}/commits`);
-  url.searchParams.set("sha", "main");
-  url.searchParams.set("per_page", String(FETCH_COUNT));
-
-  const response = await fetch(url, {
-    headers: {
-      Accept: "application/vnd.github+json",
-      "User-Agent": "anybase-web-build",
-      "X-GitHub-Api-Version": "2022-11-28",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
+export async function fetchLatestChanges(repository: string): Promise<LatestChange[]> {
+  const response = await fetch(`https://github.com/${repository}/commits/main.atom`, {
+    headers: { Accept: "application/atom+xml", "User-Agent": "anybase-web-build" },
     // Fail promptly instead of hanging the build on a stalled connection.
     signal: AbortSignal.timeout(30_000),
   });
   if (!response.ok) {
-    throw new Error(`GitHub history request failed with ${response.status}`);
+    throw new Error(`GitHub commit feed request failed with ${response.status}`);
   }
 
-  const entries = (await response.json()) as GitHubCommit[];
-  const changes = Array.isArray(entries) ? selectLatestChanges(entries, repository) : [];
+  const changes = selectLatestChanges(parseCommitFeed(await response.text()), repository);
   if (changes.length === 0) {
     throw new Error("GitHub returned no product changes for main");
   }

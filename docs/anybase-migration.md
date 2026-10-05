@@ -129,10 +129,8 @@ zone):
 
 1. Workers & Pages → Create → Import a repository → `joswayski/dbm`.
 2. Root directory `apps/web`, build command `npm run build`, deploy command
-   `npx wrangler deploy`, production branch `main`.
-3. Optional: add a `GITHUB_TOKEN` build variable (a fine-grained token with
-   read-only access to public repositories). Unauthenticated GitHub API calls are
-   limited to 60 an hour per IP, and build machines share IPs.
+   `npx wrangler deploy`, production branch `main`. No build variables are
+   needed: **Latest changes** comes from GitHub's public commit feed.
 
 Every push to `main` then rebuilds the site, which refreshes **Latest changes**.
 Leave build watch paths unrestricted so app-only merges still refresh the list.
