@@ -1,4 +1,4 @@
-# DBM for iPhone
+# Anybase for iPhone
 
 Native SwiftUI client for iOS 17+. It invokes `dbm-native-bridge` in-process: no HTTP server, web view, telemetry, or cloud sync. Profile metadata and history use a protected SQLite file under Application Support (excluded from iCloud backup). Passwords are passed to Rust only for the current session and are cleared when the form/session closes.
 

@@ -1,6 +1,6 @@
-# Graphite — DBM design system
+# Graphite — Anybase design system
 
-Graphite is DBM's visual language: neutral graphite surfaces, a system-blue
+Graphite is Anybase's visual language: neutral graphite surfaces, a system-blue
 accent, dense but readable data, and native desktop idioms (source-list
 sidebar, segmented controls, a row inspector). It is the reference for both
 native apps. The tokens are defined in `enum Graphite` in

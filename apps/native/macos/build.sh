@@ -5,7 +5,7 @@ if [[ "$(uname -s)" != Darwin ]]; then
   exit 1
 fi
 root="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
-output="$root/target/native/DBM.app"
+output="$root/target/native/Anybase.app"
 export MACOSX_DEPLOYMENT_TARGET=13.0
 # Cargo's release profile strips debuginfo, and rustc before 1.98 does that on
 # Apple targets with its bundled llvm-objcopy, which can leave the LINKEDIT

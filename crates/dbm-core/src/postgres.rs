@@ -623,7 +623,7 @@ fn base_config(profile: &ConnectionProfile, password: Option<&str>) -> Config {
         .port(profile.port)
         .user(&profile.username)
         .dbname(&profile.default_database)
-        .application_name("DBM")
+        .application_name("Anybase")
         .connect_timeout(Duration::from_secs(10))
         .keepalives(true)
         .keepalives_idle(Duration::from_secs(60));

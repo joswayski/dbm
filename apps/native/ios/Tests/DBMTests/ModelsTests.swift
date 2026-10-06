@@ -12,7 +12,7 @@ final class ModelsTests: XCTestCase {
     func testAppMetadataPreservesNativeDisplayAndPrivateNetworkUsage() {
         XCTAssertNotNil(Bundle.main.object(forInfoDictionaryKey: "UILaunchScreen") as? [String: Any])
         let networkUsage = Bundle.main.object(forInfoDictionaryKey: "NSLocalNetworkUsageDescription") as? String
-        XCTAssertEqual(networkUsage, "DBM connects directly to the databases you configure on your private network.")
+        XCTAssertEqual(networkUsage, "Anybase connects directly to the databases you configure on your private network.")
     }
     func testMobileProfileAlwaysUsesSafeSettings() {
         var draft = ProfileDraft(); draft.password = "secret"

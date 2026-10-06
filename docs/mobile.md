@@ -1,11 +1,11 @@
 # Mobile development clients
 
-DBM has browser-free **Kotlin/Compose Android** and **SwiftUI iPhone** development
+Anybase has browser-free **Kotlin/Compose Android** and **SwiftUI iPhone** development
 clients. They reuse the desktop Rust database adapters in-process through JNI
 and the C ABI. These are not Play Store/App Store releases or desktop-parity apps.
 
 The setup follows Caper's separate native UI/build approach, not its hosted API.
-DBM has no server, account, pairing service, telemetry, or connection sync.
+Anybase has no server, account, pairing service, telemetry, or connection sync.
 
 ## First slice
 
@@ -39,13 +39,13 @@ Native CI and device acceptance are required before relying on these clients.
 
 ## Access away from home
 
-The phone connects **directly to the database**, not through a DBM backend.
+The phone connects **directly to the database**, not through an Anybase backend.
 Use a routable database hostname and port, valid TLS certificates, and a dedicated
 least-privilege database user. Do not open database ports to the public Internet
 just to use this app.
 
 For private endpoints, install/configure your VPN (for example Tailscale) on the
-phone and verify its subnet routing and DNS first. DBM does not manage the VPN.
+phone and verify its subnet routing and DNS first. Anybase does not manage the VPN.
 `localhost` on a phone is the phone itself, not your laptop. TLS hostname checking
 still applies over a VPN. Existing laptop access does not prove phone access.
 
@@ -111,7 +111,7 @@ artifacts, records exact tested revisions/checksums, and runs native demo UI
 tests with retained captures. PR jobs have no signing credentials. A successful
 package step is not proof that the later UI tests pass. Downloads expire after
 14 days. Simulator/emulator fixtures do not validate real databases or phones.
-DBM's existing desktop release workflow remains unchanged; merging app changes
+Anybase's existing desktop release workflow remains unchanged; merging app changes
 still publishes desktop updates, not mobile store releases.
 
 These are configured workflows, not a record that any particular revision has
@@ -121,7 +121,7 @@ verified-TLS database connections on both mobile platforms remain outstanding.
 ## Signed mobile releases (Caper's distribution path)
 
 `.github/workflows/mobile-release.yml` follows Caper's release approval and
-signing setup. It does not deploy a DBM server or change desktop distribution.
+signing setup. It does not deploy an Anybase server or change desktop distribution.
 After **Mobile development builds** passes for a push to `main`,
 `mobile-ready.yml` posts **Deploy DBM mobile** in the existing Discord deploys
 channel. Godis dispatches the exact SHA; the release rejects commits outside

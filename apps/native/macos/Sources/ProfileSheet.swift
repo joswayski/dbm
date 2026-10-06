@@ -235,7 +235,7 @@ final class ProfileSheet: NSWindowController {
 
         readOnlyBox.attributedTitle = NSAttributedString(string: readOnlyBox.title, attributes: [.font: Graphite.ui(12.5), .foregroundColor: Graphite.text])
         openOnStartupBox.attributedTitle = NSAttributedString(string: openOnStartupBox.title, attributes: [.font: Graphite.ui(12.5), .foregroundColor: Graphite.text])
-        openOnStartupBox.toolTip = "Connect to this profile's saved database when DBM launches."
+        openOnStartupBox.toolTip = "Connect to this profile's saved database when Anybase launches."
         feedback.maximumNumberOfLines = 6
         feedback.lineBreakMode = .byWordWrapping
         feedback.preferredMaxLayoutWidth = 494
@@ -243,7 +243,7 @@ final class ProfileSheet: NSWindowController {
         feedbackBox.radius = 7
         feedbackBox.pin(feedback, insets: NSEdgeInsets(top: 9, left: 12, bottom: 9, right: 12))
         feedbackBox.isHidden = true
-        let note = label("Passwords are stored in your operating system credential manager and are never written to DBM's profile database.",
+        let note = label("Passwords are stored in your operating system credential manager and are never written to Anybase's profile database.",
                          font: Graphite.ui(11.5), color: Graphite.faint)
         note.maximumNumberOfLines = 2
         note.lineBreakMode = .byWordWrapping

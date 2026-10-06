@@ -1,6 +1,6 @@
 # Native architecture
 
-DBM ships browser-free desktop apps on **macOS, Windows, and Linux**: AppKit on
+Anybase ships browser-free desktop apps on **macOS, Windows, and Linux**: AppKit on
 macOS and egui on Windows and Linux, over one shared Rust core. Android Compose
 and iPhone SwiftUI clients are in development and are not desktop-parity or
 store releases. None uses Electron, JavaScript, or a WebView. See
@@ -45,7 +45,7 @@ discarded with that session.
 
 ## Build outputs
 
-- `bash apps/native/macos/build.sh` produces `target/native/DBM.app`
+- `bash apps/native/macos/build.sh` produces `target/native/Anybase.app`
   (executable `dbm`, bundle identifier `io.github.joswayski.dbm`). It builds
   for the current architecture and signs ad hoc; `DBM_UNIVERSAL=1` builds for
   Apple Silicon and Intel, and `DBM_SIGNING_IDENTITY` signs with a Developer ID

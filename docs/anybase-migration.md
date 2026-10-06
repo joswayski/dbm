@@ -9,8 +9,8 @@ when, and which identifiers must never change.
 
 | Stage | Scope | Status |
 | --- | --- | --- |
-| 1. Website and branding | anyba.se site in `apps/web`; README; josevalerio.com links to anyba.se | In progress |
-| 2. App display name | What users see inside and around the installed app | Planned |
+| 1. Website and branding | anyba.se site in `apps/web`; README; josevalerio.com links to anyba.se | Done |
+| 2. App display name | What users see inside and around the installed app | Done, except screenshots and store listings |
 | 3. Download names | Anybase-named first-install downloads | Planned |
 | 4. Repository rename (optional) | `joswayski/dbm` to `joswayski/anybase`, and every hard-coded reference | Planned |
 | 5. Internal names | Crates, env vars, script names | Optional |
@@ -18,31 +18,42 @@ when, and which identifiers must never change.
 ### 1. Website and branding
 
 - `apps/web` builds anyba.se. See [Website](#website).
-- The README leads with Anybase and says the apps still show DBM.
+- The README leads with Anybase and says download names still say DBM.
 - josevalerio.com lists Anybase and links to anyba.se.
 
 ### 2. App display name
 
-Change only what people read; keep every identifier in
-[Never change](#never-change).
+Everything users read now says Anybase; every identifier in
+[Never change](#never-change) stays.
 
-- macOS: `CFBundleName` (add `CFBundleDisplayName`), menu and About titles, window
-  titles. Decide whether the bundle folder becomes `Anybase.app`: check how
-  `crates/dbm-update` swaps the bundle in place before renaming it, and keep the
-  in-place update path working for existing `DBM.app` installs.
-- Windows (`apps/native/windows/installer.nsi`): `Name`, the Start menu shortcut,
-  and the uninstall `DisplayName`/`Publisher`. Keep `InstallDir`
-  (`%LOCALAPPDATA%\DBM`), the `UNINSTALL_KEY`, and `dbm.exe`, so upgrades land on
-  top of existing installs instead of beside them. Delete the old `DBM.lnk` when
-  writing the new shortcut.
-- Linux: `Name=` and `Comment=` (now "Database manager"; make it "Database client")
-  in the AppImage desktop entry (`apps/native/workbench/appimage.sh`).
-- egui window title and About text; update and release-note copy.
-- Mobile display names (`app_name` on Android, `CFBundleDisplayName` on iPhone).
-- Refresh `docs/screenshots` (and the website's WebP copies) once the sidebar
-  shows Anybase.
+- macOS: `CFBundleName` and `CFBundleDisplayName`, the app menu (About, Hide,
+  Quit), window title, sidebar, dialogs, and tooltips. New builds are
+  `Anybase.app`; the DMG volume is "Anybase". The native updater installs
+  whichever `.app` its zip holds at the existing install's path, so installs made
+  before the rename keep their `DBM.app` folder (and the Finder and Dock name
+  that comes from it) while showing Anybase inside. `DBM.app.tar.gz` keeps its
+  `DBM.app` folder name for the Tauri updater.
+- Windows and Linux (egui): window title, sidebar, dialogs, and tooltips.
+- Windows installer: `Name`, the Start menu shortcut (`Anybase.lnk`, replacing
+  `DBM.lnk`), and the uninstall `DisplayName`/`Publisher`. The native updater
+  swaps only `dbm.exe`, so existing installs keep their DBM Start menu entry until
+  the installer runs again.
+- Linux AppImage desktop entry: `Name=Anybase`,
+  `Comment=Database client for PostgreSQL, MySQL, and Redis`.
+- Android: `android:label` and the Compose screens. iPhone: `CFBundleDisplayName`,
+  `CFBundleName`, the local network prompt, and the SwiftUI screens.
+- PostgreSQL connections report `application_name` "Anybase"; the demo fixture's
+  query result says "Anybase demo".
+- GitHub release titles: "Anybase <version>" and "Anybase mobile (latest)".
 
-The AppKit app only builds on macOS, so this stage needs a Mac run before merge.
+Still to do:
+
+- Refresh `docs/screenshots` (and the website's WebP copies) so the sidebar shows
+  Anybase. The AppKit CI job's `--snapshot-dir` artifact renders the demo states.
+- Rename the Play Console app and the App Store Connect record (store-side names,
+  not in this repository), and the Godis "Deploy DBM mobile" button label.
+- Optional: have the macOS updater move a `DBM.app` install to `Anybase.app`.
+  Skipped for now because it would break Dock and login-item references.
 
 ### 3. Download names
 
@@ -105,6 +116,12 @@ users' saved state or strands them on an old version.
 | macOS bundle ID `io.github.joswayski.dbm` | `apps/native/macos/Info.plist` | Make macOS treat Anybase as a different app |
 | `native-latest.json`, `latest.json` | Release assets | Stop native and former Tauri installs from updating |
 | `DBM-macOS.zip`, `DBM-Windows-x64.exe`, `DBM-Linux-x64`, `DBM.app.tar.gz`, `DBM-Windows-x64-setup.exe`, `DBM-Linux-x86_64.AppImage` | Release assets ([releases](releases.md)) | Break the updaters that download them |
+| `DBM.app` folder inside `DBM.app.tar.gz` | Release workflow (`tar -s`) | Break former Tauri installs' updates |
+| Windows `%LOCALAPPDATA%\DBM`, `dbm.exe`, uninstall key `...\Uninstall\DBM` | `apps/native/windows/installer.nsi` | Install a second copy beside the old one |
+| egui app name `"DBM"` in `eframe::run_native` | `apps/native/workbench/src/main.rs` | Reset saved window size and sidebar width |
+| Window autosave name `DBMNativeMain` | `apps/native/macos/Sources/main.swift` | Reset the saved macOS window frame |
+| iPhone `Application Support/DBM/dbm.sqlite` | `apps/native/ios/Sources/DBM/Bridge.swift` | Lose iPhone profiles and history |
+| Android `dbm-mobile.sqlite3` | `apps/native/android/.../NativeBridge.kt` | Lose Android profiles and history |
 
 If one of these ever has to move, ship a migration that copies the old data first
 and keep reading the old location for several releases.

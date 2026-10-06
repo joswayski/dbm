@@ -1,4 +1,4 @@
-# DBM features
+# Anybase features
 
 What the app does today, what is deliberately not built yet, and what it stores locally.
 
@@ -11,7 +11,7 @@ What the app does today, what is deliberately not built yet, and what it stores 
   sidebar, including Redis database indices. That selection becomes the saved
   database used when reconnecting; failed switches leave it unchanged.
 - **Open on startup** in the connection editor automatically connects and opens
-  a SQL or Redis workbench tab when DBM launches, without running workbench queries.
+  a SQL or Redis workbench tab when Anybase launches, without running workbench queries.
   It defaults to on for new and existing desktop profiles and can be turned off
   per connection. Startup connection errors use the normal error banner; other
   profiles still open. Mobile clients continue to connect manually.
@@ -24,7 +24,7 @@ What the app does today, what is deliberately not built yet, and what it stores 
   managers and OS clipboard sync may retain or share it. URLs encode credentials,
   database names, ports, and TLS settings. MySQL TLS option names vary by client;
   Redis CA certificates must be configured separately in the destination app.
-  Redis Preferred TLS exports as `rediss://` (no plaintext fallback). DBM's
+  Redis Preferred TLS exports as `rediss://` (no plaintext fallback). Anybase's
   read-only profile setting is not a URL option; use a restricted database user
   when connecting from another app.
 - Native apps: AppKit on macOS (Apple Silicon and Intel), egui on Windows and

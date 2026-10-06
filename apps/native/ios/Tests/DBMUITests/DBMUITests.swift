@@ -130,14 +130,14 @@ final class DBMUITests: XCTestCase {
         XCTAssertEqual(editor.value as? String, "SHOW DATABASES")
         retainScreenshot(named: "iphone-query-refresh")
         app.buttons["run-query"].tap()
-        expectation(for: NSPredicate(format: "label CONTAINS %@", "result: DBM demo"), evaluatedWith: row)
+        expectation(for: NSPredicate(format: "label CONTAINS %@", "result: Anybase demo"), evaluatedWith: row)
         waitForExpectations(timeout: 10)
         endOfFirstLine.tap()
         editor.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: "SHOW DATABASES".count) + "SELECT 1")
         expectation(for: NSPredicate(format: "value == %@", "SELECT 1"), evaluatedWith: editor)
         waitForExpectations(timeout: 10)
         refresh.tap()
-        XCTAssertTrue(row.label.contains("result: DBM demo"), row.label)
+        XCTAssertTrue(row.label.contains("result: Anybase demo"), row.label)
         XCTAssertEqual(editor.value as? String, "SELECT 1")
     }
 
@@ -149,8 +149,8 @@ final class DBMUITests: XCTestCase {
         let name = app.textFields["name"]; name.tap(); name.typeText("Invalid Redis")
         let database = app.textFields["database"]; database.tap(); database.typeText(XCUIKeyboardKey.delete.rawValue + "not-a-number")
         app.buttons["test-connection"].tap()
-        XCTAssertTrue(app.alerts["DBM"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.alerts["DBM"].staticTexts["invalid input: Redis database must be a non-negative integer"].exists)
+        XCTAssertTrue(app.alerts["Anybase"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.alerts["Anybase"].staticTexts["invalid input: Redis database must be a non-negative integer"].exists)
         retainScreenshot(named: "iphone-connection-error")
     }
 

@@ -1,6 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
-    <application android:theme="@style/AppTheme" android:label="DBM" android:icon="@drawable/dbm_icon" android:usesCleartextTraffic="false" android:allowBackup="false">
+    <application android:theme="@style/AppTheme" android:label="Anybase" android:icon="@drawable/dbm_icon" android:usesCleartextTraffic="false" android:allowBackup="false">
         <activity android:name=".MainActivity" android:exported="true" android:configChanges="orientation|screenSize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

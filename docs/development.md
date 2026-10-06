@@ -1,6 +1,6 @@
-# Developing DBM
+# Developing Anybase
 
-DBM's released desktop product is two native clients over one Rust core:
+Anybase's released desktop product is two native clients over one Rust core:
 
 - **macOS:** a Swift/AppKit app in `apps/native/macos`, calling the Rust core
   through the C ABI bridge in `apps/native/bridge`.
@@ -39,9 +39,9 @@ On macOS:
 
 ```sh
 bash apps/native/macos/build.sh
-open target/native/DBM.app
+open target/native/Anybase.app
 # Isolated fixture, without loading local profiles or connecting to databases:
-target/native/DBM.app/Contents/MacOS/dbm --demo
+target/native/Anybase.app/Contents/MacOS/dbm --demo
 ```
 
 `build.sh` builds for the current Mac's architecture and signs ad hoc.
@@ -60,7 +60,7 @@ cargo run --manifest-path apps/native/workbench/Cargo.toml --locked --release --
 `bash apps/native/workbench/demo.sh` is a shortcut for the debug `--demo` build.
 
 Outside `--demo`, development builds use the same saved profiles, passwords,
-and query history as an installed DBM. Use disposable databases or read-only
+and query history as an installed Anybase. Use disposable databases or read-only
 profiles when testing writes.
 
 ## Tests and checks
@@ -110,23 +110,23 @@ intact when an orb wakes. No long-running services are declared in
 ## Local installs
 
 Local builds are not installed automatically. On macOS, copy
-`target/native/DBM.app` into `/Applications` yourself if you want to run it
+`target/native/Anybase.app` into `/Applications` yourself if you want to run it
 from there. On Windows and Linux, the release binary is
 `apps/native/workbench/target/release/dbm-workbench` (`.exe` on Windows).
 
 Development builds have no build number, so they never check for updates.
 
-An ad-hoc signature changes whenever the macOS app is rebuilt. Because DBM
+An ad-hoc signature changes whenever the macOS app is rebuilt. Because Anybase
 keeps database passwords in the macOS Keychain, macOS may ask for the login
 keychain password when a newly built copy first reads an existing password.
-This is a macOS system prompt; DBM never receives the login keychain password.
+This is a macOS system prompt; Anybase never receives the login keychain password.
 Signing with a stable identity (`DBM_SIGNING_IDENTITY`) avoids the repeated
 approval.
 
 ## Releases
 
 Every merge to `main` that changes the app runs the release workflow and
-publishes a GitHub release for macOS, Windows, and Linux. Install DBM once from
+publishes a GitHub release for macOS, Windows, and Linux. Install Anybase once from
 the [latest release](https://github.com/joswayski/dbm/releases/latest); after
 that, release builds update themselves. The macOS app is signed and notarized;
 Windows builds are not Authenticode-signed. Versioning, the workflow's steps,
@@ -136,7 +136,7 @@ required secrets, and the update flow are documented in
 That desktop release flow is unchanged. Mobile CI does not sign, upload, or
 publish Play Store, App Store, or TestFlight releases.
 
-DBM never uploads connection profiles, query history, or database results.
+Anybase never uploads connection profiles, query history, or database results.
 Desktop passwords use the operating system credential store; mobile passwords
 remain in memory only. See [mobile privacy and lifecycle](mobile.md#storage-and-lifecycle).
 
@@ -169,7 +169,7 @@ states to PNG files without interaction:
 
 ```sh
 mkdir -p target/native/snapshots
-target/native/DBM.app/Contents/MacOS/dbm --demo --snapshot-dir target/native/snapshots
+target/native/Anybase.app/Contents/MacOS/dbm --demo --snapshot-dir target/native/snapshots
 ```
 
 The website serves 1600-pixel WebP copies. After replacing a README screenshot,

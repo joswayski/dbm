@@ -1,5 +1,5 @@
 //! Embeds the app icon in the Windows executable, so Explorer,
-//! shortcuts, and the taskbar show DBM rather than a generic program icon.
+//! shortcuts, and the taskbar show Anybase rather than a generic program icon.
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");

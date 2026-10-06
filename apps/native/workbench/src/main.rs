@@ -1,5 +1,5 @@
 #![allow(clippy::collapsible_if, clippy::possible_missing_else)]
-// Release builds are GUI apps on Windows: no console window behind DBM.
+// Release builds are GUI apps on Windows: no console window behind Anybase.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod backend;
@@ -17,7 +17,7 @@ fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
         renderer: Renderer::Wgpu,
         viewport: egui::ViewportBuilder::default()
-            .with_title(if demo { "DBM — DEMO" } else { "DBM" })
+            .with_title(if demo { "Anybase — DEMO" } else { "Anybase" })
             .with_inner_size([1280.0, 800.0])
             .with_min_inner_size([900.0, 600.0])
             .with_icon(std::sync::Arc::new(
@@ -31,6 +31,8 @@ fn main() -> eframe::Result {
         ..Default::default()
     };
     eframe::run_native(
+        // eframe stores the saved layout under this name; keep it so existing
+        // window sizes and sidebar widths carry over (docs/anybase-migration.md).
         "DBM",
         options,
         Box::new(move |cc| Ok(Box::new(workbench::Workbench::new(cc, demo)))),

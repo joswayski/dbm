@@ -2,7 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>CFBundleIdentifier</key><string>io.github.joswayski.dbm</string>
-  <key>CFBundleName</key><string>DBM</string>
+  <key>CFBundleName</key><string>Anybase</string>
+  <key>CFBundleDisplayName</key><string>Anybase</string>
   <key>CFBundleIconFile</key><string>icon.icns</string>
   <key>CFBundleExecutable</key><string>dbm</string>
   <key>CFBundlePackageType</key><string>APPL</string>
