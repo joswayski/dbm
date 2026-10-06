@@ -160,6 +160,9 @@ Every push to `main` then rebuilds the site, which refreshes **Latest changes**.
 Leave build watch paths unrestricted so app-only merges still refresh the list.
 To deploy by hand instead: `cd apps/web && npm ci && npx wrangler login && npm run deploy`.
 
+`https://anyba.se/privacy` is the privacy policy URL given to Google Play and the
+App Store; update it (and its date) whenever what the apps store or send changes.
+
 `www.anyba.se` is not configured; add a Cloudflare redirect rule to the apex if
 it should resolve. Site-only changes never publish a desktop release
 (`release.yml` ignores `apps/web/**`).
