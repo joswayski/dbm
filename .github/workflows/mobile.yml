@@ -23,7 +23,8 @@ jobs:
     secrets: inherit
 
   android:
-    runs-on: ubuntu-24.04
+    needs: route
+    runs-on: ${{ needs.route.outputs.linux == 'true' && fromJSON('["self-hosted","joselinux"]') || 'ubuntu-24.04' }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
