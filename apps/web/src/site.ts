@@ -6,6 +6,7 @@ export const SITE_DESCRIPTION = "A fast database client for PostgreSQL, MySQL, a
 export const REPOSITORY = "joswayski/dbm";
 export const REPO_URL = `https://github.com/${REPOSITORY}`;
 export const AUTHOR_URL = "https://josevalerio.com";
+export const CONTACT_EMAIL = "contact@josevalerio.com";
 
 export const FEATURES = [
   "Browse databases, schemas, tables, and Redis keys, with filters, sorting, and CSV export.",
