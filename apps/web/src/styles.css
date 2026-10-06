@@ -1,36 +1,36 @@
 @import "tailwindcss";
 
-/* Geist and Geist Mono are bundled with the site, never fetched from a font CDN. */
+/* Space Mono is bundled with the site, never fetched from a font CDN. */
 @font-face {
-  font-family: "Geist";
+  font-family: "Space Mono";
   font-style: normal;
   font-display: swap;
   font-weight: 400;
-  src: url("@fontsource/geist/files/geist-latin-400-normal.woff2") format("woff2");
+  src: url("@fontsource/space-mono/files/space-mono-latin-400-normal.woff2") format("woff2");
 }
 
 @font-face {
-  font-family: "Geist";
+  font-family: "Space Mono";
   font-style: normal;
   font-display: swap;
-  font-weight: 500;
-  src: url("@fontsource/geist/files/geist-latin-500-normal.woff2") format("woff2");
+  font-weight: 700;
+  src: url("@fontsource/space-mono/files/space-mono-latin-700-normal.woff2") format("woff2");
 }
 
 @font-face {
-  font-family: "Geist";
-  font-style: normal;
-  font-display: swap;
-  font-weight: 600;
-  src: url("@fontsource/geist/files/geist-latin-600-normal.woff2") format("woff2");
-}
-
-@font-face {
-  font-family: "Geist Mono";
-  font-style: normal;
+  font-family: "Space Mono";
+  font-style: italic;
   font-display: swap;
   font-weight: 400;
-  src: url("@fontsource/geist-mono/files/geist-mono-latin-400-normal.woff2") format("woff2");
+  src: url("@fontsource/space-mono/files/space-mono-latin-400-italic.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Space Mono";
+  font-style: italic;
+  font-display: swap;
+  font-weight: 700;
+  src: url("@fontsource/space-mono/files/space-mono-latin-700-italic.woff2") format("woff2");
 }
 
 /* Graphite tokens, from docs/design-system.md. */
@@ -55,8 +55,10 @@
 }
 
 @theme {
-  --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --font-sans: "Space Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --font-mono: "Space Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --font-weight-medium: 400;
+  --font-weight-semibold: 700;
   --color-canvas: var(--bg);
   --color-chrome: var(--chrome);
   --color-control: var(--control);

@@ -1,4 +1,22 @@
-import { stepIndex } from "../src/components/ScreenshotViewer";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { ScreenshotViewer, stepIndex } from "../src/components/ScreenshotViewer";
+
+describe("ScreenshotViewer", () => {
+  it("allows native pinch zoom alongside gallery swipes and explains the mobile gestures", () => {
+    const markup = renderToStaticMarkup(
+      createElement(ScreenshotViewer, {
+        shots: [{ src: "/screenshot.webp", alt: "Table preview", caption: "Browse rows" }],
+        index: 0,
+        onIndexChange: () => {},
+        onClose: () => {},
+      }),
+    );
+
+    expect(markup).toMatch(/class="[^"]*touch-pan-y touch-pinch-zoom[^"]*"/);
+    expect(markup).toContain("Pinch to zoom");
+  });
+});
 
 describe("stepIndex", () => {
   it("moves forward and back", () => {

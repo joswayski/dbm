@@ -21,8 +21,8 @@ struct WorkspaceView: View {
             HStack(spacing: 9) {
                 Circle().fill(Color(hex: model.active?.color ?? "#4c9aff")).frame(width: 8, height: 8)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(model.active?.name ?? "Anybase").font(.custom("Geist-Regular", size: 13).weight(.semibold))
-                    Text("\(model.active?.engine.title ?? "") · \(model.database)").font(.custom("Geist-Regular", size: 11)).foregroundStyle(Graphite.faint)
+                    Text(model.active?.name ?? "Anybase").font(.custom("SpaceMono-Bold", size: 13))
+                    Text("\(model.active?.engine.title ?? "") · \(model.database)").font(.custom("SpaceMono-Regular", size: 11)).foregroundStyle(Graphite.faint)
                 }
                 Spacer()
                 if showExplorer { Button { explorer = true } label: { Image(systemName: "sidebar.left").frame(width: 44, height: 44) }.accessibilityLabel("Explorer").accessibilityIdentifier("explorer") }
@@ -42,11 +42,11 @@ struct WorkspaceView: View {
                     Spacer(minLength: 4)
                     Button("Refresh", systemImage: "arrow.clockwise") { model.refresh() }.buttonStyle(SecondaryButton()).disabled(model.lastExecuted == nil).accessibilityIdentifier("refresh-query")
                     Button("Run", systemImage: "play.fill") { model.run() }.buttonStyle(PrimaryButton()).disabled(model.sql.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty).accessibilityIdentifier("run-query")
-                }.font(.custom("Geist-Regular", size: 12)).padding(.horizontal, 12).frame(height: 42).graphitePanel()
-                TextEditor(text: $model.sql).scrollContentBackground(.hidden).autocorrectionDisabled().textInputAutocapitalization(.never).font(.custom("GeistMono-Regular", size: 12)).frame(minHeight: 112, maxHeight: 170).padding(8).background(Graphite.bg)
+                }.font(.custom("SpaceMono-Regular", size: 12)).padding(.horizontal, 12).frame(height: 42).graphitePanel()
+                TextEditor(text: $model.sql).scrollContentBackground(.hidden).autocorrectionDisabled().textInputAutocapitalization(.never).font(.custom("SpaceMono-Regular", size: 12)).frame(minHeight: 112, maxHeight: 170).padding(8).background(Graphite.bg)
                     .accessibilityLabel(model.active?.engine == .redis ? "Redis command editor" : "SQL editor").accessibilityIdentifier("query-editor")
             } else if let table = model.selectedTable {
-                HStack { Image(systemName: model.active?.engine == .redis ? "key" : "tablecells").foregroundStyle(Color(hex: model.active?.color ?? "#4c9aff")); Text("\(table.schema).\(table.table)").font(.custom("Geist-Regular", size: 13).weight(.medium)); Spacer(); Button("Refresh", systemImage: "arrow.clockwise") { model.refresh() }.buttonStyle(SecondaryButton()) }
+                HStack { Image(systemName: model.active?.engine == .redis ? "key" : "tablecells").foregroundStyle(Color(hex: model.active?.color ?? "#4c9aff")); Text("\(table.schema).\(table.table)").font(.custom("SpaceMono-Regular", size: 13)); Spacer(); Button("Refresh", systemImage: "arrow.clockwise") { model.refresh() }.buttonStyle(SecondaryButton()) }
                     .padding(.horizontal, 12).frame(height: 42).graphitePanel()
             }
             GridView(data: model.grid).frame(maxWidth: .infinity, maxHeight: .infinity).clipped()
@@ -61,7 +61,7 @@ struct WorkspaceView: View {
                     Text("Page \(model.grid.offset / model.grid.limit + 1)")
                     Button { model.next() } label: { Image(systemName: "chevron.right").frame(width: 36, height: 44) }.disabled(!model.grid.hasMore).opacity(model.grid.hasMore ? 1 : 0.4).accessibilityLabel("Next")
                 }
-            }.font(.custom("Geist-Regular", size: 11)).padding(.horizontal, 12).frame(height: 44).graphitePanel()
+            }.font(.custom("SpaceMono-Regular", size: 11)).padding(.horizontal, 12).frame(height: 44).graphitePanel()
         }.buttonStyle(.plain)
     }
 }
@@ -69,7 +69,7 @@ struct WorkspaceView: View {
 private struct TabButton: View {
     @EnvironmentObject var model: AppModel
     let title, icon: String; let active: Bool; let action: () -> Void
-    var body: some View { Button(action: action) { HStack(spacing: 6) { Image(systemName: icon); Text(title) }.font(.custom("Geist-Regular", size: 12).weight(active ? .medium : .regular)).padding(.horizontal, 12).frame(height: 38).background(active ? Graphite.bg : Graphite.chrome).overlay(alignment: .top) { Rectangle().fill(active ? Color(hex: model.active?.color ?? "#4c9aff") : .clear).frame(height: 2) } }.accessibilityAddTraits(active ? .isSelected : []) }
+    var body: some View { Button(action: action) { HStack(spacing: 6) { Image(systemName: icon); Text(title) }.font(.custom("SpaceMono-Regular", size: 12)).padding(.horizontal, 12).frame(height: 38).background(active ? Graphite.bg : Graphite.chrome).overlay(alignment: .top) { Rectangle().fill(active ? Color(hex: model.active?.color ?? "#4c9aff") : .clear).frame(height: 2) } }.accessibilityAddTraits(active ? .isSelected : []) }
 }
 
 struct SourceList: View {
@@ -79,7 +79,7 @@ struct SourceList: View {
     @State private var editor: ProfileDraft?
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack { Image(systemName: "cylinder").foregroundStyle(Graphite.accent); Text("Anybase").font(.custom("Geist-Regular", size: 14).weight(.semibold)); Spacer(); if let close { Button("Done", action: close) } }.padding(12)
+            HStack { Image(systemName: "cylinder").foregroundStyle(Graphite.accent); Text("Anybase").font(.custom("SpaceMono-Bold", size: 14)); Spacer(); if let close { Button("Done", action: close) } }.padding(12)
             ScrollView {
             VStack(alignment: .leading, spacing: 0) {
             Text("Connections").sectionLabel()
@@ -88,7 +88,7 @@ struct SourceList: View {
                     if model.active?.id == profile.id { close?() }
                     else if model.isDemo { model.connect(profile); close?() }
                     else { editor = ProfileDraft(profile) }
-                } label: { HStack(spacing: 9) { Circle().fill(Color(hex: profile.color)).frame(width: 8, height: 8); VStack(alignment: .leading, spacing: 2) { Text(profile.name); Text("\(profile.engine.title) · \(profile.host)").foregroundStyle(Graphite.faint).font(.custom("Geist-Regular", size: 11)) }; Spacer() }.padding(.horizontal, 10).frame(height: 44).background(model.active?.id == profile.id ? Color.white.opacity(0.06) : .clear).clipShape(RoundedRectangle(cornerRadius: 6)) }.buttonStyle(.plain).accessibilityIdentifier("source-profile-\(profile.id)")
+                } label: { HStack(spacing: 9) { Circle().fill(Color(hex: profile.color)).frame(width: 8, height: 8); VStack(alignment: .leading, spacing: 2) { Text(profile.name); Text("\(profile.engine.title) · \(profile.host)").foregroundStyle(Graphite.faint).font(.custom("SpaceMono-Regular", size: 11)) }; Spacer() }.padding(.horizontal, 10).frame(height: 44).background(model.active?.id == profile.id ? Color.white.opacity(0.06) : .clear).clipShape(RoundedRectangle(cornerRadius: 6)) }.buttonStyle(.plain).accessibilityIdentifier("source-profile-\(profile.id)")
             if model.active?.id == profile.id {
                 Divider().overlay(Graphite.border).padding(.vertical, 8)
                 Text("Database").sectionLabel()
@@ -102,7 +102,7 @@ struct SourceList: View {
             }.frame(maxHeight: .infinity).accessibilityIdentifier("source-list-scroll")
             Divider().overlay(Graphite.border)
             Button { editor = ProfileDraft() } label: { Label("New connection", systemImage: "plus").frame(maxWidth: .infinity, alignment: .leading).frame(height: 44).padding(.horizontal, 12) }.buttonStyle(.plain)
-        }.background(Graphite.sidebar).foregroundStyle(Graphite.text).disabled(model.loading)
+        }.font(.custom("SpaceMono-Regular", size: 13)).background(Graphite.sidebar).foregroundStyle(Graphite.text).disabled(model.loading)
             .sheet(item: Binding(get: { editor.map(ConnectionsView.EditorItem.init) }, set: { if $0 == nil { editor = nil } })) { item in ProfileForm(draft: item.draft) }
     }
 }
@@ -122,17 +122,17 @@ private struct SchemaTree: View {
                 if expanded.contains(node.id) || !filter.isEmpty { SchemaTree(items: node.children ?? [], filter: filter, close: close).padding(.leading, 14) }
             }
         }
-    } }.font(.custom("Geist-Regular", size: 12.5)) }
+    } }.font(.custom("SpaceMono-Regular", size: 12.5)) }
 }
 
 struct GridView: View {
     let data: GridData; private let width: CGFloat = 150
     var body: some View {
-        if data.columns.isEmpty { VStack(spacing: 10) { Image(systemName: "tablecells"); Text("No results").font(.custom("Geist-Regular", size: 13)); Text("Run a query or choose a table.").foregroundStyle(Graphite.faint).font(.custom("Geist-Regular", size: 11)) }.frame(maxWidth: .infinity, maxHeight: .infinity).background(Graphite.bg) }
+        if data.columns.isEmpty { VStack(spacing: 10) { Image(systemName: "tablecells"); Text("No results").font(.custom("SpaceMono-Regular", size: 13)); Text("Run a query or choose a table.").foregroundStyle(Graphite.faint).font(.custom("SpaceMono-Regular", size: 11)) }.frame(maxWidth: .infinity, maxHeight: .infinity).background(Graphite.bg) }
         else { ScrollView(.horizontal) { VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 0) { ForEach(Array(data.columns.enumerated()), id: \.offset) { index, column in Text(column).font(.custom("GeistMono-Regular", size: 11).weight(.semibold)).lineLimit(1).frame(width: width, alignment: .leading).padding(.horizontal, 8).frame(height: 34).background(Graphite.gridHeader).accessibilityIdentifier("result-column-\(index)") } }.overlay(alignment: .bottom) { Rectangle().fill(Graphite.border).frame(height: 0.5) }
+            HStack(spacing: 0) { ForEach(Array(data.columns.enumerated()), id: \.offset) { index, column in Text(column).font(.custom("SpaceMono-Bold", size: 11)).lineLimit(1).frame(width: width, alignment: .leading).padding(.horizontal, 8).frame(height: 34).background(Graphite.gridHeader).accessibilityIdentifier("result-column-\(index)") } }.overlay(alignment: .bottom) { Rectangle().fill(Graphite.border).frame(height: 0.5) }
             ScrollView(.vertical) { LazyVStack(alignment: .leading, spacing: 0) {
-                ForEach(Array(data.rows.enumerated()), id: \.offset) { rowIndex, row in HStack(spacing: 0) { ForEach(data.columns.indices, id: \.self) { index in Text(index < row.count ? display(row[index]) : "").foregroundStyle((index < row.count && row[index] is NSNull) ? Graphite.faint : Graphite.text).font(.custom("GeistMono-Regular", size: 12)).lineLimit(1).frame(width: width, alignment: .leading).padding(.horizontal, 8).frame(height: 32).overlay(alignment: .bottom) { Rectangle().fill(Graphite.hairline).frame(height: 0.5) } } }.accessibilityElement(children: .ignore).accessibilityLabel(rowLabel(rowIndex, row)).accessibilityIdentifier("result-row-\(rowIndex + 1)") }
+                ForEach(Array(data.rows.enumerated()), id: \.offset) { rowIndex, row in HStack(spacing: 0) { ForEach(data.columns.indices, id: \.self) { index in Text(index < row.count ? display(row[index]) : "").foregroundStyle((index < row.count && row[index] is NSNull) ? Graphite.faint : Graphite.text).font(.custom("SpaceMono-Regular", size: 12)).lineLimit(1).frame(width: width, alignment: .leading).padding(.horizontal, 8).frame(height: 32).overlay(alignment: .bottom) { Rectangle().fill(Graphite.hairline).frame(height: 0.5) } } }.accessibilityElement(children: .ignore).accessibilityLabel(rowLabel(rowIndex, row)).accessibilityIdentifier("result-row-\(rowIndex + 1)") }
             } }.accessibilityIdentifier("results-rows")
         }.frame(width: CGFloat(data.columns.count) * (width + 16), alignment: .topLeading).frame(maxHeight: .infinity) }.background(Graphite.bg).accessibilityIdentifier("results-grid") }
     }
@@ -141,11 +141,11 @@ struct GridView: View {
 
 private struct SecondaryButton: ButtonStyle {
     @Environment(\.isEnabled) private var enabled
-    func makeBody(configuration: Configuration) -> some View { configuration.label.font(.custom("Geist-Regular", size: 12)).padding(.horizontal, 12).frame(minHeight: 36).background(configuration.isPressed ? Graphite.controlActive : Graphite.control).foregroundStyle(Graphite.text).clipShape(RoundedRectangle(cornerRadius: 6)).overlay(RoundedRectangle(cornerRadius: 6).stroke(Graphite.borderStrong)).opacity(enabled ? 1 : 0.4) }
+    func makeBody(configuration: Configuration) -> some View { configuration.label.font(.custom("SpaceMono-Regular", size: 12)).padding(.horizontal, 12).frame(minHeight: 36).background(configuration.isPressed ? Graphite.controlActive : Graphite.control).foregroundStyle(Graphite.text).clipShape(RoundedRectangle(cornerRadius: 6)).overlay(RoundedRectangle(cornerRadius: 6).stroke(Graphite.borderStrong)).opacity(enabled ? 1 : 0.4) }
 }
 
 private struct PrimaryButton: ButtonStyle {
     @Environment(\.isEnabled) private var enabled
-    func makeBody(configuration: Configuration) -> some View { configuration.label.font(.custom("Geist-Regular", size: 12).weight(.semibold)).padding(.horizontal, 12).frame(minHeight: 36).background(configuration.isPressed ? Graphite.accent : Graphite.accentStrong).foregroundStyle(.white).clipShape(RoundedRectangle(cornerRadius: 6)).opacity(enabled ? 1 : 0.4) }
+    func makeBody(configuration: Configuration) -> some View { configuration.label.font(.custom("SpaceMono-Bold", size: 12)).padding(.horizontal, 12).frame(minHeight: 36).background(configuration.isPressed ? Graphite.accent : Graphite.accentStrong).foregroundStyle(.white).clipShape(RoundedRectangle(cornerRadius: 6)).opacity(enabled ? 1 : 0.4) }
 }
-private extension View { func sectionLabel() -> some View { self.font(.custom("Geist-Regular", size: 11).weight(.semibold)).foregroundStyle(Graphite.muted).padding(.horizontal, 12).padding(.vertical, 5) } }
+private extension View { func sectionLabel() -> some View { self.font(.custom("SpaceMono-Bold", size: 11)).foregroundStyle(Graphite.muted).padding(.horizontal, 12).padding(.vertical, 5) } }

@@ -14,4 +14,4 @@ done
 # Distribution bundles must include both JNI architectures and the font notices.
 unzip -l "$ROOT/app/build/outputs/apk/debug/app-debug.apk" | grep 'lib/arm64-v8a/libdbm_android.so'
 unzip -l "$ROOT/app/build/outputs/apk/debug/app-debug.apk" | grep 'lib/x86_64/libdbm_android.so'
-unzip -l "$ROOT/app/build/outputs/apk/debug/app-debug.apk" | grep 'assets/Geist-LICENSE.txt'
+unzip -l "$ROOT/app/build/outputs/apk/debug/app-debug.apk" | grep 'assets/SpaceMono-LICENSE.txt'

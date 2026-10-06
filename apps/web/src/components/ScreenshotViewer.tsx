@@ -1,4 +1,4 @@
-import { useEffect, useRef, type KeyboardEvent, type PointerEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 
 export type Screenshot = { src: string; alt: string; caption: string };
 
@@ -20,6 +20,7 @@ export function stepIndex(index: number, step: number, count: number): number {
 export function ScreenshotViewer({ shots, index, onIndexChange, onClose }: ScreenshotViewerProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const swipeStartRef = useRef<number | null>(null);
+  const [zoomed, setZoomed] = useState(false);
   const open = index !== null;
   const position = index ?? 0;
   const shot = open ? shots[position] : undefined;
@@ -48,6 +49,15 @@ export function ScreenshotViewer({ shots, index, onIndexChange, onClose }: Scree
     };
   }, [open]);
 
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    if (!open || !viewport) return;
+    const updateZoom = () => setZoomed(viewport.scale > 1);
+    updateZoom();
+    viewport.addEventListener("resize", updateZoom);
+    return () => viewport.removeEventListener("resize", updateZoom);
+  }, [open]);
+
   function step(direction: number) {
     if (index !== null) onIndexChange(stepIndex(index, direction, shots.length));
   }
@@ -63,6 +73,11 @@ export function ScreenshotViewer({ shots, index, onIndexChange, onClose }: Scree
   }
 
   function handlePointerDown(event: PointerEvent<HTMLDivElement>) {
+    // A second finger starts a pinch; zoomed drags pan the viewport, not the gallery.
+    if (!event.isPrimary || (window.visualViewport?.scale ?? 1) > 1) {
+      swipeStartRef.current = null;
+      return;
+    }
     // Keep receiving the pointer when a swipe ends outside the image.
     event.currentTarget.setPointerCapture(event.pointerId);
     swipeStartRef.current = event.clientX;
@@ -71,7 +86,7 @@ export function ScreenshotViewer({ shots, index, onIndexChange, onClose }: Scree
   function handlePointerUp(event: PointerEvent<HTMLDivElement>) {
     const start = swipeStartRef.current;
     swipeStartRef.current = null;
-    if (start === null) return;
+    if (start === null || (window.visualViewport?.scale ?? 1) > 1) return;
     const distance = event.clientX - start;
     if (Math.abs(distance) >= SWIPE_DISTANCE) step(distance < 0 ? 1 : -1);
   }
@@ -103,7 +118,7 @@ export function ScreenshotViewer({ shots, index, onIndexChange, onClose }: Scree
 
           <figure className="flex w-full flex-col items-center" data-dismiss="">
             <div
-              className="touch-pan-y select-none"
+              className={`select-none ${zoomed ? "touch-auto" : "touch-pan-y touch-pinch-zoom"}`}
               onPointerDown={handlePointerDown}
               onPointerUp={handlePointerUp}
               onPointerCancel={() => {
@@ -134,6 +149,7 @@ export function ScreenshotViewer({ shots, index, onIndexChange, onClose }: Scree
                 <ChevronIcon direction="right" />
               </button>
             </figcaption>
+            <p className="mt-3 text-xs text-ink-faint sm:hidden">Pinch to zoom · Swipe to browse</p>
           </figure>
         </div>
       ) : null}

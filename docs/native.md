@@ -21,7 +21,7 @@ mobile contract, and [releases](releases.md) for desktop packaging and updates.
   passwords when saving), not a subprocess or a network service.
 - `apps/native/workbench` uses Rust with egui/wgpu on Windows and Linux, calling
   the core directly on a serialized worker with a two-thread Tokio runtime.
-  Rendering uses native graphics backends and bundled Geist fonts. **egui draws
+  Rendering uses native graphics backends and bundled Space Mono fonts. **egui draws
   its own controls, not Windows/GTK system widgets.** It is a separate Cargo
   workspace, so egui's dependency graph stays out of the root workspace.
 - `apps/native/android` and `apps/native/ios` use Compose and SwiftUI. They call
@@ -50,7 +50,7 @@ discarded with that session.
   for the current architecture and signs ad hoc; `DBM_UNIVERSAL=1` builds for
   Apple Silicon and Intel, and `DBM_SIGNING_IDENTITY` signs with a Developer ID
   and the hardened runtime. It bundles the bridge dylib, the icon, and the
-  Geist fonts, and records `DBM_NATIVE_BUILD`, `DBM_APP_VERSION`, and
+  Space Mono fonts, and records `DBM_NATIVE_BUILD`, `DBM_APP_VERSION`, and
   `DBM_NATIVE_VERSION` in `Info.plist` when they are set.
 - `cargo build --manifest-path apps/native/workbench/Cargo.toml --locked --release`
   produces `apps/native/workbench/target/release/dbm-workbench` (`.exe` on
@@ -100,7 +100,7 @@ snapshots (`--demo --snapshot-dir`).
 
 | Area | egui (Windows/Linux) | AppKit (macOS) |
 | --- | --- | --- |
-| Graphite layout: sidebar, top bar, connection-colored tab strip, toolbars, cards, Geist fonts | Done | Done |
+| Graphite layout: sidebar, top bar, connection-colored tab strip, toolbars, cards, Space Mono fonts | Done | Done |
 | Welcome screen, sidebar collapse and resize (persisted) | Done | Done |
 | Profiles: engine picker, URL import, colors, TLS/CA, read-only, test before save | Done | Done |
 | Sidebar: connection subtitles, database picker, filterable schema/keyspace tree, refresh summary toast | Done | Done |

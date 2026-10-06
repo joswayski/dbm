@@ -5,8 +5,9 @@ import SwiftUI
 
 final class ModelsTests: XCTestCase {
     func testBundledFontsUseRegisteredPostScriptNames() {
-        XCTAssertNotNil(UIFont(name: "Geist-Regular", size: 15))
-        XCTAssertNotNil(UIFont(name: "GeistMono-Regular", size: 14))
+        for name in ["SpaceMono-Regular", "SpaceMono-Bold", "SpaceMono-Italic", "SpaceMono-BoldItalic"] {
+            XCTAssertEqual(UIFont(name: name, size: 15)?.familyName, "Space Mono", name)
+        }
     }
     func testAppMetadataPreservesNativeDisplayAndPrivateNetworkUsage() {
         XCTAssertNotNil(Bundle.main.object(forInfoDictionaryKey: "UILaunchScreen") as? [String: Any])

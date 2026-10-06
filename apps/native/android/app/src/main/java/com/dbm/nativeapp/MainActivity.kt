@@ -31,6 +31,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -71,7 +72,13 @@ private val Secondary = Color(0xffc7c7cc); private val Muted = Color(0xffa0a0a6)
 private val Accent = Color(0xff4c9aff); private val AccentStrong = Color(0xff3b78c7)
 private val Success = Color(0xff5ad394); private val Danger = Color(0xffff8a80)
 private val Palette = listOf("#4c9aff", "#ff9f43", "#3dd6c6", "#b48cff", "#ff6b8a", "#7ed957", "#f0b14c", "#8e8e93")
-private val UiFont = FontFamily(Font(R.font.geist)); private val MonoFont = FontFamily(Font(R.font.geist_mono))
+private val UiFont = FontFamily(
+    Font(R.font.space_mono_regular, FontWeight.Normal),
+    Font(R.font.space_mono_bold, FontWeight.Bold),
+    Font(R.font.space_mono_italic, FontWeight.Normal, FontStyle.Italic),
+    Font(R.font.space_mono_bold_italic, FontWeight.Bold, FontStyle.Italic),
+)
+private val MonoFont = UiFont
 private fun profileColor(value: String?) = runCatching { Color(android.graphics.Color.parseColor(value ?: "#4c9aff")) }.getOrDefault(Accent)
 private fun engineTitle(value: String) = when(value) { "postgres" -> "PostgreSQL"; "mysql" -> "MySQL"; else -> "Redis" }
 
@@ -84,7 +91,17 @@ private fun engineTitle(value: String) = when(value) { "postgres" -> "PostgreSQL
         }
         owner.lifecycle.addObserver(observer); onDispose { owner.lifecycle.removeObserver(observer) }
     }
-    val typography = Typography(
+    val defaults = Typography()
+    val typography = defaults.copy(
+        displayLarge = defaults.displayLarge.copy(fontFamily = UiFont),
+        displayMedium = defaults.displayMedium.copy(fontFamily = UiFont),
+        displaySmall = defaults.displaySmall.copy(fontFamily = UiFont),
+        headlineLarge = defaults.headlineLarge.copy(fontFamily = UiFont),
+        headlineMedium = defaults.headlineMedium.copy(fontFamily = UiFont),
+        titleLarge = defaults.titleLarge.copy(fontFamily = UiFont),
+        titleSmall = defaults.titleSmall.copy(fontFamily = UiFont),
+        labelMedium = defaults.labelMedium.copy(fontFamily = UiFont),
+        labelSmall = defaults.labelSmall.copy(fontFamily = UiFont),
         bodyLarge = TextStyle(fontFamily = UiFont, fontSize = 13.sp),
         bodyMedium = TextStyle(fontFamily = UiFont, fontSize = 13.sp),
         bodySmall = TextStyle(fontFamily = UiFont, fontSize = 12.sp),
