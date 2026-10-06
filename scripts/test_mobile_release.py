@@ -44,11 +44,13 @@ class ReleaseWorkflowTests(unittest.TestCase):
             "GITHUB_SHA": SHA, "GITHUB_REPOSITORY": "joswayski/dbm",
             "GITHUB_SERVER_URL": "https://github.com", "GITHUB_API_URL": "https://api.github.com",
             "GITHUB_OUTPUT": str(self.directory / "output"), "GITHUB_RUN_NUMBER": "9",
-            "GITHUB_RUN_ATTEMPT": "2", "REQUESTED_SHA": "", "TESTED": "1",
-            "ANCESTOR": "0", "CALLS": str(self.directory / "calls"),
+            "GITHUB_RUN_ATTEMPT": "2", "REQUESTED_SHA": "", "TESTED": SHA,
+            "ANCESTOR": "0", "MOBILE_CHANGED": "0", "CALLS": str(self.directory / "calls"),
         }
-        executable(self.bin / "git", '#!/bin/sh\nexit "$ANCESTOR"\n')
-        executable(self.bin / "gh", '#!/bin/sh\nprintf "%s\\n" "$*" >> "$CALLS"\necho "$TESTED"\n')
+        # git merge-base --is-ancestor exits $ANCESTOR; git diff --quiet exits
+        # $MOBILE_CHANGED. gh lists $TESTED as the passing mobile build SHAs.
+        executable(self.bin / "git", '#!/bin/sh\n[ "$1" = diff ] && exit "$MOBILE_CHANGED"\nexit "$ANCESTOR"\n')
+        executable(self.bin / "gh", '#!/bin/sh\nprintf "%s\\n" "$*" >> "$CALLS"\nprintf "%s\\n" $TESTED\n')
 
     def run_step(self, script, **env):
         return subprocess.run(["bash", "-c", script], env={**self.env, **env},
@@ -60,17 +62,28 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertEqual(job["if"], "github.ref == 'refs/heads/main'")
         self.assertEqual(job["permissions"]["actions"], "read")
         script = job["steps"][1]["run"]
-        for env in ({"TESTED": "0"}, {"ANCESTOR": "1"}, {"REQUESTED_SHA": SHA.upper()},
-                    {"REQUESTED_SHA": "main; touch unexpected"}, {"GITHUB_RUN_ATTEMPT": "100"}):
+        # No passing mobile build, mobile files changed since the newest one,
+        # off main, malformed SHAs, and exhausted attempts are all refused.
+        for env in ({"TESTED": ""}, {"MOBILE_CHANGED": "1"}, {"ANCESTOR": "1"},
+                    {"REQUESTED_SHA": SHA.upper()}, {"REQUESTED_SHA": "main; touch unexpected"},
+                    {"GITHUB_RUN_ATTEMPT": "100"}):
             with self.subTest(env=env):
                 self.assertNotEqual(self.run_step(script, **env).returncode, 0)
                 self.assertFalse((self.directory / "output").exists())
         result = self.run_step(script)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual((self.directory / "output").read_text(), f"sha={SHA}\nandroid_build=902\n")
-        self.assertIn(f"head_sha={SHA}&branch=main&event=push&status=success", (self.directory / "calls").read_text())
+        self.assertIn("mobile.yml/runs?branch=main&event=push&status=success", (self.directory / "calls").read_text())
         self.assertEqual(self.run_step(script, GITHUB_RUN_ATTEMPT="3").returncode, 0)
         self.assertTrue((self.directory / "output").read_text().endswith("android_build=903\n"))
+
+    def test_resolve_releases_ci_only_commits_from_an_earlier_passing_build(self):
+        script = workflow("mobile-release.yml")["jobs"]["resolve"]["steps"][1]["run"]
+        earlier = "fedcba9876543210fedcba9876543210fedcba98"
+        result = self.run_step(script, TESTED=earlier)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"unchanged since {earlier}", result.stdout)
+        self.assertEqual((self.directory / "output").read_text(), f"sha={SHA}\nandroid_build=902\n")
 
     def test_publishing_cannot_replace_the_desktop_latest_release(self):
         release = workflow("mobile-release.yml")
