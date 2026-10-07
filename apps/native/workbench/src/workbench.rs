@@ -1274,6 +1274,7 @@ impl Workbench {
         let panel_id = egui::Id::new("sidebar");
         let handle = ctx.read_response(panel_id.with("__resize"));
         if handle.as_ref().is_some_and(egui::Response::double_clicked) {
+            egui::Popup::close_all(ctx);
             ctx.data_mut(|d| d.remove::<egui::containers::panel::PanelState>(panel_id));
         }
         // A click on the edge selects it, like the desktop's focusable
@@ -1288,6 +1289,11 @@ impl Workbench {
             self.sidebar_handle_focused = handle
                 .as_ref()
                 .is_some_and(|r| r.interact_rect.contains(origin));
+            // Dismiss transient menus before moving their sidebar anchors.
+            // In particular, the database picker can overlap the resize grip.
+            if self.sidebar_handle_focused {
+                egui::Popup::close_all(ctx);
+            }
         }
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.sidebar_handle_focused = false;
@@ -1301,6 +1307,7 @@ impl Workbench {
                 f32::from(i8::from(right) - i8::from(left)) * 10.0
             });
             if delta != 0.0 {
+                egui::Popup::close_all(ctx);
                 if let Some(mut state) = egui::containers::panel::PanelState::load(ctx, panel_id) {
                     let width = (state.rect.width() + delta).clamp(220.0, 480.0);
                     state.rect.set_width(width);
@@ -3836,6 +3843,84 @@ mod tests {
             kind,
             stale: false,
         }
+    }
+
+    #[test]
+    fn sidebar_resize_dismisses_popups_for_pointer_and_keyboard() {
+        let mut app = app();
+        let ctx = app.context.clone();
+        let panel_id = egui::Id::new("sidebar");
+        let popup_id = egui::Id::new("database-picker-test");
+        let mut frame = |events| {
+            let _ = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1280.0, 800.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ctx| {
+                    app.sidebar(ctx);
+                    egui::Popup::new(
+                        popup_id,
+                        ctx.clone(),
+                        egui::Rect::from_min_size(egui::pos2(20.0, 40.0), egui::vec2(220.0, 28.0)),
+                        egui::LayerId::background(),
+                    )
+                    .open_memory(None)
+                    .show(|ui| {
+                        ui.label("Database picker");
+                    });
+                },
+            );
+        };
+        frame(vec![]);
+        frame(vec![]);
+        let grip = ctx.read_response(panel_id.with("__resize")).unwrap();
+        egui::Popup::open_id(&ctx, popup_id);
+        frame(vec![]);
+        assert!(egui::Popup::is_id_open(&ctx, popup_id));
+
+        let pos = grip.interact_rect.center();
+        frame(vec![
+            egui::Event::PointerMoved(pos),
+            egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ]);
+        assert!(!egui::Popup::is_id_open(&ctx, popup_id));
+        let width = egui::containers::panel::PanelState::load(&ctx, panel_id)
+            .unwrap()
+            .rect
+            .width();
+        frame(vec![egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+
+        egui::Popup::open_id(&ctx, popup_id);
+        frame(vec![egui::Event::Key {
+            key: egui::Key::ArrowLeft,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        assert!(!egui::Popup::is_id_open(&ctx, popup_id));
+        assert_eq!(
+            egui::containers::panel::PanelState::load(&ctx, panel_id)
+                .unwrap()
+                .rect
+                .width(),
+            width - 10.0
+        );
     }
 
     #[test]
