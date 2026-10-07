@@ -464,6 +464,7 @@ final class GPopUpCell: NSPopUpButtonCell {
 
 final class GPopUp: NSPopUpButton {
     var onSelect: ((Int) -> Void)?
+    var itemIcons: [Icon] = [] { didSet { updateItemIcons() } }
 
     init(items: [String] = [], width: CGFloat? = nil) {
         super.init(frame: .zero, pullsDown: false)
@@ -490,6 +491,16 @@ final class GPopUp: NSPopUpButton {
         removeAllItems()
         addItems(withTitles: items)
         if let selected, items.contains(selected) { selectItem(withTitle: selected) }
+        updateItemIcons()
+    }
+
+    private func updateItemIcons() {
+        for (index, item) in itemArray.enumerated() {
+            let image = itemIcons.indices.contains(index) ? itemIcons[index].image(color: .black) : nil
+            image?.isTemplate = true
+            item.image = image
+        }
+        needsDisplay = true
     }
 
     @objc private func selected() { onSelect?(indexOfSelectedItem) }
@@ -501,7 +512,13 @@ final class GPopUp: NSPopUpButton {
             .font: Graphite.ui(12.5), .foregroundColor: isEnabled ? Graphite.text : Graphite.faint,
         ])
         let height = text.size().height
-        text.draw(with: NSRect(x: 10, y: (bounds.height - height) / 2, width: max(0, bounds.width - 38), height: height),
+        let hasIcon = itemIcons.indices.contains(indexOfSelectedItem)
+        if hasIcon {
+            itemIcons[indexOfSelectedItem].draw(in: NSRect(x: 10, y: bounds.midY - 7, width: 14, height: 14),
+                                                color: isEnabled ? Graphite.text : Graphite.faint)
+        }
+        let inset: CGFloat = hasIcon ? 30 : 10
+        text.draw(with: NSRect(x: inset, y: (bounds.height - height) / 2, width: max(0, bounds.width - inset - 28), height: height),
                   options: [.truncatesLastVisibleLine, .usesLineFragmentOrigin])
     }
 

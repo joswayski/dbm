@@ -46,7 +46,11 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
     private let filterRows = vstack([], spacing: 6)
     private let limitField = GTextField("200", mono: true)
     private let sortColumn = GPopUp(width: 180)
-    private let sortDirection = GPopUp(items: ["Ascending", "Descending"], width: 120)
+    private let sortDirection: GPopUp = {
+        let popup = GPopUp(items: ["Ascending", "Descending"], width: 146)
+        popup.itemIcons = [.arrowUp, .arrowDown]
+        return popup
+    }()
     private let directionLabel = label("Direction", font: Graphite.ui(12), color: Graphite.muted)
     private lazy var clearButton = GButton("Clear", style: .secondary) { [weak self] in self?.clearFilters() }
     private lazy var resetColumnsButton = GButton("Reset columns", style: .link, tooltip: "Restore every column's default width") { [weak self] in
