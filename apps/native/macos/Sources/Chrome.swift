@@ -149,22 +149,16 @@ final class SidebarView: PanelView {
         widthConstraint = widthAnchor.constraint(equalToConstant: stored >= 220 && stored <= 480 ? stored : Self.defaultWidth)
         widthConstraint.isActive = true
 
-        let badge = PanelView(fill: Graphite.accentStrong)
-        badge.radius = 6
-        badge.pin(IconView(.database, size: 14, color: .white), insets: NSEdgeInsets(top: 4, left: 4, bottom: 4, right: 4))
         let collapse = GButton("", icon: .sidebar, style: .icon, tooltip: "Collapse sidebar") { [weak self] in self?.setCollapsed(true) }
-        let brand = hstack([badge, label("Anybase", font: Graphite.ui(14, .semibold), color: Graphite.textStrong), spacer(), collapse], spacing: 8)
-        let connections = label("Connections", font: Graphite.ui(11, .semibold), color: Graphite.muted)
+        let connections = hstack([label("Connections", font: Graphite.ui(11, .semibold), color: Graphite.muted), spacer(), collapse], spacing: 8)
         let scroll = verticalScroll(list)
         let newConnection = GButton("New connection", icon: .plus, style: .secondary) { [weak app] in app?.newProfile() }
         newConnection.minHeight = 30
         let footer = PanelView(fill: nil, edges: [.top])
         footer.pin(newConnection, insets: NSEdgeInsets(top: 10, left: 10, bottom: 10, right: 10))
-        let column = vstack([brand, connections, scroll, footer], spacing: 0)
-        column.setCustomSpacing(14, after: brand)
+        let column = vstack([connections, scroll, footer], spacing: 0)
         column.setCustomSpacing(6, after: connections)
         column.distribution = .fill
-        brand.widthAnchor.constraint(equalTo: column.widthAnchor, constant: -20).isActive = true
         connections.widthAnchor.constraint(equalTo: column.widthAnchor, constant: -20).isActive = true
         scroll.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true
         footer.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true
