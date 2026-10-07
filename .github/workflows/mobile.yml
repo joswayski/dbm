@@ -122,14 +122,11 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: 1.94.0
-          targets: aarch64-apple-ios-sim,aarch64-apple-ios
-      - uses: Swatinem/rust-cache@v2
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+      # Runs alongside the Rust toolchain and cache restore below, which do
+      # not touch Xcode or the simulator.
       - name: Provision the SDK-matched iPhone test simulator
+        id: simulator
+        background: true
         run: |
           sudo xcodebuild -runFirstLaunch
           # simctl waits for CoreSimulator's cache initialization; xcodebuild does not.
@@ -147,6 +144,16 @@ jobs:
           xcrun simctl boot "$device"
           echo "DBM_IOS_SIMULATOR_ID=$device" >> "$GITHUB_ENV"
           echo "DBM_IOS_TEST_DESTINATION=platform=iOS Simulator,id=$device" >> "$GITHUB_ENV"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.94.0
+          targets: aarch64-apple-ios-sim,aarch64-apple-ios
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      # Also applies the simulator's GITHUB_ENV values to the steps below.
+      - name: Wait for the test simulator to be created
+        wait: simulator
       # prepare.sh (run by build.sh) compiles XcodeGen from source at a pinned
       # commit; reuse that build. Keyed by the commit and the Xcode version, and
       # still checked out and verified against the commit by prepare.sh.
