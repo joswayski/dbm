@@ -239,9 +239,15 @@ final class GridRowView: NSTableRowView {
         if mark == .deleted {
             (hovered ? NSColor(hex: 0xff6b61, alpha: 0.13) : Graphite.dangerSoft).setFill()
             bounds.fill()
-        } else if hovered {
-            NSColor(white: 1, alpha: 0.025).setFill()
-            bounds.fill()
+        } else {
+            if mark == .modified && !isSelected {
+                Graphite.modifiedRowSoft.setFill()
+                bounds.fill()
+            }
+            if hovered {
+                NSColor(white: 1, alpha: 0.025).setFill()
+                bounds.fill()
+            }
         }
         Graphite.hairline.setFill()
         NSRect(x: 0, y: bounds.height - 1, width: bounds.width, height: 1).fill()
@@ -260,6 +266,10 @@ final class GridRowView: NSTableRowView {
             NSColor(hex: 0x4c9aff, alpha: hovered ? 0.16 : 0.13).setFill()
         }
         bounds.fill()
+        if mark == .modified {
+            Graphite.modifiedRowSoft.setFill()
+            bounds.fill()
+        }
         let edge = mark == .deleted ? Graphite.danger : mark == .modified ? Graphite.modified : Graphite.accent
         edge.setFill()
         NSRect(x: 0, y: 0, width: 2, height: bounds.height).fill()

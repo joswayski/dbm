@@ -25,6 +25,7 @@ pub const ACCENT_SOFT: Color32 = Color32::from_rgba_premultiplied(11, 22, 36, 36
 pub const EDIT_SURFACE: Color32 = Color32::from_rgb(0x10, 0x19, 0x2a);
 pub const MODIFIED: Color32 = Color32::from_rgb(0xf0, 0xb1, 0x4c);
 pub const MODIFIED_SOFT: Color32 = Color32::from_rgba_premultiplied(29, 21, 9, 31);
+pub const MODIFIED_ROW_SOFT: Color32 = Color32::from_rgba_premultiplied(12, 9, 4, 13);
 pub const SUCCESS: Color32 = Color32::from_rgb(0x5a, 0xd3, 0x94);
 pub const DANGER: Color32 = Color32::from_rgb(0xff, 0x8a, 0x80);
 pub const DANGER_SOFT: Color32 = Color32::from_rgba_premultiplied(23, 10, 9, 23);

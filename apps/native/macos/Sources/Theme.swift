@@ -26,6 +26,7 @@ enum Graphite {
     static let editSurface = NSColor(hex: 0x10192a)
     static let modified = NSColor(hex: 0xf0b14c)
     static let modifiedSoft = NSColor(hex: 0xf0b14c, alpha: 0.12)
+    static let modifiedRowSoft = NSColor(hex: 0xf0b14c, alpha: 0.05)
     static let success = NSColor(hex: 0x5ad394)
     static let danger = NSColor(hex: 0xff8a80)
     static let dangerSoft = NSColor(hex: 0xff6b61, alpha: 0.09)

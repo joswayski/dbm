@@ -1947,6 +1947,8 @@ fn grid(
                                 }
                                 if deleted {
                                     ui.painter().rect_filled(rect, 0, theme::DANGER_SOFT);
+                                } else if modified {
+                                    ui.painter().rect_filled(rect, 0, theme::MODIFIED_ROW_SOFT);
                                 }
                                 let changed = pending
                                     .is_some_and(|p| p.changes[column] != p.original[column]);
@@ -2640,6 +2642,72 @@ pub mod tests {
         assert!(Arc::ptr_eq(state.page.as_ref().unwrap(), &shared));
         assert_eq!(shared.rows[0][1], original);
         assert_eq!(state.pending[&0].changes[1], json!("ada@example.com"));
+    }
+
+    #[test]
+    fn staged_edit_tints_every_column_until_reverted_or_deleted() {
+        for (selected, deleted, reverted) in [
+            (false, false, false),
+            (true, false, false),
+            (true, true, false),
+            (false, false, true),
+        ] {
+            let context = egui::Context::default();
+            theme::configure(&context);
+            let page = Arc::new(page());
+            let mut state = TableState {
+                page: Some(page.clone()),
+                ..TableState::default()
+            };
+            stage_cell(&mut state, 1, 1, "changed@example.com");
+            if selected {
+                state.selected.insert(1);
+            }
+            if deleted {
+                toggle_delete(&mut state, &[1]);
+            }
+            if reverted {
+                stage_cell(&mut state, 1, 1, "person2@example.com");
+            }
+            let cx = TableContext {
+                tab_id: 1,
+                schema: "public",
+                table: "customers",
+                embedded: false,
+                read_only: false,
+                saving: false,
+                exporting: false,
+            };
+            let output = context.run(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        Vec2::new(1200.0, 400.0),
+                    )),
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        grid(ui, &cx, &mut state, &page, &mut Vec::new());
+                    });
+                },
+            );
+            let fills = |color| {
+                output.shapes.iter().filter(|shape| {
+                    matches!(&shape.shape, egui::epaint::Shape::Rect(rect) if rect.fill == color)
+                }).count()
+            };
+            let modified = !deleted && !reverted;
+            // All four visible columns, not just the changed email cell.
+            assert_eq!(
+                fills(theme::MODIFIED_ROW_SOFT),
+                if modified { 4 } else { 0 }
+            );
+            assert_eq!(fills(theme::MODIFIED_SOFT), usize::from(modified));
+            assert_eq!(fills(theme::DANGER_SOFT), if deleted { 4 } else { 0 });
+            assert_eq!(fills(theme::ACCENT_SOFT), if selected { 4 } else { 0 });
+            assert!(theme::MODIFIED_ROW_SOFT.a() < theme::MODIFIED_SOFT.a());
+        }
     }
 
     #[test]
