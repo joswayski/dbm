@@ -354,6 +354,7 @@ pub struct Workbench {
     now: f64,
     /// The window's width this frame, for layout defaults.
     window_width: f32,
+    startup_window_checked: bool,
 }
 
 impl Workbench {
@@ -401,10 +402,40 @@ impl Workbench {
             sidebar_handle_focused: false,
             completion: None,
             now: 0.0,
-            window_width: 1280.0,
+            window_width: crate::DEFAULT_WINDOW_SIZE.x,
+            startup_window_checked: false,
         };
         app.send(Command::LoadProfiles, "Loading connections", None);
         app
+    }
+
+    fn ensure_startup_window_size(&mut self, ctx: &egui::Context) {
+        if self.startup_window_checked {
+            return;
+        }
+        let viewport = ctx.input(|input| input.viewport().clone());
+        if viewport.minimized == Some(true) {
+            return;
+        }
+        let size = ctx.content_rect().size();
+        if size.x <= 0.0 || size.y <= 0.0 {
+            return;
+        }
+        self.startup_window_checked = true;
+        if viewport.maximized == Some(true) || viewport.fullscreen == Some(true) {
+            return;
+        }
+
+        // Check the actual window after native creation and eframe's layout
+        // restoration, not just the requested size. Recover unusably small
+        // startup windows without resetting normal saved sizes on every launch.
+        let monitor_size = viewport.monitor_size.unwrap_or(crate::DEFAULT_WINDOW_SIZE);
+        let minimum = crate::MIN_WINDOW_SIZE.min(monitor_size);
+        if size.x < minimum.x || size.y < minimum.y {
+            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(
+                crate::DEFAULT_WINDOW_SIZE.min(monitor_size),
+            ));
+        }
     }
 
     // ---- requests -------------------------------------------------------
@@ -1212,6 +1243,7 @@ impl eframe::App for Workbench {
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.ensure_startup_window_size(ctx);
         self.now = ctx.input(|input| input.time);
         if !self.demo {
             self.updates.poll(ctx, self.now);
@@ -3836,6 +3868,108 @@ mod tests {
             kind,
             stale: false,
         }
+    }
+
+    fn startup_window_commands(
+        app: &mut Workbench,
+        size: Vec2,
+        viewport: egui::ViewportInfo,
+    ) -> Vec<egui::ViewportCommand> {
+        let mut input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+            ..Default::default()
+        };
+        input.viewports.insert(egui::ViewportId::ROOT, viewport);
+        let mut output = app.context.clone().run(input, |ctx| {
+            app.ensure_startup_window_size(ctx);
+        });
+        output
+            .viewport_output
+            .remove(&egui::ViewportId::ROOT)
+            .unwrap()
+            .commands
+    }
+
+    #[test]
+    fn tiny_startup_window_recovers_once_in_logical_pixels() {
+        let mut app = app();
+        let viewport = egui::ViewportInfo {
+            native_pixels_per_point: Some(1.5),
+            monitor_size: Some(egui::vec2(1920.0, 1080.0)),
+            ..Default::default()
+        };
+        assert_eq!(
+            startup_window_commands(&mut app, egui::vec2(100.0, 200.0), viewport.clone()),
+            vec![egui::ViewportCommand::InnerSize(egui::vec2(1280.0, 800.0))]
+        );
+        // Later resizes must not be overridden, even if the first resize has
+        // not yet been applied by the OS.
+        assert!(startup_window_commands(&mut app, egui::vec2(100.0, 200.0), viewport).is_empty());
+    }
+
+    #[test]
+    fn startup_size_checks_both_dimensions_and_preserves_valid_saved_sizes() {
+        for (size, resize) in [
+            (egui::vec2(899.0, 720.0), true),
+            (egui::vec2(1100.0, 599.0), true),
+            (egui::vec2(900.0, 600.0), false),
+            (egui::vec2(1060.0, 725.0), false),
+        ] {
+            let commands = startup_window_commands(&mut app(), size, egui::ViewportInfo::default());
+            let expected = if resize {
+                vec![egui::ViewportCommand::InnerSize(egui::vec2(1280.0, 800.0))]
+            } else {
+                vec![]
+            };
+            assert_eq!(commands, expected, "startup size: {size:?}");
+        }
+    }
+
+    #[test]
+    fn startup_recovery_fits_small_monitors() {
+        for monitor_size in [egui::vec2(1000.0, 700.0), egui::vec2(800.0, 500.0)] {
+            let viewport = egui::ViewportInfo {
+                monitor_size: Some(monitor_size),
+                ..Default::default()
+            };
+            assert_eq!(
+                startup_window_commands(&mut app(), egui::vec2(100.0, 200.0), viewport.clone()),
+                vec![egui::ViewportCommand::InnerSize(monitor_size)]
+            );
+            assert!(startup_window_commands(&mut app(), monitor_size, viewport).is_empty());
+        }
+    }
+
+    #[test]
+    fn startup_recovery_preserves_window_states_and_waits_for_unminimize() {
+        for viewport in [
+            egui::ViewportInfo {
+                maximized: Some(true),
+                ..Default::default()
+            },
+            egui::ViewportInfo {
+                fullscreen: Some(true),
+                ..Default::default()
+            },
+        ] {
+            assert!(
+                startup_window_commands(&mut app(), egui::vec2(100.0, 200.0), viewport).is_empty()
+            );
+        }
+        let mut app = app();
+        let minimized = egui::ViewportInfo {
+            minimized: Some(true),
+            ..Default::default()
+        };
+        assert!(startup_window_commands(&mut app, egui::vec2(100.0, 200.0), minimized).is_empty());
+        assert_eq!(
+            startup_window_commands(
+                &mut app,
+                egui::vec2(100.0, 200.0),
+                egui::ViewportInfo::default()
+            ),
+            vec![egui::ViewportCommand::InnerSize(egui::vec2(1280.0, 800.0))]
+        );
     }
 
     #[test]
