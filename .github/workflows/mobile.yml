@@ -134,6 +134,15 @@ jobs:
           xcrun simctl list
           version="$(xcrun --sdk iphonesimulator --show-sdk-version)"
           runtime="com.apple.CoreSimulator.SimRuntime.iOS-${version//./-}"
+          # The self-hosted Mac keeps simulators between jobs, and booted ones
+          # pile up until no more can boot. Its one dbm runner runs one job at
+          # a time, so any earlier run's device is unused: remove it.
+          xcrun simctl list devices --json \
+            | jq -r '.devices[][] | select(.name == "DBM UI Tests") | .udid' \
+            | while read -r stale; do
+                xcrun simctl shutdown "$stale" 2>/dev/null || true
+                xcrun simctl delete "$stale"
+              done
           runtimes="$(xcrun simctl list runtimes --json)"
           if ! jq -e --arg runtime "$runtime" 'any(.runtimes[]; .identifier == $runtime and .isAvailable)' <<< "$runtimes" > /dev/null; then
             xcodebuild -downloadPlatform iOS -buildVersion "$version"
@@ -224,3 +233,9 @@ jobs:
           curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
             "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/cancel" >/dev/null \
             || echo "::warning::Could not cancel the rest of this run"
+      - name: Delete the test simulator
+        # Self-hosted Macs keep it otherwise (GitHub-hosted ones are discarded).
+        if: always() && env.DBM_IOS_SIMULATOR_ID != ''
+        run: |
+          xcrun simctl shutdown "$DBM_IOS_SIMULATOR_ID" 2>/dev/null || true
+          xcrun simctl delete "$DBM_IOS_SIMULATOR_ID"
