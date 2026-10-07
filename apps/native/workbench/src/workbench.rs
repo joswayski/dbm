@@ -1868,6 +1868,7 @@ impl Workbench {
             }
             if whole.double_clicked() && tab.kind == TabKind::Query {
                 self.renaming = Some((tab.id, tab.title.clone()));
+                ui.memory_mut(|m| m.request_focus(egui::Id::new(("tab-title-input", tab.id))));
             }
             if whole.middle_clicked() {
                 self.close_tab(tab.id);
@@ -1916,12 +1917,12 @@ impl Workbench {
                         // `.tab-title-input`: 140 px on the edit surface.
                         let edit = ui.add(
                             egui::TextEdit::singleline(draft)
+                                .id(egui::Id::new(("tab-title-input", tab.id)))
                                 .desired_width(140.0)
                                 .font(theme::ui_font(12.5))
                                 .background_color(theme::EDIT_SURFACE),
                         );
-                        edit.request_focus();
-                        if edit.lost_focus() {
+                        if edit.lost_focus() || edit.clicked_elsewhere() {
                             let escape = ui.input(|i| i.key_pressed(egui::Key::Escape));
                             let title = draft.trim().to_owned();
                             if !escape && !title.is_empty() {
@@ -1990,6 +1991,9 @@ impl Workbench {
                             );
                             if pencil.clicked() {
                                 self.renaming = Some((tab.id, tab.title.clone()));
+                                ui.memory_mut(|m| {
+                                    m.request_focus(egui::Id::new(("tab-title-input", tab.id)))
+                                });
                             }
                         }
                     }
@@ -3826,6 +3830,91 @@ mod tests {
         let mut app = Workbench::with_context(egui::Context::default(), true);
         app.pending_requests.clear();
         app
+    }
+
+    #[test]
+    fn query_tab_rename_finishes_on_outside_click_enter_and_escape() {
+        for (event, draft, expected) in [
+            (
+                egui::Event::PointerButton {
+                    pos: egui::pos2(500.0, 200.0),
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+                "  Renamed query  ",
+                "Renamed query",
+            ),
+            (
+                egui::Event::Key {
+                    key: egui::Key::Enter,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+                "Renamed query",
+                "Renamed query",
+            ),
+            (
+                egui::Event::Key {
+                    key: egui::Key::Escape,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+                "Canceled query",
+                "Query 1",
+            ),
+            (
+                egui::Event::Key {
+                    key: egui::Key::Enter,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+                "   ",
+                "Query 1",
+            ),
+        ] {
+            let mut app = app();
+            app.open_query(Uuid::from_u128(1), true);
+            let tab = app.active_tab.unwrap();
+            let ctx = egui::Context::default();
+            app.renaming = Some((tab, draft.into()));
+            ctx.memory_mut(|m| m.request_focus(egui::Id::new(("tab-title-input", tab))));
+            let _ = ctx.run(egui::RawInput::default(), |ctx| app.tab_strip(ctx));
+            assert!(app.renaming.is_some());
+            let mut events = vec![event.clone()];
+            if let egui::Event::PointerButton {
+                pos,
+                button,
+                modifiers,
+                ..
+            } = event
+            {
+                events.insert(0, egui::Event::PointerMoved(pos));
+                events.push(egui::Event::PointerButton {
+                    pos,
+                    button,
+                    pressed: false,
+                    modifiers,
+                });
+            }
+            let _ = ctx.run(
+                egui::RawInput {
+                    events,
+                    ..Default::default()
+                },
+                |ctx| app.tab_strip(ctx),
+            );
+            assert!(app.renaming.is_none(), "rename should end for {expected}");
+            assert_eq!(app.tabs[0].title, expected);
+            let _ = ctx.run(egui::RawInput::default(), |ctx| app.tab_strip(ctx));
+            assert!(app.renaming.is_none());
+        }
     }
 
     fn meta(tab: Option<u64>, kind: RequestKind) -> RequestMeta {
