@@ -2301,7 +2301,7 @@ fn inspector(ui: &mut egui::Ui, cx: &TableContext<'_>, state: &mut TableState, p
 }
 
 /// One `.inspector-field`: mono name, type, a right-aligned note, then a
-/// 30 px input. Read-only fields (primary keys, deleted rows, read-only
+/// 26 px input. Read-only fields (primary keys, deleted rows, read-only
 /// profiles) render as plain muted text like the desktop's `[readonly]`.
 fn inspector_field(
     ui: &mut egui::Ui,
@@ -2394,16 +2394,17 @@ fn inspector_field(
         .fill(fill)
         .stroke(Stroke::new(1.0, stroke))
         .corner_radius(egui::CornerRadius::same(6))
-        .inner_margin(Margin::symmetric(10, 0));
+        .inner_margin(Margin::symmetric(6, 0));
     let response = frame
         .show(ui, |ui| {
-            ui.set_height(28.0);
+            ui.set_height(24.0);
             ui.centered_and_justified(|ui| {
                 ui.add(
                     egui::TextEdit::singleline(&mut text)
                         .id(id)
                         .interactive(!read_only)
                         .frame(false)
+                        .margin(Margin::ZERO)
                         .font(mono(12.0))
                         .vertical_align(egui::Align::Center)
                         .text_color(if read_only { theme::MUTED } else { theme::TEXT })
@@ -2503,7 +2504,7 @@ pub mod tests {
     }
 
     #[test]
-    fn inspector_text_is_vertically_centered_in_every_field_state() {
+    fn inspector_inputs_are_compact_and_centered_in_every_field_state() {
         for scale in [1.0, 1.5, 2.0] {
             // Normal, focused, staged, NULL, primary key, and deleted fields.
             for (column, value, focused, deleted) in [
@@ -2563,6 +2564,27 @@ pub mod tests {
                     })
                     .expect("field value or NULL placeholder is painted");
                 let editor = context.read_response(id).unwrap().rect;
+                let name = output
+                    .shapes
+                    .iter()
+                    .find_map(|shape| match &shape.shape {
+                        egui::epaint::Shape::Text(text)
+                            if text.galley.text() == page.metadata.columns[column].name =>
+                        {
+                            Some(text)
+                        }
+                        _ => None,
+                    })
+                    .expect("column name is painted");
+                assert_eq!(editor.height(), 24.0, "26 px field minus its border");
+                assert!(
+                    (editor.left() - name.pos.x - 7.0).abs() <= 1.0 / scale,
+                    "6 px horizontal inset plus its border"
+                );
+                assert!(
+                    (text.pos.x - editor.left()).abs() <= 1.0 / scale,
+                    "the text editor must not add another layer of padding"
+                );
                 let text_center = text.pos.y + text.galley.size().y / 2.0;
                 assert!(
                     (text_center - editor.center().y).abs() <= 1.0 / scale,

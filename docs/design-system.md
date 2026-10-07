@@ -127,7 +127,8 @@ platform or egui fallback fonts.
   `--accent-strong` with white text; destructive items in `--danger`.
 - **Row inspector:** 300 px panel on the right of the grid showing the single
   selected row. Each field shows name, type, a note ("Primary key" or
-  "was …"), and a value field. Enter stages the change, Escape reverts it.
+  "was …"), and a compact 26 px value field with a 6 px leading inset.
+  Enter stages the change, Escape reverts it.
   Toggle it from the toolbar.
 - **Pending-changes bar:** amber dot, count, per-kind chips, Discard (secondary)
   and Save changes (primary).
