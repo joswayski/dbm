@@ -936,19 +936,19 @@ final class InspectorView: PanelView {
             notes = []
             for (index, column) in page.columns.enumerated() {
                 let isKey = page.primaryKey.contains(column.name)
-                // `.inspector-field`: mono name and type, a note, a 30 pt input.
+                // `.inspector-field`: mono name and type, a note, a 26 pt input.
                 let name = label(column.name, font: Graphite.mono(11.5), color: Graphite.secondary)
                 let type = label(column.dataType, font: Graphite.mono(11), color: NSColor(hex: 0x6f6f76))
                 let note = label("", font: Graphite.ui(11), color: Graphite.faint)
                 note.alignment = .right
                 let header = hstack([name, type, spacer(), note], spacing: 6)
-                let field = GTextField("", mono: true, height: 30)
+                let field = GTextField("", mono: true, height: 26)
                 let large = largeValueSize(values[index])
                 let readOnly = !editable || isKey || deleted || large != nil
                 field.isEditable = !readOnly
                 field.isSelectable = true
                 if let cell = field.cell as? GTextFieldCell {
-                    cell.leftInset = 10
+                    cell.leftInset = 6
                     cell.plain = readOnly
                 }
                 if readOnly { field.textColor = Graphite.muted }
