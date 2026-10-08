@@ -117,11 +117,48 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn(f"--target {SHA}", calls[2])
         self.assertEqual(release["jobs"]["publish"]["needs"], ["resolve", "android"])
 
+    def test_distribution_installs_workflow_locks_not_selected_source_metadata(self):
+        jobs = workflow("mobile-release.yml")["jobs"]
+        executable(
+            self.bin / "uv",
+            '#!/bin/sh\nprintf "%s\\n" "$*" >> "$CALLS"\n[ "$1" != "${FAIL_UV_AT:-}" ] || exit 73\n',
+        )
+        for job_name, script_name in [("android", "play-upload"), ("testflight", "testflight-distribute")]:
+            with self.subTest(job=job_name):
+                steps = jobs[job_name]["steps"]
+                checkouts = [step["with"] for step in steps if step.get("uses") == "actions/checkout@v4"]
+                self.assertEqual(checkouts[0]["ref"], "${{ needs.resolve.outputs.sha }}")
+                self.assertEqual(
+                    checkouts[1],
+                    {"ref": "${{ github.sha }}", "path": ".release-tooling", "sparse-checkout": "scripts"},
+                )
+                prepare = next(
+                    step["run"] for step in steps if step.get("name") == "Prepare locked distribution environment"
+                )
+                distribute = steps[-2]["run"]
+                self.assertIn(f'"$RUNNER_TEMP/mobile-python/bin/python" scripts/{script_name}.py', distribute)
+                self.assertNotIn("uv run", distribute)
+                expected = [
+                    f"export --locked --script .release-tooling/scripts/{script_name}.py "
+                    f"--output-file {self.directory}/mobile-requirements.txt",
+                    f"venv --python 3.12 {self.directory}/mobile-python",
+                    f"pip sync --python {self.directory}/mobile-python/bin/python "
+                    f"--require-hashes {self.directory}/mobile-requirements.txt",
+                ]
+                for fail_at, count in [("", 3), ("export", 1), ("venv", 2), ("pip", 3)]:
+                    with self.subTest(fail_at=fail_at):
+                        (self.directory / "calls").unlink(missing_ok=True)
+                        result = self.run_step(prepare, RUNNER_TEMP=str(self.directory), FAIL_UV_AT=fail_at)
+                        self.assertEqual(result.returncode, 73 if fail_at else 0, result.stderr)
+                        self.assertEqual((self.directory / "calls").read_text().splitlines(), expected[:count])
+
     def test_play_rollout_requires_dbm_credentials_without_shared_fallback(self):
         step = workflow("mobile-release.yml")["jobs"]["android"]["steps"][-2]
         self.assertNotIn("if", step)
         executable(self.bin / "aws", '#!/bin/sh\nprintf "%s" "$SIGNING_SECRET"\n')
-        executable(self.bin / "uv", '#!/bin/sh\nprintf "%s\\n" "$*" >> "$CALLS"\n')
+        python = self.directory / "mobile-python/bin/python"
+        python.parent.mkdir(parents=True)
+        executable(python, '#!/bin/sh\nprintf "%s\\n" "$*" >> "$CALLS"\n')
         account = json.dumps({"client_email": "dbm-release@example.invalid"})
         caper = {"service_account_json": json.dumps({"client_email": "caper-release@example.invalid"})}
         secret = json.dumps({"dbm_google_play": {"service_account_json": account}, "google_play": caper})
@@ -132,7 +169,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertEqual((self.directory / "play.json").read_text().strip(), account)
         self.assertEqual((self.directory / "play.json").stat().st_mode & 0o777, 0o600)
         self.assertIn(
-            "run --locked --python 3.12 --script scripts/play-upload.py dist/mobile/play/DBM-Android-Play.aab",
+            "scripts/play-upload.py dist/mobile/play/DBM-Android-Play.aab",
             (self.directory / "calls").read_text().splitlines(),
         )
 
