@@ -25,6 +25,7 @@ pub const ACCENT_SOFT: Color32 = Color32::from_rgba_premultiplied(11, 22, 36, 36
 pub const EDIT_SURFACE: Color32 = Color32::from_rgb(0x10, 0x19, 0x2a);
 pub const MODIFIED: Color32 = Color32::from_rgb(0xf0, 0xb1, 0x4c);
 pub const MODIFIED_SOFT: Color32 = Color32::from_rgba_premultiplied(29, 21, 9, 31);
+pub const MODIFIED_ROW_SOFT: Color32 = Color32::from_rgba_premultiplied(12, 9, 4, 13);
 pub const SUCCESS: Color32 = Color32::from_rgb(0x5a, 0xd3, 0x94);
 pub const DANGER: Color32 = Color32::from_rgb(0xff, 0x8a, 0x80);
 pub const DANGER_SOFT: Color32 = Color32::from_rgba_premultiplied(23, 10, 9, 23);
@@ -169,7 +170,15 @@ pub fn configure(ctx: &egui::Context) {
 /// A menu row (`.selection-actions-menu button`): 28 px, 12.5 px text,
 /// accent fill with white text on hover; danger rows are red with a red wash.
 pub fn menu_item(ui: &mut egui::Ui, label: &str, danger: bool) -> egui::Response {
-    let width = ui.available_width().max(ui.min_rect().width());
+    let label_width = ui
+        .painter()
+        .layout_no_wrap(label.to_owned(), ui_font(12.5), TEXT)
+        .size()
+        .x;
+    let width = ui
+        .available_width()
+        .max(ui.min_rect().width())
+        .max(label_width + 16.0);
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 28.0), egui::Sense::click());
     response.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
@@ -196,10 +205,10 @@ pub fn menu_item(ui: &mut egui::Ui, label: &str, danger: bool) -> egui::Response
     response
 }
 
-/// Menu popups: `padding: 4px` with 1 px between rows, at least `width`.
+/// Menu popups: `padding: 4px` with 1 px between rows, starting at `width`.
 pub fn menu_scope(ui: &mut egui::Ui, width: f32) {
     ui.spacing_mut().item_spacing.y = 1.0;
-    ui.set_min_width(width - 8.0);
+    ui.set_width(width - 8.0);
 }
 
 /// A count with thousands separators, like `toLocaleString()` in en-US.
@@ -517,6 +526,34 @@ pub fn eyebrow(text: &str) -> egui::RichText {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn menus_stay_compact_in_wide_containers_and_fit_long_labels() {
+        let ctx = super::egui::Context::default();
+        super::configure(&ctx);
+        let _ = ctx.run(super::egui::RawInput::default(), |ctx| {
+            super::egui::CentralPanel::default().show(ctx, |ui| {
+                ui.set_width(900.0);
+                ui.scope(|ui| {
+                    super::menu_scope(ui, 200.0);
+                    let copy = super::menu_item(ui, "Copy selected as CSV", false);
+                    let delete = super::menu_item(ui, "Stage row for deletion", true);
+                    assert_eq!(copy.rect.width(), 192.0);
+                    assert_eq!(delete.rect.width(), 192.0);
+
+                    let label = "Stage 10000 rows for deletion";
+                    let label_width = ui
+                        .painter()
+                        .layout_no_wrap(label.to_owned(), super::ui_font(12.5), super::TEXT)
+                        .size()
+                        .x;
+                    let multiple = super::menu_item(ui, label, true);
+                    assert!(multiple.rect.width() >= label_width + 16.0);
+                    assert!(multiple.rect.width() < 300.0);
+                });
+            });
+        });
+    }
+
     #[test]
     fn ui_and_code_use_matching_monospaced_faces() {
         let ctx = super::egui::Context::default();

@@ -41,6 +41,44 @@ const FILTER_OPERATORS: [(FilterOperator, &str); 13] = [
     (FilterOperator::IsNotNull, "Is not null"),
 ];
 
+fn sort_direction_text(ui: &egui::Ui, descending: bool) -> egui::text::LayoutJob {
+    let mut job = egui::text::LayoutJob::default();
+    job.append(
+        if descending {
+            "Descending"
+        } else {
+            "Ascending"
+        },
+        20.0,
+        egui::TextFormat {
+            font_id: ui_font(12.5),
+            color: ui.visuals().text_color(),
+            ..Default::default()
+        },
+    );
+    job
+}
+
+fn paint_sort_direction(ui: &egui::Ui, response: &egui::Response, descending: bool) {
+    let rect = Rect::from_center_size(
+        egui::pos2(
+            response.rect.left() + ui.spacing().button_padding.x + 7.0,
+            response.rect.center().y,
+        ),
+        Vec2::splat(14.0),
+    );
+    icons::paint(
+        ui.painter(),
+        rect,
+        if descending {
+            Icon::ArrowDown
+        } else {
+            Icon::ArrowUp
+        },
+        ui.style().interact(response).text_color(),
+    );
+}
+
 fn operator_label(operator: FilterOperator) -> &'static str {
     FILTER_OPERATORS
         .iter()
@@ -861,17 +899,17 @@ fn query_controls(
     if effective.is_some() {
         ui.add_space(6.0);
         labeled(ui, "Direction");
-        egui::ComboBox::from_id_salt("sort-direction")
-            .selected_text(if descending {
-                "Descending"
-            } else {
-                "Ascending"
-            })
-            .width(116.0)
+        let direction = egui::ComboBox::from_id_salt("sort-direction")
+            .selected_text(sort_direction_text(ui, descending))
+            .width(142.0)
             .show_ui(ui, |ui| {
-                ui.selectable_value(&mut descending, false, "Ascending");
-                ui.selectable_value(&mut descending, true, "Descending");
+                for value in [false, true] {
+                    let text = sort_direction_text(ui, value);
+                    let option = ui.selectable_value(&mut descending, value, text);
+                    paint_sort_direction(ui, &option, value);
+                }
             });
+        paint_sort_direction(ui, &direction.response, descending);
     }
     let changed_column = effective.as_ref().map(|o| o.column.as_str()) != Some(column.as_str())
         && !column.is_empty();
@@ -1979,6 +2017,8 @@ fn grid(
                                 }
                                 if deleted {
                                     ui.painter().rect_filled(rect, 0, theme::DANGER_SOFT);
+                                } else if modified {
+                                    ui.painter().rect_filled(rect, 0, theme::MODIFIED_ROW_SOFT);
                                 }
                                 let changed = pending
                                     .is_some_and(|p| p.changes[column] != p.original[column]);
@@ -2333,7 +2373,7 @@ fn inspector(ui: &mut egui::Ui, cx: &TableContext<'_>, state: &mut TableState, p
 }
 
 /// One `.inspector-field`: mono name, type, a right-aligned note, then a
-/// 30 px input. Read-only fields (primary keys, deleted rows, read-only
+/// 26 px input. Read-only fields (primary keys, deleted rows, read-only
 /// profiles) render as plain muted text like the desktop's `[readonly]`.
 fn inspector_field(
     ui: &mut egui::Ui,
@@ -2426,16 +2466,17 @@ fn inspector_field(
         .fill(fill)
         .stroke(Stroke::new(1.0, stroke))
         .corner_radius(egui::CornerRadius::same(6))
-        .inner_margin(Margin::symmetric(10, 0));
+        .inner_margin(Margin::symmetric(6, 0));
     let response = frame
         .show(ui, |ui| {
-            ui.set_height(28.0);
+            ui.set_height(24.0);
             ui.centered_and_justified(|ui| {
                 ui.add(
                     egui::TextEdit::singleline(&mut text)
                         .id(id)
                         .interactive(!read_only)
                         .frame(false)
+                        .margin(Margin::ZERO)
                         .font(mono(12.0))
                         .vertical_align(egui::Align::Center)
                         .text_color(if read_only { theme::MUTED } else { theme::TEXT })
@@ -2520,6 +2561,22 @@ pub mod tests {
 
     use super::*;
     use dbm_core::demo::table_page as demo_page;
+
+    #[test]
+    fn sort_direction_labels_reserve_space_for_stroke_icons() {
+        let context = egui::Context::default();
+        let _ = context.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                for (descending, label) in [(false, "Ascending"), (true, "Descending")] {
+                    let job = sort_direction_text(ui, descending);
+                    assert_eq!(job.text, label);
+                    assert_eq!(job.sections.len(), 1);
+                    assert_eq!(job.sections[0].leading_space, 20.0);
+                    assert_eq!(job.sections[0].byte_range, 0..label.len());
+                }
+            });
+        });
+    }
 
     pub fn page() -> TablePage {
         demo_page(&TablePageRequest {
@@ -2610,7 +2667,7 @@ pub mod tests {
     }
 
     #[test]
-    fn inspector_text_is_vertically_centered_in_every_field_state() {
+    fn inspector_inputs_are_compact_and_centered_in_every_field_state() {
         for scale in [1.0, 1.5, 2.0] {
             // Normal, focused, staged, NULL, primary key, and deleted fields.
             for (column, value, focused, deleted) in [
@@ -2670,6 +2727,27 @@ pub mod tests {
                     })
                     .expect("field value or NULL placeholder is painted");
                 let editor = context.read_response(id).unwrap().rect;
+                let name = output
+                    .shapes
+                    .iter()
+                    .find_map(|shape| match &shape.shape {
+                        egui::epaint::Shape::Text(text)
+                            if text.galley.text() == page.metadata.columns[column].name =>
+                        {
+                            Some(text)
+                        }
+                        _ => None,
+                    })
+                    .expect("column name is painted");
+                assert_eq!(editor.height(), 24.0, "26 px field minus its border");
+                assert!(
+                    (editor.left() - name.pos.x - 7.0).abs() <= 1.0 / scale,
+                    "6 px horizontal inset plus its border"
+                );
+                assert!(
+                    (text.pos.x - editor.left()).abs() <= 1.0 / scale,
+                    "the text editor must not add another layer of padding"
+                );
                 let text_center = text.pos.y + text.galley.size().y / 2.0;
                 assert!(
                     (text_center - editor.center().y).abs() <= 1.0 / scale,
@@ -2747,6 +2825,72 @@ pub mod tests {
         assert!(Arc::ptr_eq(state.page.as_ref().unwrap(), &shared));
         assert_eq!(shared.rows[0][1], original);
         assert_eq!(state.pending[&0].changes[1], json!("ada@example.com"));
+    }
+
+    #[test]
+    fn staged_edit_tints_every_column_until_reverted_or_deleted() {
+        for (selected, deleted, reverted) in [
+            (false, false, false),
+            (true, false, false),
+            (true, true, false),
+            (false, false, true),
+        ] {
+            let context = egui::Context::default();
+            theme::configure(&context);
+            let page = Arc::new(page());
+            let mut state = TableState {
+                page: Some(page.clone()),
+                ..TableState::default()
+            };
+            stage_cell(&mut state, 1, 1, "changed@example.com");
+            if selected {
+                state.selected.insert(1);
+            }
+            if deleted {
+                toggle_delete(&mut state, &[1]);
+            }
+            if reverted {
+                stage_cell(&mut state, 1, 1, "person2@example.com");
+            }
+            let cx = TableContext {
+                tab_id: 1,
+                schema: "public",
+                table: "customers",
+                embedded: false,
+                read_only: false,
+                saving: false,
+                exporting: false,
+            };
+            let output = context.run(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        Vec2::new(1200.0, 400.0),
+                    )),
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        grid(ui, &cx, &mut state, &page, &mut Vec::new());
+                    });
+                },
+            );
+            let fills = |color| {
+                output.shapes.iter().filter(|shape| {
+                    matches!(&shape.shape, egui::epaint::Shape::Rect(rect) if rect.fill == color)
+                }).count()
+            };
+            let modified = !deleted && !reverted;
+            // All four visible columns, not just the changed email cell.
+            assert_eq!(
+                fills(theme::MODIFIED_ROW_SOFT),
+                if modified { 4 } else { 0 }
+            );
+            assert_eq!(fills(theme::MODIFIED_SOFT), usize::from(modified));
+            assert_eq!(fills(theme::DANGER_SOFT), if deleted { 4 } else { 0 });
+            assert_eq!(fills(theme::ACCENT_SOFT), if selected { 4 } else { 0 });
+            assert!(theme::MODIFIED_ROW_SOFT.a() < theme::MODIFIED_SOFT.a());
+        }
     }
 
     #[test]

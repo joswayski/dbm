@@ -50,6 +50,8 @@ each language's case (`--accent-strong` is `accentStrong` in Swift and
 | `--accent-soft` | `rgba(76,154,255,.14)` | Selected row, active toggles |
 | `--edit-surface` | `#10192a` | Cell or field being edited |
 | `--modified` | `#f0b14c` | Staged edit (dot, row edge, chip) |
+| `--modified-soft` | `rgba(240,177,76,.12)` | Staged cell or inspector field fill |
+| `--modified-row-soft` | `rgba(240,177,76,.05)` | Subtle full-row wash for staged edits |
 | `--success` | `#5ad394` | Success, inserted rows (future) |
 | `--danger` | `#ff8a80` | Staged delete, destructive actions, errors |
 
@@ -109,7 +111,8 @@ platform or egui fallback fonts.
 | Hover | `rgba(255,255,255,.025)` row wash |
 | Selected row | `--accent-soft` wash, 2 px `--accent` left edge |
 | Editing cell | `--edit-surface` fill, 1.5 px inset `--accent` ring |
-| Modified cell | `--modified-soft` fill, 5 px `--modified` dot top-right; row gets a 2 px `--modified` edge |
+| Modified row | `--modified-row-soft` wash, 2 px `--modified` edge; wash also overlays selected rows |
+| Modified cell | Additional `--modified-soft` fill, 5 px `--modified` dot top-right |
 | Deleted row | `--danger-soft` wash, `--danger` text with strikethrough, 2 px `--danger` edge |
 | NULL | `NULL` in `--faint` italic |
 | Primary key | key glyph in `--modified` in the header; read-only in the inspector |
@@ -127,7 +130,8 @@ platform or egui fallback fonts.
   `--accent-strong` with white text; destructive items in `--danger`.
 - **Row inspector:** 300 px panel on the right of the grid showing the single
   selected row. Each field shows name, type, a note ("Primary key" or
-  "was …"), and a value field. Enter stages the change, Escape reverts it.
+  "was …"), and a compact 26 px value field with a 6 px leading inset.
+  Enter stages the change, Escape reverts it.
   Toggle it from the toolbar.
 - **Pending-changes bar:** amber dot, count, per-kind chips, Discard (secondary)
   and Save changes (primary).
