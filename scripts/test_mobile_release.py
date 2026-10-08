@@ -1,4 +1,9 @@
+# /// script
+# requires-python = ">=3.10"
+# dependencies = ["pyjwt[crypto]==2.10.1", "PyYAML==6.0.3"]
+# ///
 """Exercise release orchestration with disposable tools/APIs; never upload."""
+
 import importlib.util
 import json
 import os
@@ -40,12 +45,20 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.bin = self.directory / "bin"
         self.bin.mkdir()
         self.env = {
-            **os.environ, "PATH": f"{self.bin}:{os.environ['PATH']}",
-            "GITHUB_SHA": SHA, "GITHUB_REPOSITORY": "joswayski/dbm",
-            "GITHUB_SERVER_URL": "https://github.com", "GITHUB_API_URL": "https://api.github.com",
-            "GITHUB_OUTPUT": str(self.directory / "output"), "GITHUB_RUN_NUMBER": "9",
-            "GITHUB_RUN_ATTEMPT": "2", "REQUESTED_SHA": "", "TESTED": SHA,
-            "ANCESTOR": "0", "MOBILE_CHANGED": "0", "CALLS": str(self.directory / "calls"),
+            **os.environ,
+            "PATH": f"{self.bin}:{os.environ['PATH']}",
+            "GITHUB_SHA": SHA,
+            "GITHUB_REPOSITORY": "joswayski/dbm",
+            "GITHUB_SERVER_URL": "https://github.com",
+            "GITHUB_API_URL": "https://api.github.com",
+            "GITHUB_OUTPUT": str(self.directory / "output"),
+            "GITHUB_RUN_NUMBER": "9",
+            "GITHUB_RUN_ATTEMPT": "2",
+            "REQUESTED_SHA": "",
+            "TESTED": SHA,
+            "ANCESTOR": "0",
+            "MOBILE_CHANGED": "0",
+            "CALLS": str(self.directory / "calls"),
         }
         # git merge-base --is-ancestor exits $ANCESTOR; git diff --quiet exits
         # $MOBILE_CHANGED. gh lists $TESTED as the passing mobile build SHAs.
@@ -53,8 +66,9 @@ class ReleaseWorkflowTests(unittest.TestCase):
         executable(self.bin / "gh", '#!/bin/sh\nprintf "%s\\n" "$*" >> "$CALLS"\nprintf "%s\\n" $TESTED\n')
 
     def run_step(self, script, **env):
-        return subprocess.run(["bash", "-c", script], env={**self.env, **env},
-                              text=True, capture_output=True, cwd=self.directory)
+        return subprocess.run(
+            ["bash", "-c", script], env={**self.env, **env}, text=True, capture_output=True, cwd=self.directory
+        )
 
     def test_resolve_rejects_untested_non_main_or_malformed_commits(self):
         release = workflow("mobile-release.yml")
@@ -64,9 +78,14 @@ class ReleaseWorkflowTests(unittest.TestCase):
         script = job["steps"][1]["run"]
         # No passing mobile build, mobile files changed since the newest one,
         # off main, malformed SHAs, and exhausted attempts are all refused.
-        for env in ({"TESTED": ""}, {"MOBILE_CHANGED": "1"}, {"ANCESTOR": "1"},
-                    {"REQUESTED_SHA": SHA.upper()}, {"REQUESTED_SHA": "main; touch unexpected"},
-                    {"GITHUB_RUN_ATTEMPT": "100"}):
+        for env in (
+            {"TESTED": ""},
+            {"MOBILE_CHANGED": "1"},
+            {"ANCESTOR": "1"},
+            {"REQUESTED_SHA": SHA.upper()},
+            {"REQUESTED_SHA": "main; touch unexpected"},
+            {"GITHUB_RUN_ATTEMPT": "100"},
+        ):
             with self.subTest(env=env):
                 self.assertNotEqual(self.run_step(script, **env).returncode, 0)
                 self.assertFalse((self.directory / "output").exists())
@@ -102,26 +121,35 @@ class ReleaseWorkflowTests(unittest.TestCase):
         step = workflow("mobile-release.yml")["jobs"]["android"]["steps"][-2]
         self.assertNotIn("if", step)
         executable(self.bin / "aws", '#!/bin/sh\nprintf "%s" "$SIGNING_SECRET"\n')
-        executable(self.bin / "python3", '#!/bin/sh\nprintf "%s\\n" "$*" >> "$CALLS"\n')
+        executable(self.bin / "uv", '#!/bin/sh\nprintf "%s\\n" "$*" >> "$CALLS"\n')
         account = json.dumps({"client_email": "dbm-release@example.invalid"})
         caper = {"service_account_json": json.dumps({"client_email": "caper-release@example.invalid"})}
         secret = json.dumps({"dbm_google_play": {"service_account_json": account}, "google_play": caper})
-        result = self.run_step(step["run"], SIGNING_SECRET=secret,
-                               RUNNER_TEMP=str(self.directory), DBM_BUILD_NUMBER="902")
+        result = self.run_step(
+            step["run"], SIGNING_SECRET=secret, RUNNER_TEMP=str(self.directory), DBM_BUILD_NUMBER="902"
+        )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual((self.directory / "play.json").read_text().strip(), account)
         self.assertEqual((self.directory / "play.json").stat().st_mode & 0o777, 0o600)
-        self.assertIn("scripts/play-upload.py dist/mobile/play/DBM-Android-Play.aab",
-                      (self.directory / "calls").read_text().splitlines())
+        self.assertIn(
+            "run --locked --python 3.12 --script scripts/play-upload.py dist/mobile/play/DBM-Android-Play.aab",
+            (self.directory / "calls").read_text().splitlines(),
+        )
 
         (self.directory / "calls").unlink()
-        result = self.run_step(step["run"], SIGNING_SECRET=json.dumps({"google_play": caper}),
-                               RUNNER_TEMP=str(self.directory), DBM_BUILD_NUMBER="902")
+        result = self.run_step(
+            step["run"],
+            SIGNING_SECRET=json.dumps({"google_play": caper}),
+            RUNNER_TEMP=str(self.directory),
+            DBM_BUILD_NUMBER="902",
+        )
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse((self.directory / "calls").exists())
 
     def configure_curl(self):
-        executable(self.bin / "curl", '''#!/usr/bin/env python3
+        executable(
+            self.bin / "curl",
+            """#!/usr/bin/env python3
 import json, os, sys
 args = sys.argv[1:]
 if "/pulls?" in args[-1]:
@@ -129,10 +157,15 @@ if "/pulls?" in args[-1]:
 else:
     with open(os.environ["CALLS"], "w") as out:
         json.dump({"url": args[-1], "payload": json.loads(args[args.index("--data") + 1])}, out)
-''')
-        self.env.update(DEPLOY_NOTIFICATION_WEBHOOK_URL="https://discord.com/api/webhooks/123/fake-token",
-                        GITHUB_TOKEN="fixture", GIT_SHA=SHA, COMMIT_MESSAGE="Fallback",
-                        CI_RUN_URL="https://github.com/joswayski/dbm/actions/runs/123")
+""",
+        )
+        self.env.update(
+            DEPLOY_NOTIFICATION_WEBHOOK_URL="https://discord.com/api/webhooks/123/fake-token",
+            GITHUB_TOKEN="fixture",
+            GIT_SHA=SHA,
+            COMMIT_MESSAGE="Fallback",
+            CI_RUN_URL="https://github.com/joswayski/dbm/actions/runs/123",
+        )
 
     def test_ready_notification_pins_the_sha_and_disables_mentions(self):
         self.configure_curl()
@@ -152,11 +185,18 @@ else:
 
     def test_result_controls_and_rejected_foreign_run_url(self):
         self.configure_curl()
-        command = f'bash "{ROOT}/scripts/update-discord-mobile-release.sh" --git-sha {SHA} ' \
-                  '--message-id 123456789012345678 --started-at 1791080000 --finished-at 1791080073 '
-        for result, label, disabled in [("success", "Released", True), ("failure", "Retry release", False),
-                                        ("cancelled", "Check GitHub", True)]:
-            run = self.run_step(command + f"--result {result} --run-url https://github.com/joswayski/dbm/actions/runs/123")
+        command = (
+            f'bash "{ROOT}/scripts/update-discord-mobile-release.sh" --git-sha {SHA} '
+            "--message-id 123456789012345678 --started-at 1791080000 --finished-at 1791080073 "
+        )
+        for result, label, disabled in [
+            ("success", "Released", True),
+            ("failure", "Retry release", False),
+            ("cancelled", "Check GitHub", True),
+        ]:
+            run = self.run_step(
+                command + f"--result {result} --run-url https://github.com/joswayski/dbm/actions/runs/123"
+            )
             self.assertEqual(run.returncode, 0, run.stderr)
             payload = json.loads((self.directory / "calls").read_text())["payload"]
             button = payload["components"][0]["components"][0]
@@ -178,9 +218,14 @@ else:
         archive.parent.mkdir(parents=True)
         archive.write_bytes(b"fixture")
         for name in ["cargo", "rustup", "swift"]:
-            executable(self.bin / name, '#!/bin/sh\nexit 0\n')
-        executable(self.bin / "git", '#!/bin/sh\nif [ "$3" = rev-parse ]; then echo 21ac9944b0ab546a07422dbed86f33dd2ebd76f8; fi\n')
-        executable(self.bin / "xcodebuild", '''#!/usr/bin/env python3
+            executable(self.bin / name, "#!/bin/sh\nexit 0\n")
+        executable(
+            self.bin / "git",
+            '#!/bin/sh\nif [ "$3" = rev-parse ]; then echo 21ac9944b0ab546a07422dbed86f33dd2ebd76f8; fi\n',
+        )
+        executable(
+            self.bin / "xcodebuild",
+            """#!/usr/bin/env python3
 import json, os, plistlib, sys
 args = sys.argv[1:]
 entry = {"args": args}
@@ -189,12 +234,19 @@ if "-exportOptionsPlist" in args:
         entry["options"] = plistlib.load(source)
 with open(os.environ["CALLS"], "a") as out:
     out.write(json.dumps(entry) + "\\n")
-''')
+""",
+        )
         key = self.directory / "fixture.p8"
         key.write_text("fake key; never used to authenticate")
-        run = self.run_step(f'bash "{ios}/upload-testflight.sh"', APPLE_TEAM_ID="TESTTEAM",
-                            NOTARY_KEY_PATH=str(key), NOTARY_KEY_ID="TESTKEY", NOTARY_ISSUER="TESTISSUER",
-                            BUILD_NUMBER="9.2", DBM_IOS_BUNDLE_ID="app.dbm.ios")
+        run = self.run_step(
+            f'bash "{ios}/upload-testflight.sh"',
+            APPLE_TEAM_ID="TESTTEAM",
+            NOTARY_KEY_PATH=str(key),
+            NOTARY_KEY_ID="TESTKEY",
+            NOTARY_ISSUER="TESTISSUER",
+            BUILD_NUMBER="9.2",
+            DBM_IOS_BUNDLE_ID="app.dbm.ios",
+        )
         self.assertEqual(run.returncode, 0, run.stderr)
         calls = [json.loads(line) for line in (self.directory / "calls").read_text().splitlines()]
         self.assertEqual(len(calls), 2)
@@ -207,21 +259,35 @@ with open(os.environ["CALLS"], "a") as out:
             self.assertIn("-allowProvisioningUpdates", call["args"])
             self.assertIn("-authenticationKeyPath", call["args"])
             self.assertNotIn("CODE_SIGNING_ALLOWED=NO", call["args"])
-        self.assertEqual(calls[1]["options"], {"destination": "upload", "method": "app-store-connect",
-                         "teamID": "TESTTEAM", "signingStyle": "automatic",
-                         "manageAppVersionAndBuildNumber": False, "uploadSymbols": True})
+        self.assertEqual(
+            calls[1]["options"],
+            {
+                "destination": "upload",
+                "method": "app-store-connect",
+                "teamID": "TESTTEAM",
+                "signingStyle": "automatic",
+                "manageAppVersionAndBuildNumber": False,
+                "uploadSymbols": True,
+            },
+        )
         self.assertFalse(Path(calls[0]["args"][calls[0]["args"].index("-archivePath") + 1]).parent.exists())
 
 
 class TesterDistributionTests(unittest.TestCase):
     def test_testflight_without_testers_does_not_report_delivery_success(self):
         script = load_script("testflight-distribute")
-        with patch.dict(os.environ, {"BUILD_NUMBER": "9.2"}, clear=True), \
-             patch.object(script, "call", side_effect=[
-                 (200, {"data": [{"id": "app"}]}),
-                 (200, {"data": [{"id": "build", "attributes": {"processingState": "VALID"}}]}),
-                 (200, {"data": []}),
-             ]):
+        with (
+            patch.dict(os.environ, {"BUILD_NUMBER": "9.2"}, clear=True),
+            patch.object(
+                script,
+                "call",
+                side_effect=[
+                    (200, {"data": [{"id": "app"}]}),
+                    (200, {"data": [{"id": "build", "attributes": {"processingState": "VALID"}}]}),
+                    (200, {"data": []}),
+                ],
+            ),
+        ):
             with self.assertRaisesRegex(SystemExit, "No TestFlight tester groups"):
                 script.main()
 
@@ -233,27 +299,48 @@ class TesterDistributionTests(unittest.TestCase):
             (200, {"data": [{"id": "build", "attributes": {"processingState": "VALID"}}]}),
             (200, {"data": [{"id": "locale", "attributes": {"locale": "en-US"}}]}),
             (200, {}),
-            (200, {"data": [
-                {"id": "internal", "attributes": {"isInternalGroup": True, "hasAccessToAllBuilds": True}},
-                {"id": "external", "attributes": {"isInternalGroup": False}}]}),
-            (204, {}), (201, {}),
+            (
+                200,
+                {
+                    "data": [
+                        {"id": "internal", "attributes": {"isInternalGroup": True, "hasAccessToAllBuilds": True}},
+                        {"id": "external", "attributes": {"isInternalGroup": False}},
+                    ]
+                },
+            ),
+            (204, {}),
+            (201, {}),
         ]
-        with patch.dict(os.environ, {"BUILD_NUMBER": "9.2", "WHAT_TO_TEST": "Test TLS"}, clear=True), \
-             patch.object(script, "call", side_effect=replies) as call, patch.object(script.time, "sleep") as sleep:
+        with (
+            patch.dict(os.environ, {"BUILD_NUMBER": "9.2", "WHAT_TO_TEST": "Test TLS"}, clear=True),
+            patch.object(script, "call", side_effect=replies) as call,
+            patch.object(script.time, "sleep") as sleep,
+        ):
             script.main()
         self.assertEqual(call.call_args_list[0].kwargs["query"], {"filter[bundleId]": "app.dbm.ios"})
         self.assertEqual(call.call_args_list[1].kwargs["query"]["filter[version]"], "9.2")
         sleep.assert_called_once_with(30)
-        self.assertEqual(call.call_args_list[-2].args, ("POST", "/betaGroups/external/relationships/builds",
-                         {"data": [{"type": "builds", "id": "build"}]}))
+        self.assertEqual(
+            call.call_args_list[-2].args,
+            ("POST", "/betaGroups/external/relationships/builds", {"data": [{"type": "builds", "id": "build"}]}),
+        )
         self.assertEqual(call.call_args_list[-1].args[1], "/betaAppReviewSubmissions")
 
     def test_testflight_rejected_build_is_never_assigned(self):
         script = load_script("testflight-distribute")
         for state in ["INVALID", "FAILED"]:
-            with self.subTest(state=state), patch.dict(os.environ, {"BUILD_NUMBER": "9.2"}, clear=True), \
-                 patch.object(script, "call", side_effect=[(200, {"data": [{"id": "app"}]}),
-                    (200, {"data": [{"id": "build", "attributes": {"processingState": state}}]})]) as call:
+            with (
+                self.subTest(state=state),
+                patch.dict(os.environ, {"BUILD_NUMBER": "9.2"}, clear=True),
+                patch.object(
+                    script,
+                    "call",
+                    side_effect=[
+                        (200, {"data": [{"id": "app"}]}),
+                        (200, {"data": [{"id": "build", "attributes": {"processingState": state}}]}),
+                    ],
+                ) as call,
+            ):
                 with self.assertRaisesRegex(SystemExit, "rejected build"):
                     script.main()
                 self.assertEqual(call.call_count, 2)
@@ -266,16 +353,26 @@ class TesterDistributionTests(unittest.TestCase):
             bundle = Path(temporary) / "bundle.aab"
             bundle.write_bytes(b"fixture bundle")
             for error, succeeds in [("Only draft releases allowed", True), ("Permission denied", False)]:
-                replies = [(200, {"id": "edit"}), (200, {"versionCode": 902}),
-                           (400, {"errors": [error]}), (200, {}), (200, {})]
-                with self.subTest(error=error), patch.dict(os.environ, {"GOOGLE_PLAY_SERVICE_ACCOUNT": str(key)}, clear=True), \
-                     patch.object(script.sys, "argv", ["play-upload.py", str(bundle)]), \
-                     patch.object(script, "access_token", return_value="fixture"), \
-                     patch.object(script, "call", side_effect=replies) as call:
+                replies = [
+                    (200, {"id": "edit"}),
+                    (200, {"versionCode": 902}),
+                    (400, {"errors": [error]}),
+                    (200, {}),
+                    (200, {}),
+                ]
+                with (
+                    self.subTest(error=error),
+                    patch.dict(os.environ, {"GOOGLE_PLAY_SERVICE_ACCOUNT": str(key)}, clear=True),
+                    patch.object(script.sys, "argv", ["play-upload.py", str(bundle)]),
+                    patch.object(script, "access_token", return_value="fixture"),
+                    patch.object(script, "call", side_effect=replies) as call,
+                ):
                     if succeeds:
                         script.main()
-                        self.assertEqual(call.call_args_list[3].args[3],
-                                         {"track": "internal", "releases": [{"versionCodes": ["902"], "status": "draft"}]})
+                        self.assertEqual(
+                            call.call_args_list[3].args[3],
+                            {"track": "internal", "releases": [{"versionCodes": ["902"], "status": "draft"}]},
+                        )
                         self.assertTrue(call.call_args_list[-1].args[2].endswith("/edits/edit:commit"))
                     else:
                         with self.assertRaises(SystemExit):

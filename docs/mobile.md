@@ -180,6 +180,14 @@ The release reads `production/signing/release` through GitHub OIDC role
   Apple; Discord reports failure if either platform fails, including partial
   uploads. A TestFlight success is not physical-device acceptance.
 
+The Google Play and TestFlight API scripts run through pinned uv 0.12.23 with
+Python 3.12 and `--locked --script`; their inline PyJWT dependency and `.py.lock`
+files keep installation isolated from the runner's global Python. Lockfile
+changes count as mobile changes in both the build trigger and release guard.
+CI checks these scripts with Ruff and exercises orchestration against
+disposable tools/mocked APIs, not the live stores. See
+[development checks](development.md#tests-and-checks) for local commands.
+
 ### One-time setup before the first release
 
 1. Apply the DBM signer role in `joswayski/infrastructure` following its

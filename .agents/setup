@@ -10,6 +10,7 @@
 #   * the Rust toolchain pinned in rust-toolchain.toml
 #   * the locked Cargo dependencies of both Cargo workspaces
 #   * npm dependencies for the website and shared release tests
+#   * uv, Python 3.12 script environments, and Ruff
 #
 # Amp runs this before snapshotting a new project orb and again whenever a stale
 # snapshot is refreshed, so every step checks first and is safe to repeat.
@@ -119,6 +120,27 @@ install_javascript_dependencies() {
   npm --prefix apps/web ci
 }
 
+install_python_dependencies() {
+  export PATH="$HOME/.local/bin:$PATH"
+  if ! command -v uv >/dev/null || [[ "$(uv --version | awk '{print $2}')" != "0.12.23" ]]; then
+    curl -LsSf https://astral.sh/uv/0.12.23/install.sh | env UV_NO_MODIFY_PATH=1 sh
+  fi
+  # Use a separate marker so existing Rust profile hooks are preserved.
+  local marker="# Anybase orb Python tooling (added by .agents/setup)"
+  local file
+  for file in "$HOME/.bash_profile" "$HOME/.bashrc"; do
+    [ -f "$file" ] || continue
+    if ! grep -Fqx "$marker" "$file"; then
+      printf '\n%s\n%s\n' "$marker" 'export PATH="$HOME/.local/bin:$PATH"' >>"$file"
+    fi
+  done
+  # Syncing installs dependencies without executing the distribution scripts.
+  for file in scripts/play-upload.py scripts/testflight-distribute.py scripts/test_mobile_release.py; do
+    uv sync --locked --python 3.12 --script "$file"
+  done
+  uvx ruff==0.16.10 --version
+}
+
 timed "Installing system packages" install_system_packages
 timed "Installing the Rust toolchain" install_rust
 persist_toolchain_path
@@ -127,6 +149,7 @@ export PATH="$cargo_bin:$PATH"
 
 timed "Fetching Cargo dependencies" fetch_rust_dependencies
 timed "Installing website and release-test dependencies" install_javascript_dependencies
+timed "Installing Python script environments and Ruff" install_python_dependencies
 
 log "Orb setup complete"
 rustc --version

@@ -24,6 +24,7 @@ have cargo "$HOME/.cargo/bin/cargo" || missing+=(cargo)
 have redis-server /usr/bin/redis-server || missing+=(redis-server)
 have node /usr/bin/node || missing+=(node)
 have npm /usr/bin/npm || missing+=(npm)
+have uv "$HOME/.local/bin/uv" || missing+=(uv)
 [ -d apps/web/node_modules/vitest ] || missing+=(npm-dependencies)
 
 if ((${#missing[@]})); then

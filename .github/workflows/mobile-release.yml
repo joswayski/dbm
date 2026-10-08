@@ -57,7 +57,7 @@ jobs:
           # none of them is releasable from the newest passing build before it.
           mobile_paths=(':(glob)apps/native/android/**' ':(glob)apps/native/ios/**' ':(glob)apps/native/bridge/**'
             ':(glob)crates/dbm-core/**' ':(glob)Cargo.*' ':(glob).github/workflows/mobile*.yml'
-            ':(glob)scripts/*mobile*' 'scripts/testflight-distribute.py' 'scripts/play-upload.py')
+            ':(glob)scripts/*mobile*' ':(glob)scripts/testflight-distribute.py*' ':(glob)scripts/play-upload.py*')
           tested=""
           for candidate in $(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/mobile.yml/runs?branch=main&event=push&status=success&per_page=100" --jq '.workflow_runs[].head_sha'); do
             git merge-base --is-ancestor "$candidate" "$sha" || continue
@@ -86,6 +86,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.resolve.outputs.sha }}
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: '0.12.23'
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -159,11 +162,10 @@ jobs:
           umask 077
           aws secretsmanager get-secret-value --secret-id production/signing/release \
             --query SecretString --output text | jq -er '.dbm_google_play.service_account_json | strings' > "$RUNNER_TEMP/play.json"
-          python3 -m pip install --quiet 'pyjwt[crypto]==2.10.1'
           export GOOGLE_PLAY_SERVICE_ACCOUNT="$RUNNER_TEMP/play.json"
           export PLAY_RELEASE_NAME="0.1.$DBM_BUILD_NUMBER"
           export PLAY_RELEASE_NOTES="$(git log -1 --format=%s)"
-          python3 scripts/play-upload.py dist/mobile/play/DBM-Android-Play.aab
+          uv run --locked --python 3.12 --script scripts/play-upload.py dist/mobile/play/DBM-Android-Play.aab
       - name: Remove signing material
         if: always()
         run: rm -f "$RUNNER_TEMP/dbm-release.jks" "$RUNNER_TEMP/android.json" "$RUNNER_TEMP/play.json"
@@ -189,6 +191,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: '0.12.23'
       - name: Use Xcode 26 (App Store Connect SDK requirement)
         run: |
           set -euo pipefail
@@ -221,9 +226,8 @@ jobs:
       - name: Wait for processing and assign tester groups
         run: |
           set -euo pipefail
-          python3 -m pip install --quiet 'pyjwt[crypto]==2.10.1'
           export WHAT_TO_TEST="$(git log -1 --format=%s)"
-          python3 scripts/testflight-distribute.py
+          uv run --locked --python 3.12 --script scripts/testflight-distribute.py
       - name: Remove signing material
         if: always()
         run: rm -f "$RUNNER_TEMP/asc.p8" "$RUNNER_TEMP/apple.json"
