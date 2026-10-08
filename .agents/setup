@@ -9,6 +9,7 @@
 #     live Redis tests skip themselves when redis-server is missing)
 #   * the Rust toolchain pinned in rust-toolchain.toml
 #   * the locked Cargo dependencies of both Cargo workspaces
+#   * npm dependencies for the website and shared release tests
 #
 # Amp runs this before snapshotting a new project orb and again whenever a stale
 # snapshot is refreshed, so every step checks first and is safe to repeat.
@@ -112,6 +113,12 @@ fetch_rust_dependencies() {
   cargo fetch --locked --manifest-path apps/native/workbench/Cargo.toml
 }
 
+install_javascript_dependencies() {
+  # Node/npm are supplied by the orb image. CI and developer docs use Node 24.
+  node -e 'if (Number(process.versions.node.split(".")[0]) < 24) throw new Error("Node 24+ is required")'
+  npm --prefix apps/web ci
+}
+
 timed "Installing system packages" install_system_packages
 timed "Installing the Rust toolchain" install_rust
 persist_toolchain_path
@@ -119,6 +126,7 @@ persist_toolchain_path
 export PATH="$cargo_bin:$PATH"
 
 timed "Fetching Cargo dependencies" fetch_rust_dependencies
+timed "Installing website and release-test dependencies" install_javascript_dependencies
 
 log "Orb setup complete"
 rustc --version

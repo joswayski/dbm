@@ -22,6 +22,9 @@ have() {
 
 have cargo "$HOME/.cargo/bin/cargo" || missing+=(cargo)
 have redis-server /usr/bin/redis-server || missing+=(redis-server)
+have node /usr/bin/node || missing+=(node)
+have npm /usr/bin/npm || missing+=(npm)
+[ -d apps/web/node_modules/vitest ] || missing+=(npm-dependencies)
 
 if ((${#missing[@]})); then
   printf 'DBM orb resume: missing %s. Run .agents/setup to repair the environment.\n' \

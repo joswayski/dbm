@@ -7,8 +7,14 @@
     "deploy": "npm run build && wrangler deploy",
     "dev": "vite dev",
     "preview": "npm run build && wrangler dev",
-    "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "test": "vitest run --project web",
+    "test:release": "vitest run --project release",
+    "test:all": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "lint": "cd ../.. && oxlint --deny-warnings apps/web/src apps/web/tests apps/web/*.ts scripts/*.mjs",
+    "fmt": "cd ../.. && oxfmt --write \"apps/web/**/*.{ts,tsx,css}\" \"apps/web/{package,tsconfig}.json\" \"scripts/*.mjs\" \".ox*.json\"",
+    "fmt:check": "cd ../.. && oxfmt --check \"apps/web/**/*.{ts,tsx,css}\" \"apps/web/{package,tsconfig}.json\" \"scripts/*.mjs\" \".ox*.json\"",
+    "check": "npm run lint && npm run fmt:check && npm run typecheck"
   },
   "dependencies": {
     "@tanstack/react-router": "1.170.28",
@@ -22,11 +28,13 @@
     "@types/node": "^22",
     "@types/react": "^19.1.2",
     "@types/react-dom": "^19.1.2",
-    "@vitejs/plugin-react": "5.2.0",
+    "@vitejs/plugin-react": "6.1.2",
+    "oxfmt": "0.72.0",
+    "oxlint": "1.87.0",
     "tailwindcss": "^4.1.4",
-    "typescript": "^5.8.3",
-    "vite": "8.2.1",
-    "vitest": "^4.1.11",
+    "typescript": "7.0.2",
+    "vite": "8.3.3",
+    "vitest": "5.0.3",
     "wrangler": "^4.123.0"
   }
 }
