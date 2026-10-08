@@ -1727,29 +1727,46 @@ impl Workbench {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         // `.update-control`: only on channel builds.
                         if self.updates.enabled() && !self.demo {
-                            let label = self.updates.label();
-                            let button = match &self.updates.state {
-                                crate::updates::State::Available(_) => theme::accent_button(&label),
-                                _ => theme::secondary_button(&label),
-                            }
-                            .small();
                             let busy = matches!(
                                 self.updates.state,
                                 crate::updates::State::Checking | crate::updates::State::Installing
                             );
-                            let detail = self.updates.detail();
-                            let response = ui
-                                .add_enabled(!busy, button)
-                                .on_hover_text(&detail)
-                                .on_disabled_hover_text(&detail);
-                            if response.clicked() {
-                                match &self.updates.state {
-                                    crate::updates::State::Available(update) => {
-                                        self.confirm_update = Some(update.clone());
-                                    }
-                                    _ => self.updates.check(ctx, false),
+                            ui.menu_button("Help", |ui| {
+                                if ui.add_enabled(!busy, egui::Button::new("Check for updates…")).clicked() {
+                                    self.updates.check(ctx, false);
+                                    ui.close();
                                 }
-                            }
+                            });
+                            let height = match self.updates.state {
+                                crate::updates::State::Idle => 14.0,
+                                crate::updates::State::Available(_) | crate::updates::State::Failed(_) => 34.0,
+                                _ => 28.0,
+                            };
+                            ui.allocate_ui_with_layout(Vec2::new(200.0, height), egui::Layout::top_down(egui::Align::Max), |ui| {
+                                ui.spacing_mut().item_spacing.y = 0.0;
+                                let label = self.updates.label();
+                                let detail = self.updates.detail();
+                                match &self.updates.state {
+                                    crate::updates::State::Available(_) | crate::updates::State::Failed(_) => {
+                                        let button = if matches!(self.updates.state, crate::updates::State::Available(_)) {
+                                            theme::accent_button(&label)
+                                        } else {
+                                            theme::secondary_button(&label)
+                                        };
+                                        if ui.add(button.small()).on_hover_text(&detail).clicked() {
+                                            if let crate::updates::State::Available(update) = &self.updates.state {
+                                                self.confirm_update = Some(update.clone());
+                                            } else {
+                                                self.updates.check(ctx, false);
+                                            }
+                                        }
+                                    }
+                                    crate::updates::State::Idle => {}
+                                    _ => { ui.label(RichText::new(label).font(mono(11.0)).color(theme::MUTED)); }
+                                }
+                                ui.label(RichText::new(self.updates.version_label()).font(mono(10.0)).color(theme::MUTED))
+                                    .on_hover_text(detail);
+                            });
                         }
                         if self.demo {
                             chip(ui, "Demo fixture · not a live connection", theme::MODIFIED)

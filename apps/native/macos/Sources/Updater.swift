@@ -147,13 +147,17 @@ final class Updater {
     /// `UpdateControl` words them.
     var label: String {
         switch state {
-        case .idle: return "Check for updates"
+        case .idle: return ""
         case .checking: return "Checking…"
         case .upToDate: return "Up to date"
-        case .available(let update): return "Update to \(string(update["version"]))"
+        case .available(let update): return "Update to v\(string(update["version"]))"
         case .installing: return "Installing…"
         case .failed: return "Retry update"
         }
+    }
+
+    var versionLabel: String {
+        "Version \(Bundle.main.object(forInfoDictionaryKey: "DBMVersion") as? String ?? "build \(currentBuild ?? 0)")"
     }
 
     var detail: String {

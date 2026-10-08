@@ -9,7 +9,7 @@ struct Workspace {
 /// Owns UI state and talks to the Rust core through the bridge. Views call
 /// back into it and it refreshes them; replies are routed to the tab or
 /// profile that started the request, and ignored once that is closed.
-final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, QueryHost {
+final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuItemValidation, QueryHost {
     let demo = CommandLine.arguments.contains("--demo")
     lazy var bridge = Bridge(demo: demo)
     var window: NSWindow!
@@ -765,6 +765,16 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, Qu
     @objc private func menuNewConnection() { newProfile() }
     @objc private func menuNewQuery() { if let id = activeProfileID, workspaces[id] != nil { openQuery(id) } }
     @objc private func menuCloseTab() { if let activeTab { closeTab(activeTab) } else { window.performClose(nil) } }
+    @objc private func menuCheckUpdates() { updater.check() }
+
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        guard menuItem.action == #selector(menuCheckUpdates) else { return true }
+        guard updater.enabled && !demo else { return false }
+        switch updater.state {
+        case .checking, .installing: return false
+        default: return true
+        }
+    }
 
     private func installMenu() {
         let menu = NSMenu()
@@ -772,6 +782,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, Qu
         menu.addItem(appItem)
         let appMenu = NSMenu()
         appMenu.addItem(withTitle: "About Anybase", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(withTitle: "Check for updates…", action: #selector(menuCheckUpdates), keyEquivalent: "").target = self
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Hide Anybase", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         appMenu.addItem(withTitle: "Quit Anybase", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
