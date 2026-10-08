@@ -48,6 +48,9 @@ What the app does today, what is deliberately not built yet, and what it stores 
   Unfiltered key-name pages fetch type and TTL only for visible keys. Filtering
   or sorting by metadata inspects all matching keys, so large keyspaces can take
   longer. Pages and exports are not snapshots of concurrent database changes.
+- Unfiltered Redis lists in ascending index order fetch only the requested page
+  plus one lookahead element, with `LLEN` supplying the total. Filtering or
+  other sort orders still load the complete list before paging.
 - Resizable sidebars and columns, collapsible wide fields, and multi-row
   selection for staged edits and deletes.
 - A row inspector next to table grids that shows every field of the selected

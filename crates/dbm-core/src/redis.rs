@@ -437,24 +437,54 @@ async fn key_table_page(
         )));
     }
     let metadata = key_metadata(&key_type, &request.table);
-    let mut rows = load_key_rows(conn, &key_type, &request.table).await?;
-    rows.retain(|row| row_matches(&metadata, row, &request.filters));
-    sort_rows(&metadata, &mut rows, request.order_by.as_ref())?;
-    let total_rows = if request.include_total.unwrap_or(true) {
-        Some(rows.len() as u64)
-    } else {
-        None
-    };
     let limit = request.limit.clamp(1, MAX_PAGE_SIZE);
     let offset = usize::try_from(request.offset).unwrap_or(0);
     let take = usize::try_from(limit).unwrap_or(0);
-    let page_rows = rows
-        .iter()
-        .skip(offset)
-        .take(take)
-        .cloned()
-        .collect::<Vec<_>>();
-    let has_more = offset + page_rows.len() < rows.len();
+    let (page_rows, total, has_more) = if key_type == "list"
+        && request.filters.is_empty()
+        && request
+            .order_by
+            .as_ref()
+            .is_none_or(|order| order.column == "index" && !order.descending)
+    {
+        // Ordinary list browsing needs only this slice, not LRANGE 0 -1.
+        // Fetch one extra element to detect another page, keeping absolute
+        // indices so edits still address the original list positions.
+        let (total, values): (u64, Vec<String>) = redis_rs::pipe()
+            .cmd("LLEN")
+            .arg(&request.table)
+            .cmd("LRANGE")
+            .arg(&request.table)
+            .arg(request.offset)
+            .arg(u64::from(request.offset) + u64::from(limit))
+            .query_async(conn)
+            .await?;
+        let has_more = values.len() > take;
+        let rows = values
+            .into_iter()
+            .take(take)
+            .enumerate()
+            .map(|(index, value)| {
+                vec![
+                    JsonValue::from(u64::from(request.offset) + index as u64),
+                    JsonValue::String(value),
+                ]
+            })
+            .collect();
+        (rows, total, has_more)
+    } else {
+        let mut rows = load_key_rows(conn, &key_type, &request.table).await?;
+        rows.retain(|row| row_matches(&metadata, row, &request.filters));
+        sort_rows(&metadata, &mut rows, request.order_by.as_ref())?;
+        let total = rows.len() as u64;
+        let has_more = u64::from(request.offset) + u64::from(limit) < total;
+        (
+            rows.into_iter().skip(offset).take(take).collect(),
+            total,
+            has_more,
+        )
+    };
+    let total_rows = request.include_total.unwrap_or(true).then_some(total);
     let columns = metadata
         .columns
         .iter()
@@ -1530,7 +1560,7 @@ fn bulk_to_json(bytes: &[u8]) -> JsonValue {
     match String::from_utf8(bytes.to_vec()) {
         Ok(mut text) => {
             if text.len() > MAX_VALUE_BYTES {
-                text.truncate(MAX_VALUE_BYTES);
+                text.truncate(text.floor_char_boundary(MAX_VALUE_BYTES));
                 text.push_str("… (truncated)");
             }
             JsonValue::String(text)
@@ -1599,6 +1629,20 @@ mod tests {
     use chrono::Utc;
     use std::process::{Command, Stdio};
     use std::time::Duration;
+
+    #[test]
+    fn bulk_previews_truncate_only_at_utf8_boundaries() {
+        let exact = format!("{}é", "a".repeat(MAX_VALUE_BYTES - 2));
+        assert_eq!(bulk_to_json(exact.as_bytes()), JsonValue::String(exact));
+        for suffix in ["é", "🚀"] {
+            let prefix = "a".repeat(MAX_VALUE_BYTES - 1);
+            let input = format!("{prefix}{suffix}tail");
+            assert_eq!(
+                bulk_to_json(input.as_bytes()),
+                JsonValue::String(format!("{prefix}… (truncated)"))
+            );
+        }
+    }
 
     #[test]
     fn tokenizes_quoted_redis_cli_arguments() {
@@ -1906,6 +1950,107 @@ mod tests {
             .await
             .expect("exists");
         assert_eq!(missing.rows[0][0], JsonValue::Number(0.into()));
+    }
+
+    #[tokio::test]
+    async fn list_pages_fetch_only_the_requested_range_and_keep_absolute_indices() {
+        let Some((_server, session)) = start_test_redis().await else {
+            eprintln!("skipping live Redis test because redis-server is unavailable");
+            return;
+        };
+        session
+            .run_query("RPUSH tasks z a y b x c w d v e u f", None)
+            .await
+            .unwrap();
+        session
+            .run_query("CONFIG SET slowlog-log-slower-than 0", None)
+            .await
+            .unwrap();
+        let mut request = TablePageRequest {
+            profile_id: session.profile().id,
+            schema: "list".into(),
+            table: "tasks".into(),
+            offset: 2,
+            limit: 3,
+            filters: vec![],
+            order_by: None,
+            include_total: Some(true),
+        };
+        let row = |index, value: &str| vec![JsonValue::from(index), JsonValue::from(value)];
+        let page = session.table_page(&request).await.unwrap();
+        assert_eq!(page.rows, vec![row(2, "y"), row(3, "b"), row(4, "x")]);
+        assert_eq!(page.total_rows, Some(12));
+        assert!(page.has_more);
+        // Assert the actual server request, not just the already-capped output:
+        // fetching the whole list and slicing locally must fail this test.
+        let log: Vec<Value> = redis_rs::cmd("SLOWLOG")
+            .arg("GET")
+            .arg(10)
+            .query_async(&mut *session.conn().await)
+            .await
+            .unwrap();
+        let ranges: Vec<Vec<String>> = log
+            .into_iter()
+            .filter_map(|entry| {
+                let Value::Array(parts) = entry else {
+                    return None;
+                };
+                let Value::Array(args) = parts.get(3)? else {
+                    return None;
+                };
+                let args: Vec<_> = args.iter().cloned().map(value_as_string).collect();
+                args.first()
+                    .is_some_and(|cmd| cmd.eq_ignore_ascii_case("lrange"))
+                    .then_some(args)
+            })
+            .collect();
+        assert_eq!(ranges, vec![vec!["LRANGE", "tasks", "2", "5"]]);
+
+        request.order_by = Some(OrderSpec {
+            column: "index".into(),
+            descending: false,
+        });
+        request.offset = 9;
+        request.include_total = Some(false);
+        let page = session.table_page(&request).await.unwrap();
+        assert_eq!(page.rows, vec![row(9, "e"), row(10, "u"), row(11, "f")]);
+        assert_eq!(page.total_rows, None);
+        assert!(!page.has_more, "an exact final page is not truncated");
+        request.offset = 11;
+        let page = session.table_page(&request).await.unwrap();
+        assert_eq!(page.rows, vec![row(11, "f")]);
+        assert!(!page.has_more);
+        request.offset = 12;
+        let page = session.table_page(&request).await.unwrap();
+        assert!(page.rows.is_empty());
+        assert!(!page.has_more);
+
+        // Value sorting, descending index order, and filters still apply to the
+        // complete list before paging, not just the requested slice.
+        request.offset = 2;
+        request.order_by = Some(OrderSpec {
+            column: "value".into(),
+            descending: false,
+        });
+        let page = session.table_page(&request).await.unwrap();
+        assert_eq!(page.rows, vec![row(5, "c"), row(7, "d"), row(9, "e")]);
+        request.order_by = Some(OrderSpec {
+            column: "index".into(),
+            descending: true,
+        });
+        let page = session.table_page(&request).await.unwrap();
+        assert_eq!(page.rows, vec![row(9, "e"), row(8, "v"), row(7, "d")]);
+        request.order_by = None;
+        request.filters = vec![FilterCondition {
+            column: "value".into(),
+            operator: FilterOperator::LessThan,
+            value: Some("g".into()),
+        }];
+        request.include_total = Some(true);
+        let page = session.table_page(&request).await.unwrap();
+        assert_eq!(page.rows, vec![row(5, "c"), row(7, "d"), row(9, "e")]);
+        assert_eq!(page.total_rows, Some(6));
+        assert!(page.has_more);
     }
 
     #[tokio::test]
