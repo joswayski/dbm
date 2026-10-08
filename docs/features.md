@@ -80,8 +80,10 @@ What the app does today, what is deliberately not built yet, and what it stores 
   through the normal result handling. The cap does not limit server execution
   or network transfer; add SQL `LIMIT` when you need to bound those too.
 - Automatically reconnects once after an idle connection closes, staying on the
-  selected database, then retries read-only browsing and SQL statements. Writes
-  are never retried automatically.
+  selected database, then retries read-only schema and table browsing. User
+  queries are never replayed automatically: even `SELECT` can have side effects.
+  A query connection error attempts reconnection for the next explicit run but
+  still reports the failed query; check its effects before running it again.
 - Refresh on table previews and query results: reload the current page and
   filters, or re-run the last executed statement, without re-authoring them.
 

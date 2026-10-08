@@ -47,6 +47,7 @@ impl AppError {
             "broken pipe",
             "not connected",
             "connection is closed",
+            "terminating connection",
         ]
         .iter()
         .any(|needle| message.contains(needle))
@@ -112,6 +113,12 @@ mod tests {
     fn identifies_lost_database_connections() {
         assert!(AppError::Database("connection closed".into()).is_connection_lost());
         assert!(AppError::Database("Broken pipe".into()).is_connection_lost());
+        assert!(
+            AppError::Database(
+                "terminating connection due to administrator command (SQLSTATE 57P01)".into()
+            )
+            .is_connection_lost()
+        );
         assert!(!AppError::Database("syntax error at or near SELECT".into()).is_connection_lost());
         assert!(!AppError::NotConnected.is_connection_lost());
     }
