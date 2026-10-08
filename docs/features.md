@@ -29,6 +29,10 @@ What the app does today, what is deliberately not built yet, and what it stores 
   when connecting from another app.
 - Native apps: AppKit on macOS (Apple Silicon and Intel), egui on Windows and
   Linux.
+- Windows and Linux start at 1280 × 800 logical pixels and remember normal
+  window sizes between launches. A startup window below the 900 × 600 minimum
+  recovers to the default size, capped to the display size; maximized and
+  fullscreen windows are left unchanged.
 - Signed in-app updates from the GitHub Release published for each merge to
   `main`.
 - Database list, schemas, tables/views, a sidebar filter for tables and keys,

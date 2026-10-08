@@ -12,14 +12,17 @@ mod workbench;
 
 use eframe::{Renderer, egui};
 
+const DEFAULT_WINDOW_SIZE: egui::Vec2 = egui::vec2(1280.0, 800.0);
+const MIN_WINDOW_SIZE: egui::Vec2 = egui::vec2(900.0, 600.0);
+
 fn main() -> eframe::Result {
     let demo = std::env::args().any(|arg| arg == "--demo");
     let options = eframe::NativeOptions {
         renderer: Renderer::Wgpu,
         viewport: egui::ViewportBuilder::default()
             .with_title(if demo { "Anybase — DEMO" } else { "Anybase" })
-            .with_inner_size([1280.0, 800.0])
-            .with_min_inner_size([900.0, 600.0])
+            .with_inner_size(DEFAULT_WINDOW_SIZE)
+            .with_min_inner_size(MIN_WINDOW_SIZE)
             .with_icon(std::sync::Arc::new(
                 eframe::icon_data::from_png_bytes(include_bytes!("../../icons/icon.png"))
                     .expect("bundled app icon is a valid PNG"),
