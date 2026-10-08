@@ -182,7 +182,27 @@ queueing, stale replies after closing a profile, dirty-state guards, failed
 page loads, typed staging, CSV copy, PK/xmin preservation, and the embedded
 table viewer. `crates/dbm-update` tests cover manifest parsing and signature
 verification. macOS CI builds the universal Swift host and captures the
-isolated AppKit fixture.
+isolated AppKit fixture. That fixture also checks header-cell copy ownership
+with long JSON-decoded column types, nested copies, and both destruction orders,
+then refreshes a schema while a table has staged edits. These checks run in the
+optimized app and fail the snapshot process on a regression.
+
+Run the AppKit checks on a Mac (not supported on Linux):
+
+```sh
+bash apps/native/macos/build.sh
+mkdir -p target/native/snapshots
+NSZombieEnabled=YES target/native/Anybase.app/Contents/MacOS/dbm \
+  --demo --snapshot-dir target/native/snapshots
+```
+
+Zombies help diagnose over-released Objective-C objects during this isolated
+fixture run; they are not enabled in normal app launches. AppKit can copy cells
+with `NSCopyObject`, which does not retain Swift stored reference values
+([SR-4756](https://github.com/swiftlang/swift/issues/47333)). `GridHeaderCell`
+therefore keeps its type string in `NSCell.representedObject` and explicitly
+restores that property when copying, since `NSCell` clears it in a copy.
+
 Redis adapter tests start a disposable server when `redis-server` is available;
 PostgreSQL/MySQL live tests skip unless `DBM_TEST_POSTGRES_PORT` or
 `DBM_TEST_MYSQL_PORT` points to the documented disposable local server.
