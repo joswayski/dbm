@@ -145,24 +145,16 @@ impl AppState {
 
     pub async fn run_query(&self, request: QueryRequest) -> AppResult<QueryResponse> {
         // History follows the active database, not the saved default.
-        let database = self
-            .session(request.profile_id)
-            .await?
-            .profile()
-            .default_database
-            .clone();
-        let response = if is_read_only_query(&request.sql) {
-            self.with_session_retry(request.profile_id, |session| {
-                let request = &request;
-                async move { session.run_query(&request.sql, request.max_rows).await }
-            })
-            .await
-        } else {
-            self.session(request.profile_id)
-                .await?
-                .run_query(&request.sql, request.max_rows)
-                .await
-        };
+        let session = self.session(request.profile_id).await?;
+        let database = session.profile().default_database.clone();
+        // Even SELECT can invoke a writing function or begin a multi-statement
+        // script. A lost response does not prove the server did not execute it.
+        let response = session.run_query(&request.sql, request.max_rows).await;
+        if response.as_ref().is_err_and(AppError::is_connection_lost) {
+            // Prepare for the next explicit run, but never replay user SQL or
+            // hide its original error if reconnecting also fails.
+            let _ = self.connect(session.profile().clone()).await;
+        }
         self.store.add_history(&QueryHistoryEntry {
             id: Uuid::new_v4(),
             profile_id: request.profile_id,
@@ -176,25 +168,126 @@ impl AppState {
     }
 }
 
-fn is_read_only_query(sql: &str) -> bool {
-    matches!(
-        sql.split_whitespace()
-            .next()
-            .map(str::to_ascii_lowercase)
-            .as_deref(),
-        Some("select" | "show" | "describe" | "desc" | "explain")
-    )
-}
-
 #[cfg(test)]
 mod tests {
-    use super::is_read_only_query;
+    use super::*;
+    use crate::models::{DatabaseEngine, TlsMode};
+    use serde_json::json;
 
-    #[test]
-    fn retries_only_read_only_queries() {
-        assert!(is_read_only_query("SELECT * FROM users"));
-        assert!(is_read_only_query("  EXPLAIN SELECT * FROM users"));
-        assert!(!is_read_only_query("UPDATE users SET active = true"));
-        assert!(!is_read_only_query("DELETE FROM users"));
+    #[tokio::test]
+    async fn failed_user_queries_are_not_replayed_even_when_they_start_with_select() {
+        let Ok(port) = std::env::var("DBM_TEST_POSTGRES_PORT") else {
+            return;
+        };
+        let directory = tempfile::tempdir().unwrap();
+        let state = AppState::mobile(&directory.path().join("state.sqlite3")).unwrap();
+        let id = Uuid::new_v4();
+        let profile = ConnectionProfile {
+            id,
+            name: "test-query-replay".into(),
+            color: None,
+            engine: DatabaseEngine::Postgres,
+            host: "127.0.0.1".into(),
+            port: port.parse().unwrap(),
+            username: "postgres".into(),
+            default_database: "postgres".into(),
+            tls_mode: TlsMode::Disabled,
+            ca_cert_path: None,
+            ssh: None,
+            read_only: false,
+            open_on_startup: false,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+        let observer = DbSession::connect(profile.clone(), None).await.unwrap();
+        state.connect(profile).await.unwrap();
+        let sequence = format!("dbm_replay_{}", id.simple());
+        observer
+            .run_query(
+                &format!(
+                    "CREATE SEQUENCE {sequence};
+             CREATE FUNCTION {sequence}_bump() RETURNS bigint LANGUAGE plpgsql AS $$
+             BEGIN
+                 PERFORM nextval('{sequence}');
+                 RAISE EXCEPTION 'connection closed after side effect';
+             END $$"
+                ),
+                None,
+            )
+            .await
+            .unwrap();
+        let mut counts = Vec::new();
+        for prefix in ["SELECT", "EXPLAIN ANALYZE SELECT"] {
+            observer
+                .run_query(&format!("ALTER SEQUENCE {sequence} RESTART WITH 1"), None)
+                .await
+                .unwrap();
+            let error = state
+                .run_query(QueryRequest {
+                    profile_id: id,
+                    sql: format!("{prefix} {sequence}_bump()"),
+                    max_rows: Some(10),
+                })
+                .await
+                .unwrap_err();
+            assert!(error.is_connection_lost(), "exercise the reconnect path");
+            // Sequence increments survive failed transactions, revealing each
+            // execution even though the query never returned a successful result.
+            counts.push(
+                observer
+                    .run_query(&format!("SELECT last_value::int FROM {sequence}"), None)
+                    .await
+                    .unwrap()
+                    .rows,
+            );
+        }
+        observer
+            .run_query(
+                &format!("DROP FUNCTION {sequence}_bump(); DROP SEQUENCE {sequence}"),
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(counts, vec![vec![vec![json!(1)]], vec![vec![json!(1)]]]);
+        let history = state.store.list_history(id, "postgres", 10).unwrap();
+        assert_eq!(history.len(), 2);
+        assert!(history.iter().all(|entry| !entry.success));
+
+        let pid = state
+            .session(id)
+            .await
+            .unwrap()
+            .run_query("SELECT pg_backend_pid()", None)
+            .await
+            .unwrap()
+            .rows[0][0]
+            .as_i64()
+            .unwrap();
+        observer
+            .run_query(&format!("SELECT pg_terminate_backend({pid})"), None)
+            .await
+            .unwrap();
+        let error = state
+            .run_query(QueryRequest {
+                profile_id: id,
+                sql: "SELECT 41".into(),
+                max_rows: Some(10),
+            })
+            .await
+            .unwrap_err();
+        assert!(error.is_connection_lost(), "{error}");
+        // The failed run is not replayed, but reconnection makes the next
+        // explicit run usable without requiring a schema or table refresh.
+        let next = state
+            .run_query(QueryRequest {
+                profile_id: id,
+                sql: "SELECT 73".into(),
+                max_rows: Some(10),
+            })
+            .await
+            .unwrap();
+        assert_eq!(next.rows, vec![vec![json!(73)]]);
+        state.disconnect(id).await;
+        observer.close().await;
     }
 }

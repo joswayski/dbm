@@ -157,7 +157,9 @@ egui workbench under load:
   editable 1 MiB field took 3.4 s of CPU and grew memory to 786 MB. The
   AppKit host applies the same limit.
 - Stopping PostgreSQL mid-session shows the connection error inline; after
-  a restart the next refresh reconnects.
+  a restart a table refresh reconnects and retries. User queries are never
+  replayed automatically; a connection error attempts reconnection for the
+  next explicit run, while preserving the failed query's error.
 - Closing the window while a long query runs exits immediately; the server
   finishes that statement on its own. Closing is refused only with staged
   edits or while a save or export is writing.

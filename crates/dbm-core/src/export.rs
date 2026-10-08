@@ -13,8 +13,8 @@ use crate::sql_text::csv_line;
 pub const EXPORT_PAGE_SIZE: u32 = 1_000;
 
 /// Streams every page of `request` (its offset and limit are ignored) to
-/// `path` as CSV and returns the number of rows written. A partial file is
-/// removed when loading or writing fails.
+/// `path` as CSV and returns the number of rows written. The destination is
+/// replaced only after the complete export succeeds; failures leave it intact.
 pub async fn export_csv<F, Fut, E>(
     path: &Path,
     columns: &[String],
@@ -26,25 +26,13 @@ where
     Fut: Future<Output = Result<TablePage, E>>,
     E: std::fmt::Display,
 {
-    let result = write(path, columns, request, &mut load).await;
-    if result.is_err() {
-        let _ = std::fs::remove_file(path);
-    }
-    result
-}
-
-async fn write<F, Fut, E>(
-    path: &Path,
-    columns: &[String],
-    request: &TablePageRequest,
-    load: &mut F,
-) -> Result<u64, String>
-where
-    F: FnMut(TablePageRequest) -> Fut,
-    Fut: Future<Output = Result<TablePage, E>>,
-    E: std::fmt::Display,
-{
-    let file = std::fs::File::create(path).map_err(|e| e.to_string())?;
+    // Keep the temporary file on the destination filesystem for an atomic
+    // replacement. Dropping it also cleans up failed or canceled exports.
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let file = tempfile::NamedTempFile::new_in(parent).map_err(|e| e.to_string())?;
     let mut out = std::io::BufWriter::new(file);
     let header: Vec<serde_json::Value> = columns
         .iter()
@@ -73,7 +61,9 @@ where
             break;
         }
     }
-    out.flush().map_err(|e| e.to_string())?;
+    let file = out.into_inner().map_err(|e| e.to_string())?;
+    file.as_file().sync_all().map_err(|e| e.to_string())?;
+    file.persist(path).map_err(|e| e.to_string())?;
     Ok(written)
 }
 
@@ -176,5 +166,64 @@ mod tests {
         .unwrap_err();
         assert_eq!(error, "connection lost");
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn failed_exports_preserve_existing_files_and_remove_temporary_files() {
+        for failed_page in [0, EXPORT_PAGE_SIZE] {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("existing.csv");
+            std::fs::write(&path, "previous export").unwrap();
+            let error = run(export_csv(&path, &["id".into()], &request(), |req| {
+                let result = if req.offset == failed_page {
+                    Err("connection lost")
+                } else {
+                    Ok(page(&req, 2_500))
+                };
+                async move { result }
+            }))
+            .unwrap_err();
+            assert_eq!(error, "connection lost");
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), "previous export");
+            assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
+        }
+    }
+
+    #[test]
+    fn successful_export_replaces_the_destination_only_after_all_pages_load() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("existing.csv");
+        std::fs::write(&path, "previous export").unwrap();
+        let rows = run(export_csv(&path, &["id".into()], &request(), |req| {
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), "previous export");
+            let page = page(&req, 1_001);
+            async move { Ok::<_, String>(page) }
+        }))
+        .unwrap();
+        assert_eq!(rows, 1_001);
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.starts_with("\u{feff}id\n0\n1\n"));
+        assert!(text.ends_with("\n999\n1000"));
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn failed_destination_replacement_removes_temporary_files() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("destination.csv");
+        std::fs::create_dir(&path).unwrap();
+        std::fs::write(path.join("keep"), "untouched").unwrap();
+        assert!(
+            run(export_csv(&path, &["id".into()], &request(), |req| {
+                let page = page(&req, 1);
+                async move { Ok::<_, String>(page) }
+            }))
+            .is_err()
+        );
+        assert_eq!(
+            std::fs::read_to_string(path.join("keep")).unwrap(),
+            "untouched"
+        );
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
     }
 }

@@ -41,11 +41,16 @@ What the app does today, what is deliberately not built yet, and what it stores 
   CSV export. Redis connections show numbered databases, a SCAN-backed key
   index, and per-type key folders (strings, hashes, lists, sets, sorted sets,
   streams).
+- CSV exports replace the chosen file only after every page is written
+  successfully. A failed export leaves an existing file unchanged.
 - Redis key-index pages scan the complete matching keyspace, deduplicate keys,
   and default to key-name order; browsing and export have no 5,000-key cutoff.
   Unfiltered key-name pages fetch type and TTL only for visible keys. Filtering
   or sorting by metadata inspects all matching keys, so large keyspaces can take
   longer. Pages and exports are not snapshots of concurrent database changes.
+- Unfiltered Redis lists in ascending index order fetch only the requested page
+  plus one lookahead element, with `LLEN` supplying the total. Filtering or
+  other sort orders still load the complete list before paging.
 - Resizable sidebars and columns, collapsible wide fields, and multi-row
   selection for staged edits and deletes.
 - A row inspector next to table grids that shows every field of the selected
@@ -78,8 +83,10 @@ What the app does today, what is deliberately not built yet, and what it stores 
   through the normal result handling. The cap does not limit server execution
   or network transfer; add SQL `LIMIT` when you need to bound those too.
 - Automatically reconnects once after an idle connection closes, staying on the
-  selected database, then retries read-only browsing and SQL statements. Writes
-  are never retried automatically.
+  selected database, then retries read-only schema and table browsing. User
+  queries are never replayed automatically: even `SELECT` can have side effects.
+  A query connection error attempts reconnection for the next explicit run but
+  still reports the failed query; check its effects before running it again.
 - Refresh on table previews and query results: reload the current page and
   filters, or re-run the last executed statement, without re-authoring them.
 
