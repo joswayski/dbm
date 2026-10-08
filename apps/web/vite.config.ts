@@ -49,6 +49,8 @@ export default defineConfig(async () => {
       // page switches to the visitor's clock after hydration.
       __BUILT_AT__: JSON.stringify(builtAt),
     },
+    // Retain Vite 8.2's browser floor instead of following changing defaults.
+    build: { target: ["chrome111", "edge111", "firefox114", "safari16.4", "ios16.4"] },
     server: {
       port: 5175,
     },

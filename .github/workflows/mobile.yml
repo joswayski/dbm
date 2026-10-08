@@ -4,7 +4,7 @@ name: Mobile development builds
 on:
   push:
     branches: [main]
-    paths: ['apps/native/android/**', 'apps/native/ios/**', 'apps/native/bridge/**', 'crates/dbm-core/**', 'Cargo.*', '.github/workflows/mobile*.yml', 'scripts/*mobile*', 'scripts/testflight-distribute.py', 'scripts/play-upload.py']
+    paths: ['apps/native/android/**', 'apps/native/ios/**', 'apps/native/bridge/**', 'crates/dbm-core/**', 'Cargo.*', '.github/workflows/mobile*.yml', 'scripts/*mobile*', 'scripts/testflight-distribute.py*', 'scripts/play-upload.py*']
   workflow_dispatch:
 
 # No signing secrets, releases, store uploads, or production/database access.

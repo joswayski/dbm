@@ -1,0 +1,7 @@
+{
+  "$schema": "./apps/web/node_modules/oxlint/configuration_schema.json",
+  "categories": { "correctness": "error" },
+  "env": { "browser": true, "node": true },
+  "overrides": [{ "files": ["apps/web/tests/**/*.test.ts"], "env": { "vitest": true } }],
+  "ignorePatterns": ["apps/web/src/routeTree.gen.ts"]
+}

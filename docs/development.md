@@ -31,7 +31,10 @@ Prerequisites:
   ```
 
   Running the app needs a display server and a Vulkan driver.
-- Node.js 24, only to run the release-script tests.
+- Node.js 24 and npm for the website and release-script tests.
+- [uv](https://docs.astral.sh/uv/getting-started/installation/) 0.12.23 for
+  Python release scripts; CI uses Python 3.12 and uv can provision it. The
+  standalone scripts retain their existing Python 3.10+ syntax floor.
 
 ## Build and run
 
@@ -72,8 +75,31 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --manifest-path apps/native/workbench/Cargo.toml --all -- --check
 cargo test --manifest-path apps/native/workbench/Cargo.toml --locked
 cargo clippy --manifest-path apps/native/workbench/Cargo.toml --locked --all-targets -- -D warnings
-node --test scripts/release.test.mjs
+npm --prefix apps/web ci
+npm --prefix apps/web run check
+npm --prefix apps/web run test:all
+npm --prefix apps/web run build
+uvx ruff==0.16.10 check scripts
+uvx ruff==0.16.10 format --check scripts
+uv run --locked --python 3.12 --script scripts/test_mobile_release.py -v
 ```
+
+The website and release scripts share Vitest 5, with isolated web and release
+projects; `npm --prefix apps/web run test:release` runs just the release tests.
+Assertions stay intact and unit tests do not load the website's build-time
+GitHub feed. Oxlint checks correctness and Oxfmt formats first-party JS/TS/CSS;
+run `npm --prefix apps/web run fmt` to format. Generated routes and public assets
+are excluded. TypeScript 7's `tsc` is the stable native Go compiler.
+
+The three standalone Python scripts declare their existing PyJWT/PyYAML
+dependencies inline (PEP 723), with per-script `.py.lock` files; no Python
+package or root project environment is needed. uv installs isolated cached
+environments rather than modifying the runner's global Python. Ruff provides
+syntax/correctness and formatting gates; `uvx ruff==0.16.10 format scripts`
+formats them. After deliberately changing a dependency, run
+`uv lock --script scripts/NAME.py` and commit its lockfile. Tests use disposable
+tools and mocked APIs; they never upload or release. The stdlib-only inline
+Python in native build/snapshot helpers remains `python3` with no new dependency.
 
 The Redis tests start a throwaway `redis-server` when one is installed and skip
 otherwise. The PostgreSQL and MySQL tests that need a live server run only when
@@ -102,7 +128,10 @@ TLS database validation remains outstanding. Commands and prerequisites are in
 Amp orbs run [`.agents/setup`](../.agents/setup) to prepare a fresh machine: it
 installs the native workbench's Linux build dependencies, `redis-server` (the
 live Redis tests skip themselves without it), the Rust toolchain pinned in
-`rust-toolchain.toml`, and the locked Cargo dependencies.
+`rust-toolchain.toml`, the locked Cargo dependencies, and npm dependencies for
+the website and release tests (using the orb image's Node/npm). It also installs
+the pinned uv version, syncs locked Python 3.12 script environments without
+executing upload scripts, and caches Ruff.
 [`.agents/resume`](../.agents/resume) only checks that the environment is still
 intact when an orb wakes. No long-running services are declared in
 [`.amp/services.yaml`](../.amp/services.yaml).
@@ -154,9 +183,13 @@ cd apps/web
 npm ci
 npm run dev        # http://localhost:5175
 npm test
-npm run typecheck
+npm run check      # Oxlint, Oxfmt check, native TypeScript
 npm run build      # dist/client
 ```
+
+Vite 8 uses Rolldown/Oxc with the React 6 plugin. The browser build target stays
+at Chrome/Edge 111, Firefox 114, Safari/iOS 16.4. npm and Node remain the package
+manager and runtime; Wrangler's static asset deployment is unchanged.
 
 Changes under `apps/web` do not publish a desktop release. Deployment is covered
 in [the rename plan](anybase-migration.md#website).

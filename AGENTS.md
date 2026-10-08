@@ -79,7 +79,8 @@
   cargo test --workspace
   cargo run --manifest-path apps/native/workbench/Cargo.toml --release -- --demo   # Windows/Linux app, fixture data
   bash apps/native/macos/build.sh && open target/native/Anybase.app                # macOS app
-  node --test scripts/release.test.mjs                                             # release versioning
+  npm --prefix apps/web ci && npm --prefix apps/web run check
+  npm --prefix apps/web run test:all                                               # website and release versioning
   ```
 
 - The AppKit app can only be built on macOS; say so when a change to it was not built.

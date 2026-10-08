@@ -31,12 +31,19 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - run: node --test scripts/release.test.mjs
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm --prefix apps/web ci
+      - run: npm --prefix apps/web run test:release
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python3 -m pip install 'pyjwt[crypto]==2.10.1' 'PyYAML==6.0.3'
-      - run: python3 -m unittest discover -s scripts -p test_mobile_release.py -v
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: '0.12.23'
+      - run: uvx ruff==0.16.10 check scripts
+      - run: uvx ruff==0.16.10 format --check scripts
+      - run: uv run --locked --python 3.12 --script scripts/test_mobile_release.py -v
       - name: Build the Windows installer from a stand-in executable
         run: |
           sudo apt-get update
@@ -74,7 +81,7 @@ jobs:
           cache: npm
           cache-dependency-path: apps/web/package-lock.json
       - run: npm ci
-      - run: npm run typecheck
+      - run: npm run check
       - run: npm test
       - name: Build (fetches Latest changes from GitHub)
         run: npm run build

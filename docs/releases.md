@@ -84,7 +84,7 @@ Tags use the release date in New York time plus a daily revision:
 tag, the display version (`2026.09.24.2`), and an app version that packs the
 date into SemVer as `YEAR.MONTH.DAY×100+REVISION` (`2026.9.2402`), so versions
 always increase for the updaters. It is covered by
-`node --test scripts/release.test.mjs`.
+`npm --prefix apps/web ci && npm --prefix apps/web run test:release`.
 
 The build number spreads the app version into one integer, `YYYYMMDDNN`
 (`2026092402`). It is compiled in as `DBM_NATIVE_BUILD` and, on macOS, written

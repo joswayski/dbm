@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test } from "vitest";
 
 import { nextReleaseVersion, releaseDate, releaseNotes } from "./release.mjs";
 
@@ -26,7 +26,10 @@ test("app versions keep increasing across days and months", () => {
     const [a, b] = [left, right].map((version) => version.split(".").map(Number));
     return a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
   };
-  const lateInMonth = nextReleaseVersion("2026-09-30", Array.from({ length: 98 }, (_, index) => `v2026.09.30.${index + 1}`));
+  const lateInMonth = nextReleaseVersion(
+    "2026-09-30",
+    Array.from({ length: 98 }, (_, index) => `v2026.09.30.${index + 1}`),
+  );
   const nextMonth = nextReleaseVersion("2026-10-01", []);
   assert.equal(lateInMonth.appVersion, "2026.9.3099");
   assert.ok(compare(nextMonth.appVersion, lateInMonth.appVersion) > 0);
@@ -37,7 +40,11 @@ test("rejects malformed tags, impossible dates, and a 100th daily release", () =
   assert.throws(() => nextReleaseVersion("2026-09-24", ["v2026.09.24.x"]), /malformed/);
   assert.throws(() => nextReleaseVersion("2026-02-30", []), /real calendar date/);
   assert.throws(
-    () => nextReleaseVersion("2026-09-24", Array.from({ length: 99 }, (_, index) => `v2026.09.24.${index + 1}`)),
+    () =>
+      nextReleaseVersion(
+        "2026-09-24",
+        Array.from({ length: 99 }, (_, index) => `v2026.09.24.${index + 1}`),
+      ),
     /at most 99/,
   );
 });

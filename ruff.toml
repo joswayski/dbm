@@ -1,0 +1,7 @@
+# These standalone scripts already require Python 3.10 syntax; CI uses 3.12.
+target-version = "py310"
+line-length = 120
+include = ["scripts/*.py"]
+
+[lint]
+select = ["E4", "E7", "E9", "F"]

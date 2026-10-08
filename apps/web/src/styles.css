@@ -79,11 +79,7 @@
 @layer base {
   body {
     @apply m-0 min-h-dvh bg-canvas font-sans text-ink antialiased;
-    background-image: radial-gradient(
-      ellipse 80% 40% at 50% -14%,
-      rgba(76, 154, 255, 0.08),
-      transparent 60%
-    );
+    background-image: radial-gradient(ellipse 80% 40% at 50% -14%, rgba(76, 154, 255, 0.08), transparent 60%);
   }
 
   ::selection {

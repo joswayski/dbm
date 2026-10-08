@@ -67,8 +67,7 @@ export function toLatestChange(entry: FeedEntry, repository: string): LatestChan
   const sha = entry.link.match(/\/commit\/([0-9a-f]{7,40})$/iu)?.[1];
   if (!sha) throw new Error(`Unexpected commit link in GitHub feed: ${entry.link}`);
 
-  const pullRequest =
-    entry.title.match(/\(#(\d+)\)$/u)?.[1] ?? entry.title.match(/^Merge pull request #(\d+)/u)?.[1];
+  const pullRequest = entry.title.match(/\(#(\d+)\)$/u)?.[1] ?? entry.title.match(/^Merge pull request #(\d+)/u)?.[1];
 
   return {
     sha,

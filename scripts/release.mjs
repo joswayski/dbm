@@ -35,9 +35,9 @@ export function nextReleaseVersion(date, tags) {
   const [year, month, day] = [Number(yearText), Number(monthText), Number(dayText)];
   const normalized = new Date(`${date}T12:00:00Z`);
   if (
-    normalized.getUTCFullYear() !== year
-    || normalized.getUTCMonth() + 1 !== month
-    || normalized.getUTCDate() !== day
+    normalized.getUTCFullYear() !== year ||
+    normalized.getUTCMonth() + 1 !== month ||
+    normalized.getUTCDate() !== day
   ) {
     throw new Error(`release date is not a real calendar date: ${date}`);
   }
@@ -73,7 +73,12 @@ export function releaseNotes(commits) {
   const lines = [];
   for (const { subject, body } of commits) {
     const merge = /^Merge pull request #(\d+) from (\S+)/u.exec(subject);
-    const title = merge ? body.split(/\r?\n/u).find((line) => line.trim())?.trim() || subject : subject;
+    const title = merge
+      ? body
+          .split(/\r?\n/u)
+          .find((line) => line.trim())
+          ?.trim() || subject
+      : subject;
     if (/^Bump \S+ from \S+ to \S+/u.test(title) || (merge && merge[2].includes("dependabot/"))) continue;
     const reference = merge && !title.includes(`#${merge[1]}`) ? ` (#${merge[1]})` : "";
     lines.push(`* ${title}${reference}`);
@@ -87,7 +92,15 @@ function git(...args) {
 
 function previousReleaseTag(sha) {
   try {
-    return git("describe", "--tags", "--abbrev=0", "--first-parent", "--match", "v[0-9]*.[0-9]*.[0-9]*.[0-9]*", `${sha}^`).trim();
+    return git(
+      "describe",
+      "--tags",
+      "--abbrev=0",
+      "--first-parent",
+      "--match",
+      "v[0-9]*.[0-9]*.[0-9]*.[0-9]*",
+      `${sha}^`,
+    ).trim();
   } catch {
     return null;
   }

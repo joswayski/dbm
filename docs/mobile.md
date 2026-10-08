@@ -180,6 +180,21 @@ The release reads `production/signing/release` through GitHub OIDC role
   Apple; Discord reports failure if either platform fails, including partial
   uploads. A TestFlight success is not physical-device acceptance.
 
+The Google Play and TestFlight API scripts run through pinned uv 0.12.23 with
+Python 3.12. Releases check out the selected application's `git_sha` separately
+from the workflow revision (`github.sha`) under `.release-tooling`. uv exports
+the workflow revision's script lock with `--locked`, then installs those exact,
+hash-verified dependencies in a disposable virtual environment. That Python
+executes the **selected revision's** distribution script, so pre-uv commits
+without inline metadata or `.py.lock` files remain releasable; no application
+source is replaced and the runner's global Python is untouched. Missing or
+stale workflow locks fail before credentials are loaded. Local commands use
+`uv run --locked --script` directly. Lockfile changes count as mobile changes
+in both the build trigger and release guard. CI checks these scripts with Ruff
+and exercises orchestration against disposable tools/mocked APIs, not the live
+stores. See
+[development checks](development.md#tests-and-checks) for local commands.
+
 ### One-time setup before the first release
 
 1. Apply the DBM signer role in `joswayski/infrastructure` following its
