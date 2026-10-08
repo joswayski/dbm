@@ -1325,38 +1325,6 @@ impl Workbench {
                     .inner_margin(Margin::symmetric(10, 10)),
             )
             .show(ctx, |ui| {
-                // `.brand-row`: a 26 px control-coloured mark with an inset
-                // ring and an accent database glyph.
-                ui.horizontal(|ui| {
-                    ui.set_height(32.0);
-                    ui.add_space(6.0);
-                    ui.spacing_mut().item_spacing.x = 9.0;
-                    let (rect, _) = ui.allocate_exact_size(Vec2::splat(26.0), Sense::hover());
-                    ui.painter().rect(
-                        rect,
-                        CornerRadius::same(7),
-                        theme::CONTROL,
-                        Stroke::new(1.0, Color32::from_white_alpha(15)),
-                        egui::StrokeKind::Inside,
-                    );
-                    icons::paint(
-                        ui.painter(),
-                        egui::Rect::from_center_size(rect.center(), Vec2::splat(15.0)),
-                        Icon::Database,
-                        theme::ACCENT_TEXT,
-                    );
-                    ui.label(
-                        RichText::new("Anybase")
-                            .font(theme::semibold(13.0))
-                            .color(theme::TEXT_STRONG),
-                    );
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if icons::button(ui, Icon::Sidebar, None, "Collapse sidebar").clicked() {
-                            self.sidebar_collapsed = true;
-                        }
-                    });
-                });
-                ui.add_space(10.0);
                 egui::TopBottomPanel::bottom("sidebar-footer")
                     .frame(Frame::new().inner_margin(Margin {
                         left: 2,
@@ -1382,7 +1350,14 @@ impl Workbench {
                             self.profile_form = Some(ProfileForm::fresh());
                         }
                     });
-                ui.label(section_label("Connections"));
+                ui.horizontal(|ui| {
+                    ui.label(section_label("Connections"));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if icons::button(ui, Icon::Sidebar, None, "Collapse sidebar").clicked() {
+                            self.sidebar_collapsed = true;
+                        }
+                    });
+                });
                 ui.add_space(4.0);
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
