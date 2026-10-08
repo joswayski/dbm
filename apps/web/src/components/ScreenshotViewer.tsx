@@ -159,7 +159,15 @@ export function ScreenshotViewer({ shots, index, onIndexChange, onClose }: Scree
 
 function ChevronIcon({ direction }: { direction: "left" | "right" }) {
   return (
-    <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+    <svg
+      viewBox="0 0 16 16"
+      width="16"
+      height="16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      aria-hidden="true"
+    >
       <path
         d={direction === "left" ? "M10 3.5 5.5 8l4.5 4.5" : "M6 3.5 10.5 8 6 12.5"}
         strokeLinecap="round"
@@ -171,7 +179,15 @@ function ChevronIcon({ direction }: { direction: "left" | "right" }) {
 
 function CloseIcon() {
   return (
-    <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+    <svg
+      viewBox="0 0 16 16"
+      width="16"
+      height="16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      aria-hidden="true"
+    >
       <path d="m4 4 8 8M12 4l-8 8" strokeLinecap="round" />
     </svg>
   );

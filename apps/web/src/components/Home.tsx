@@ -40,9 +40,7 @@ export function Home({ latestChanges, builtAt }: HomeProps) {
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <img src="/icon-192.png" alt="" width={32} height={32} className="h-8 w-8" />
-            <h1 className="text-2xl font-semibold tracking-tight text-ink-strong sm:text-3xl">
-              {PRODUCT_NAME}
-            </h1>
+            <h1 className="text-2xl font-semibold tracking-tight text-ink-strong sm:text-3xl">{PRODUCT_NAME}</h1>
           </div>
           <a
             href={REPO_URL}
@@ -151,8 +149,7 @@ function DownloadAction({ platform }: { platform: DownloadId | null | undefined 
   if (!download) {
     return (
       <p className="text-sm leading-relaxed text-ink-muted">
-        {PRODUCT_NAME} is a desktop app for macOS, Windows, and Linux. Open this page on your
-        computer to download it.
+        {PRODUCT_NAME} is a desktop app for macOS, Windows, and Linux. Open this page on your computer to download it.
       </p>
     );
   }
