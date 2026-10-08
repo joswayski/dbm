@@ -41,6 +41,8 @@ What the app does today, what is deliberately not built yet, and what it stores 
   CSV export. Redis connections show numbered databases, a SCAN-backed key
   index, and per-type key folders (strings, hashes, lists, sets, sorted sets,
   streams).
+- CSV exports replace the chosen file only after every page is written
+  successfully. A failed export leaves an existing file unchanged.
 - Redis key-index pages scan the complete matching keyspace, deduplicate keys,
   and default to key-name order; browsing and export have no 5,000-key cutoff.
   Unfiltered key-name pages fetch type and TTL only for visible keys. Filtering
