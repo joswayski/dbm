@@ -19,6 +19,11 @@ final class GridHeaderCell: NSTableHeaderCell {
 
     static let collapseWidth: CGFloat = 24
 
+    static func collapseButtonRect(in header: NSRect) -> NSRect {
+        NSRect(x: header.maxX - collapseWidth - 4, y: header.midY - collapseWidth / 2,
+               width: collapseWidth, height: collapseWidth)
+    }
+
     override func draw(withFrame cellFrame: NSRect, in controlView: NSView) {
         (actionTarget ? NSColor(hex: 0x232a36) : Graphite.gridHeader).setFill()
         cellFrame.fill()
@@ -56,17 +61,17 @@ final class GridHeaderCell: NSTableHeaderCell {
                        options: [.truncatesLastVisibleLine, .usesLineFragmentOrigin])
             return
         }
-        let collapseWidth = interactive ? Self.collapseWidth : 0
-        let sortArea = NSRect(x: cellFrame.minX, y: cellFrame.minY, width: cellFrame.width - collapseWidth, height: cellFrame.height - 1)
+        let button = Self.collapseButtonRect(in: cellFrame)
+        let sortRight = interactive ? button.minX - 4 : cellFrame.maxX
+        let sortArea = NSRect(x: cellFrame.minX, y: cellFrame.minY, width: sortRight - cellFrame.minX, height: cellFrame.height - 1)
         if interactive, hoverPart == .sort {
             NSColor(white: 1, alpha: 0.03).setFill()
             sortArea.fill()
         }
         if interactive, hoverPart != .none {
-            let button = NSRect(x: sortArea.maxX, y: cellFrame.minY, width: collapseWidth, height: cellFrame.height - 1)
             if hoverPart == .collapse {
                 Graphite.controlHover.setFill()
-                button.fill()
+                NSBezierPath(roundedRect: button, xRadius: 6, yRadius: 6).fill()
             }
             Icon.collapse.draw(in: NSRect(x: button.midX - 6, y: midY - 6, width: 12, height: 12),
                                color: hoverPart == .collapse ? Graphite.text : Graphite.faint)
@@ -132,7 +137,7 @@ final class GridHeaderView: NSTableHeaderView {
         guard column >= 0, let tableView else { return .none }
         let cell = tableView.tableColumns[column].headerCell as? GridHeaderCell
         guard onToggleColumn != nil else { return .sort }
-        if cell?.collapsed == true || point.x > headerRect(ofColumn: column).maxX - GridHeaderCell.collapseWidth { return .collapse }
+        if cell?.collapsed == true || GridHeaderCell.collapseButtonRect(in: headerRect(ofColumn: column)).contains(point) { return .collapse }
         return .sort
     }
 
@@ -178,10 +183,9 @@ final class GridHeaderView: NSTableHeaderView {
             let header = headerRect(ofColumn: index).insetBy(dx: 3, dy: 0)
             guard header.width > 0 else { continue }
             let collapsed = (tableView.tableColumns[index].headerCell as? GridHeaderCell)?.collapsed == true
-            let button = collapsed ? header : NSRect(x: header.maxX - GridHeaderCell.collapseWidth + 3, y: header.minY,
-                                                    width: GridHeaderCell.collapseWidth - 3, height: header.height)
+            let button = collapsed ? header : GridHeaderCell.collapseButtonRect(in: headerRect(ofColumn: index))
             let sort = collapsed ? NSRect.zero : NSRect(x: header.minX, y: header.minY,
-                                                        width: max(0, button.minX - header.minX), height: header.height)
+                                                        width: max(0, button.minX - 4 - header.minX), height: header.height)
             for rect in [sort, button] where rect.width > 0 {
                 addCursorRect(rect, cursor: .pointingHand)
                 addToolTip(rect, owner: self, userData: nil)
@@ -197,7 +201,7 @@ final class GridHeaderView: NSTableHeaderView {
         let name = tableColumn.title
         let collapsed = (tableColumn.headerCell as? GridHeaderCell)?.collapsed == true
         if collapsed { return "Expand \(name)" }
-        let onButton = point.x > headerRect(ofColumn: column).maxX - GridHeaderCell.collapseWidth
+        let onButton = GridHeaderCell.collapseButtonRect(in: headerRect(ofColumn: column)).contains(point)
         return onButton ? "Collapse \(name)" : "Sort by \(name)"
     }
 

@@ -1418,8 +1418,10 @@ fn header_cell(
     let hovered = ui.rect_contains_pointer(rect);
     let button = collapse_button_rect(rect);
     let show_collapse = collapsible == Some(false) && hovered;
-    let sort_rect = if show_collapse {
-        egui::Rect::from_min_max(rect.min, egui::pos2(button.left() - 2.0, rect.max.y))
+    // Reserve the button's space even when hidden, so sorting never moves
+    // the arrow or lets header text paint underneath the collapse control.
+    let sort_rect = if collapsible == Some(false) {
+        egui::Rect::from_min_max(rect.min, egui::pos2(button.left() - 4.0, rect.max.y))
     } else {
         rect
     };
@@ -1428,39 +1430,69 @@ fn header_cell(
         ui.painter()
             .rect_filled(sort_rect, 0, Color32::from_white_alpha(8));
     }
-    ui.horizontal_centered(|ui| {
-        ui.spacing_mut().item_spacing.x = 5.0;
-        ui.add_space(10.0);
-        if primary_key {
-            icons::show(ui, Icon::Key, 11.0, theme::MODIFIED).on_hover_text("Primary key");
-        }
-        ui.label(RichText::new(name).size(12.0).color(if sort.is_some() {
+    // Anchor the indicator to the sort area's right edge, independently of
+    // the name/type length and the column's width.
+    let indicator = match sort {
+        Some(true) => Some((Icon::ArrowDown, theme::ACCENT_TEXT)),
+        Some(false) => Some((Icon::ArrowUp, theme::ACCENT_TEXT)),
+        None if sort_hovered => Some((Icon::Sort, Color32::from_rgb(0x5c, 0x5c, 0x62))),
+        None => None,
+    };
+    if let Some((icon, color)) = indicator {
+        icons::paint(
+            ui.painter(),
+            Rect::from_center_size(
+                egui::pos2(sort_rect.right() - 10.0, rect.center().y),
+                Vec2::splat(12.0),
+            ),
+            icon,
+            color,
+        );
+    }
+    let limit = sort_rect.right() - 4.0 - if indicator.is_some() { 17.0 } else { 0.0 };
+    let mut x = rect.left() + 10.0;
+    if primary_key {
+        let key = Rect::from_center_size(egui::pos2(x + 5.5, rect.center().y), Vec2::splat(11.0));
+        icons::paint(ui.painter(), key, Icon::Key, theme::MODIFIED);
+        ui.interact(key, ui.id().with(("key", name)), Sense::hover())
+            .on_hover_text("Primary key");
+        x += 16.0;
+    }
+    let text_painter = ui.painter().with_clip_rect(Rect::from_min_max(
+        rect.min,
+        egui::pos2(limit, rect.bottom()),
+    ));
+    if limit > x {
+        let name_color = if sort.is_some() {
             theme::TEXT_STRONG
         } else {
             theme::TEXT
-        }));
-        if !data_type.is_empty() {
-            ui.label(
-                RichText::new(data_type)
-                    .font(mono(11.0))
-                    .color(theme::FAINT),
-            );
-        }
-        // `.sort-indicator`: an accent arrow for the sorted column, neutral
-        // two-way arrows on hover elsewhere.
-        match sort {
-            Some(true) => {
-                icons::show(ui, Icon::ArrowDown, 12.0, theme::ACCENT_TEXT);
-            }
-            Some(false) => {
-                icons::show(ui, Icon::ArrowUp, 12.0, theme::ACCENT_TEXT);
-            }
-            None if sort_hovered => {
-                icons::show(ui, Icon::Sort, 12.0, Color32::from_rgb(0x5c, 0x5c, 0x62));
-            }
-            None => {}
-        }
-    });
+        };
+        let mut job =
+            egui::text::LayoutJob::simple_singleline(name.to_owned(), ui_font(12.0), name_color);
+        job.wrap = egui::text::TextWrapping::truncate_at_width(limit - x);
+        let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
+        text_painter.galley(
+            egui::pos2(x, rect.center().y - galley.size().y / 2.0),
+            galley.clone(),
+            name_color,
+        );
+        x += galley.size().x + 5.0;
+    }
+    if !data_type.is_empty() && limit - x > 12.0 {
+        let mut job = egui::text::LayoutJob::simple_singleline(
+            data_type.to_owned(),
+            mono(11.0),
+            theme::FAINT,
+        );
+        job.wrap = egui::text::TextWrapping::truncate_at_width(limit - x);
+        let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
+        text_painter.galley(
+            egui::pos2(x, rect.center().y - galley.size().y / 2.0),
+            galley,
+            theme::FAINT,
+        );
+    }
     let sort_click = ui
         .interact(sort_rect, ui.id().with(("sort", name)), Sense::click())
         .on_hover_text(format!("Sort by {name}"));
@@ -2557,6 +2589,81 @@ pub mod tests {
             order_by: None,
             include_total: Some(true),
         })
+    }
+
+    #[test]
+    fn sorted_headers_keep_text_and_arrow_clear_of_compact_collapse_button() {
+        for (width, primary_key) in [
+            (70.0, false),
+            (70.0, true),
+            (80.0, true),
+            (170.0, false),
+            (340.0, true),
+        ] {
+            for sort in [Some(false), Some(true)] {
+                let context = egui::Context::default();
+                theme::configure(&context);
+                let header = Rect::from_min_size(egui::pos2(20.0, 20.0), Vec2::new(width, 34.0));
+                let button_center = egui::pos2(header.right() - 16.0, 37.0);
+                let mut arrows = Vec::new();
+                for (frame, pointer) in [egui::pos2(0.0, 0.0), button_center, button_center]
+                    .into_iter()
+                    .enumerate()
+                {
+                    let output = context.run(
+                        egui::RawInput {
+                            events: vec![egui::Event::PointerMoved(pointer)],
+                            ..Default::default()
+                        },
+                        |ctx| {
+                            egui::CentralPanel::default().show(ctx, |ui| {
+                                let mut ui = ui.new_child(egui::UiBuilder::new().max_rect(header));
+                                header_cell(
+                                    &mut ui,
+                                    "long_column_name_that_used_to_overlap",
+                                    "character varying(255)",
+                                    primary_key,
+                                    sort,
+                                    Some(false),
+                                );
+                            });
+                        },
+                    );
+                    let mut arrow = Rect::NOTHING;
+                    for shape in &output.shapes {
+                        match &shape.shape {
+                            egui::Shape::LineSegment { stroke, .. }
+                                if stroke.color == theme::ACCENT_TEXT =>
+                            {
+                                arrow = arrow.union(shape.shape.visual_bounding_rect());
+                            }
+                            egui::Shape::Text(text) => {
+                                assert!(
+                                    (text.pos.x + text.galley.size().x)
+                                        .min(shape.clip_rect.right())
+                                        <= header.right() - 53.0,
+                                    "text overlaps sort indicator at width {width}"
+                                );
+                            }
+                            _ => {}
+                        }
+                    }
+                    assert!(arrow.is_positive());
+                    assert!(arrow.right() < header.right() - 28.0);
+                    arrows.push(arrow);
+                    if frame == 2 {
+                        // Hover stays a 24×24 square, never a full-height strip.
+                        assert!(output.shapes.iter().any(|shape| matches!(
+                            &shape.shape,
+                            egui::Shape::Rect(rect) if rect.fill == theme::CONTROL_HOVER
+                                && rect.rect.size() == Vec2::splat(24.0)
+                                && rect.rect.center() == button_center
+                        )));
+                    }
+                }
+                assert!(arrows.windows(2).all(|pair| pair[0] == pair[1]));
+            }
+        }
     }
 
     #[test]
