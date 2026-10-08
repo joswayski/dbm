@@ -1,8 +1,8 @@
 # Anybase
 
 A fast database client for PostgreSQL, MySQL, and Redis. Native desktop apps
-are released for macOS, Windows, and Linux; Android Compose and iPhone SwiftUI
-clients are in development.
+are released for macOS, Windows, and Linux; native Android and iPhone apps are
+available for [early-access testing](#mobile-status).
 
 **[anyba.se](https://anyba.se)**. Formerly DBM: download file names and this
 repository still use the DBM name while [the rename](docs/anybase-migration.md)
@@ -41,16 +41,24 @@ rolls out.
 - Your connections, history, and data stay on your machine: no telemetry,
   accounts, or sync.
 
-The mobile development clients are a deliberately smaller, read-only slice.
-They connect directly through the in-process Rust core, require verified TLS,
-and do not save passwords. They are not public store releases. A separate
-Caper-style release workflow delivers Android through Google Play internal
-testing and iPhone through TestFlight after the one-time signing/app setup. See
-[the mobile contract](docs/mobile.md) for capabilities, privacy, networking,
-builds, and validation status.
-
 See [docs/features.md](docs/features.md) for the full feature list and what is
 planned.
+
+## Mobile status
+
+Both native mobile apps are available as **read-only development builds**, not
+public Play Store/App Store releases or desktop-parity clients.
+
+| Platform | Availability |
+| --- | --- |
+| Android 8.0+ (Kotlin/Compose) | [Google Play internal testing](https://play.google.com/apps/testing/com.dbm.nativeapp) for enrolled testers, or [download the signed APK](https://github.com/joswayski/dbm/releases/download/mobile-latest/DBM-Android.apk) |
+| iPhone, iOS 17+ (SwiftUI) | TestFlight internal testing; a tester invitation is required |
+
+Browse PostgreSQL, MySQL, and Redis and run read-only SQL/Redis commands through
+the in-process Rust core. Mobile requires verified TLS, keeps passwords only in
+memory, and has no editing or exports. Physical-device and live TLS database
+validation remain outstanding. See [the mobile guide](docs/mobile.md) for
+release evidence, capabilities, safe networking, builds, and validation status.
 
 ## Docs
 

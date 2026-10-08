@@ -1,11 +1,27 @@
 # Mobile development clients
 
 Anybase has browser-free **Kotlin/Compose Android** and **SwiftUI iPhone** development
-clients. They reuse the desktop Rust database adapters in-process through JNI
-and the C ABI. These are not Play Store/App Store releases or desktop-parity apps.
+clients available for early-access testing. They reuse the desktop Rust database
+adapters in-process through JNI and the C ABI. These are not public Play Store/App
+Store releases or desktop-parity apps.
 
 The setup follows Caper's separate native UI/build approach, not its hosted API.
 Anybase has no server, account, pairing service, telemetry, or connection sync.
+
+## Distribution status
+
+The [mobile release on 7 October 2026 (UTC)](https://github.com/joswayski/dbm/actions/runs/37552184568)
+completed both platform jobs:
+
+- **Android:** version code 1001 rolled out to Google Play internal testers.
+  Enrolled testers can use [Google Play](https://play.google.com/apps/testing/com.dbm.nativeapp),
+  or download the [signed APK](https://github.com/joswayski/dbm/releases/download/mobile-latest/DBM-Android.apk).
+- **iPhone:** build 10.1 uploaded, finished processing, and became available to
+  the internal TestFlight group. Testers need an invitation; this does not
+  establish external beta-review approval or public App Store availability.
+
+Successful distribution does not establish physical-device acceptance or live,
+verified-TLS database validation; both remain outstanding.
 
 ## First slice
 
@@ -114,9 +130,10 @@ package step is not proof that the later UI tests pass. Downloads expire after
 Anybase's existing desktop release workflow remains unchanged; merging app changes
 still publishes desktop updates, not mobile store releases.
 
-These are configured workflows, not a record that any particular revision has
-passed. SwiftUI is not compiled on Linux. Physical-device behavior and live,
-verified-TLS database connections on both mobile platforms remain outstanding.
+Workflow configuration alone is not proof that a revision passed; the
+[distribution status](#distribution-status) above links to a verified release.
+SwiftUI is not compiled on Linux. Physical-device behavior and live, verified-TLS
+database connections on both mobile platforms remain outstanding.
 
 ## Signed mobile releases (Caper's distribution path)
 
