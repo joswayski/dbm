@@ -448,7 +448,9 @@ final class TopBar: PanelView {
     private let empty = label("No active connection", font: Graphite.ui(13), color: Graphite.muted)
     private let demoChip = Chip("Demo fixture · not a live connection", color: Graphite.modified)
     /// `.update-control`: shown only on channel builds.
-    let updateButton = GButton("Check for updates", style: .secondary)
+    let updateButton = GButton("", style: .secondary)
+    private let updateStatus = label("", font: Graphite.ui(11), color: Graphite.muted)
+    private let version = label("", font: Graphite.ui(10), color: Graphite.muted)
 
     init(demo: Bool) {
         super.init(fill: Graphite.chrome, edges: [.bottom])
@@ -457,10 +459,13 @@ final class TopBar: PanelView {
         dot.heightAnchor.constraint(equalToConstant: 8).isActive = true
         demoChip.isHidden = !demo
         demoChip.toolTip = "Isolated deterministic data; profiles and edits are not persisted."
-        updateButton.minHeight = 26
+        updateButton.minHeight = 22
         updateButton.labelFont = Graphite.ui(12)
         updateButton.isHidden = true
-        pin(hstack([dot, name, target, readOnly, empty, spacer(), demoChip, updateButton], spacing: 8), insets: NSEdgeInsets(top: 0, left: 16, bottom: 1, right: 14))
+        updateStatus.isHidden = true
+        version.isHidden = true
+        let updates = vstack([updateButton, updateStatus, version], alignment: .trailing)
+        pin(hstack([dot, name, target, readOnly, empty, spacer(), demoChip, updates], spacing: 8), insets: NSEdgeInsets(top: 0, left: 16, bottom: 1, right: 14))
         heightAnchor.constraint(equalToConstant: 40).isActive = true
     }
 
@@ -468,7 +473,17 @@ final class TopBar: PanelView {
 
     /// Mirrors the updater: accent styling when a build is available.
     func showUpdate(_ updater: Updater) {
-        updateButton.isHidden = !updater.enabled
+        var actionable = false
+        switch updater.state {
+        case .available, .failed: actionable = true
+        default: break
+        }
+        updateButton.isHidden = !updater.enabled || !actionable
+        updateStatus.isHidden = !updater.enabled || actionable || updater.label.isEmpty
+        updateStatus.stringValue = updater.label
+        version.isHidden = !updater.enabled
+        version.stringValue = updater.versionLabel
+        version.toolTip = updater.detail
         updateButton.title = updater.label
         updateButton.invalidateIntrinsicContentSize()
         updateButton.toolTip = updater.detail

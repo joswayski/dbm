@@ -128,13 +128,20 @@ impl Updates {
     /// The desktop `UpdateControl`'s wording.
     pub fn label(&self) -> String {
         match &self.state {
-            State::Idle => "Check for updates".into(),
+            State::Idle => String::new(),
             State::Checking => "Checking…".into(),
             State::UpToDate => "Up to date".into(),
-            State::Available(update) => format!("Update to {}", update.version),
+            State::Available(update) => format!("Update to v{}", update.version),
             State::Installing => "Installing…".into(),
             State::Failed(_) => "Retry update".into(),
         }
+    }
+
+    pub fn version_label(&self) -> String {
+        format!(
+            "Version {}",
+            dbm_update::current_version().unwrap_or_default()
+        )
     }
 
     pub fn detail(&self) -> String {
@@ -210,4 +217,26 @@ fn replace_and_restart(download: &Path) -> Result<(), String> {
         .spawn()
         .map_err(failed)?;
     std::process::exit(0);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn header_labels_distinguish_versions_from_status() {
+        let mut updates = Updates::new();
+        assert!(updates.label().is_empty());
+        assert!(updates.version_label().starts_with("Version "));
+        updates.state = State::UpToDate;
+        assert_eq!(updates.label(), "Up to date");
+        updates.state = State::Available(Available {
+            build: 2026100801,
+            version: "2026.10.08.1".into(),
+            notes: String::new(),
+            url: String::new(),
+            signature: String::new(),
+        });
+        assert_eq!(updates.label(), "Update to v2026.10.08.1");
+    }
 }

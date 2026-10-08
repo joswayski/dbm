@@ -95,9 +95,13 @@ to `CFBundleVersion`; the display version is compiled in as
 
 Release builds check
 `https://github.com/joswayski/dbm/releases/latest/download/native-latest.json`
-five seconds after launch and every 30 minutes, and the top bar's **Check for
-updates** button checks on demand. When the manifest lists a higher build
-number, the button becomes **Update to <version>**. Installing asks for
+five seconds after launch and every 30 minutes. **Check for updates…** checks
+on demand from the Anybase menu on macOS or the top bar's Help menu on
+Windows/Linux. The top bar normally shows a small, non-clickable **Version
+<version>** label; manual checks show non-clickable status text above it.
+When the manifest lists a higher build number, an **Update to v<version>**
+button appears above the installed version. Failed manual checks offer
+**Retry update**, with the error in its tooltip. Installing asks for
 confirmation, because unsaved query text and staged edits are discarded. It
 then downloads the platform's artifact, verifies its minisign signature
 against the public key in `crates/dbm-update`, swaps it in, and restarts.
