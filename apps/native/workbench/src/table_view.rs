@@ -41,6 +41,44 @@ const FILTER_OPERATORS: [(FilterOperator, &str); 13] = [
     (FilterOperator::IsNotNull, "Is not null"),
 ];
 
+fn sort_direction_text(ui: &egui::Ui, descending: bool) -> egui::text::LayoutJob {
+    let mut job = egui::text::LayoutJob::default();
+    job.append(
+        if descending {
+            "Descending"
+        } else {
+            "Ascending"
+        },
+        20.0,
+        egui::TextFormat {
+            font_id: ui_font(12.5),
+            color: ui.visuals().text_color(),
+            ..Default::default()
+        },
+    );
+    job
+}
+
+fn paint_sort_direction(ui: &egui::Ui, response: &egui::Response, descending: bool) {
+    let rect = Rect::from_center_size(
+        egui::pos2(
+            response.rect.left() + ui.spacing().button_padding.x + 7.0,
+            response.rect.center().y,
+        ),
+        Vec2::splat(14.0),
+    );
+    icons::paint(
+        ui.painter(),
+        rect,
+        if descending {
+            Icon::ArrowDown
+        } else {
+            Icon::ArrowUp
+        },
+        ui.style().interact(response).text_color(),
+    );
+}
+
 fn operator_label(operator: FilterOperator) -> &'static str {
     FILTER_OPERATORS
         .iter()
@@ -861,17 +899,17 @@ fn query_controls(
     if effective.is_some() {
         ui.add_space(6.0);
         labeled(ui, "Direction");
-        egui::ComboBox::from_id_salt("sort-direction")
-            .selected_text(if descending {
-                "Descending"
-            } else {
-                "Ascending"
-            })
-            .width(116.0)
+        let direction = egui::ComboBox::from_id_salt("sort-direction")
+            .selected_text(sort_direction_text(ui, descending))
+            .width(142.0)
             .show_ui(ui, |ui| {
-                ui.selectable_value(&mut descending, false, "Ascending");
-                ui.selectable_value(&mut descending, true, "Descending");
+                for value in [false, true] {
+                    let text = sort_direction_text(ui, value);
+                    let option = ui.selectable_value(&mut descending, value, text);
+                    paint_sort_direction(ui, &option, value);
+                }
             });
+        paint_sort_direction(ui, &direction.response, descending);
     }
     let changed_column = effective.as_ref().map(|o| o.column.as_str()) != Some(column.as_str())
         && !column.is_empty();
@@ -2491,6 +2529,22 @@ pub mod tests {
 
     use super::*;
     use dbm_core::demo::table_page as demo_page;
+
+    #[test]
+    fn sort_direction_labels_reserve_space_for_stroke_icons() {
+        let context = egui::Context::default();
+        let _ = context.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                for (descending, label) in [(false, "Ascending"), (true, "Descending")] {
+                    let job = sort_direction_text(ui, descending);
+                    assert_eq!(job.text, label);
+                    assert_eq!(job.sections.len(), 1);
+                    assert_eq!(job.sections[0].leading_space, 20.0);
+                    assert_eq!(job.sections[0].byte_range, 0..label.len());
+                }
+            });
+        });
+    }
 
     pub fn page() -> TablePage {
         demo_page(&TablePageRequest {
