@@ -858,6 +858,7 @@ final class SnapshotDriver {
     }
 
     func start() {
+        checkHeaderCopying()
         let app = self.app
         let postgres = "00000000-0000-0000-0000-000000000001"
         let redis = "00000000-0000-0000-0000-000000000004"
@@ -876,7 +877,15 @@ final class SnapshotDriver {
                 app.refresh()
             }),
             ("05b-change-preview", { [app] in app.activeTablePane?.hoverRow(1) }),
+            ("05c-schema-refresh", { [app] in app.refreshSchema(postgres) }),
             ("06-embedded", { [app] in
+                // Schema refresh must leave the open table and staged edits intact.
+                precondition(!app.refreshingSchema.contains(postgres))
+                precondition(!(app.schemas[postgres] ?? []).isEmpty)
+                precondition(app.activeTab?.table == "users")
+                precondition(app.activeTab?.tableState?.pending.count == 2)
+                precondition(string(app.activeTab?.tableState?.pending[1]?.changes[1]) == "changed@example.com")
+                precondition(app.activeTab?.tableState?.pending[3]?.deleted == true)
                 app.openQuery(postgres)
                 if let tab = app.activeTab {
                     app.activeQueryPane?.editor.string = "SELECT * FROM public.users;"
@@ -903,6 +912,55 @@ final class SnapshotDriver {
             }),
         ]
         next(0)
+    }
+
+    /// Exercise AppKit's real NSCell copy path, including destruction in both
+    /// orders. Long JSON-decoded types use heap storage; inline/tagged short
+    /// strings alone can hide an unbalanced retain in a copied Swift field.
+    private func checkHeaderCopying() {
+        let expected = "timestamp without time zone"
+        let json = Data(#"{"name":"created_at","dataType":"timestamp without time zone","nullable":true}"#.utf8)
+        let column = Column(raw: dictionary(try! JSONSerialization.jsonObject(with: json)))
+        let header = GridHeaderCell(textCell: column.name)
+        header.dataType = column.dataType
+        header.primaryKey = true
+        header.sort = false
+        header.interactive = true
+        header.hoverPart = .collapse
+
+        for _ in 0..<256 {
+            autoreleasepool {
+                let copy = header.copy() as! GridHeaderCell
+                precondition(copy !== header && copy.stringValue == "created_at")
+                precondition(copy.dataType == expected && copy.primaryKey)
+                precondition(copy.sort == false && copy.interactive && copy.hoverPart == .collapse)
+                let nested = copy.copy() as! GridHeaderCell
+                precondition(nested.dataType == expected)
+                copy.dataType = "character varying(255)"
+                copy.stringValue = "" // AppKit's blank header filler.
+                precondition(nested.dataType == expected && header.dataType == expected)
+            }
+            // Copies have now been destroyed; re-read the same model fields
+            // that reloadGridColumns uses when Refresh Schema redraws a table.
+            precondition(column.name == "created_at" && column.dataType == expected)
+            precondition(header.dataType == expected && header.stringValue == "created_at")
+        }
+
+        let survivor: GridHeaderCell = autoreleasepool {
+            let model = Column(raw: dictionary(try! JSONSerialization.jsonObject(with: json)))
+            let original = GridHeaderCell(textCell: model.name)
+            original.dataType = model.dataType
+            return original.copy() as! GridHeaderCell
+        }
+        precondition(survivor.dataType == expected && survivor.stringValue == "created_at")
+        for type in ["", "jsonb"] {
+            header.dataType = type
+            autoreleasepool {
+                let copy = header.copy() as! GridHeaderCell
+                precondition(copy.dataType == type)
+            }
+        }
+        print("Grid header copy regression checks passed")
     }
 
     private func next(_ index: Int) {

@@ -5,7 +5,14 @@ final class GridHeaderCell: NSTableHeaderCell {
     enum HoverPart { case none, sort, collapse }
 
     var primaryKey = false
-    var dataType = ""
+    // NSCell copying can bit-copy Swift stored properties without retaining
+    // their storage (swiftlang/swift#47333). AppKit copies headers for the
+    // filler area, so a stored String here can over-release column metadata.
+    // Keep ownership in NSCell's Objective-C-managed storage instead.
+    var dataType: String {
+        get { representedObject as? String ?? "" }
+        set { representedObject = newValue }
+    }
     var sort: Bool?
     var rightAligned = false
     var collapsed = false
@@ -18,6 +25,13 @@ final class GridHeaderCell: NSTableHeaderCell {
     var dimmed = false
 
     static let collapseWidth: CGFloat = 24
+
+    override func copy(with zone: NSZone? = nil) -> Any {
+        let cell = super.copy(with: zone) as! GridHeaderCell
+        // NSCell intentionally clears representedObject in its copy.
+        cell.representedObject = representedObject
+        return cell
+    }
 
     static func collapseButtonRect(in header: NSRect) -> NSRect {
         NSRect(x: header.maxX - collapseWidth - 4, y: header.midY - collapseWidth / 2,
