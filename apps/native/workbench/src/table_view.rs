@@ -2082,7 +2082,11 @@ fn grid(
                                 }
                                 aligned(ui, right_align, |ui| {
                                     ui.add_space(10.0);
-                                    ui.add(egui::Label::new(text).truncate());
+                                    ui.add(
+                                        egui::Label::new(text)
+                                            .truncate()
+                                            .show_tooltip_when_elided(pending.is_none()),
+                                    );
                                 });
                                 if focus == Some(ColumnFocus::Dimmed) {
                                     ui.painter().rect_filled(
@@ -2825,6 +2829,93 @@ pub mod tests {
         assert!(Arc::ptr_eq(state.page.as_ref().unwrap(), &shared));
         assert_eq!(shared.rows[0][1], original);
         assert_eq!(state.pending[&0].changes[1], json!("ada@example.com"));
+    }
+
+    #[test]
+    fn pending_row_previews_replace_truncated_cell_tooltips() {
+        for (edited, deleted) in [(false, false), (true, false), (false, true)] {
+            let context = egui::Context::default();
+            theme::configure(&context);
+            let mut page = page();
+            let note =
+                "A long unchanged note that overflows the table cell and needs a hover preview";
+            page.rows[0][3] = json!(note);
+            let mut state = TableState {
+                page: Some(Arc::new(page)),
+                inspector_open: false,
+                ..TableState::default()
+            };
+            if edited {
+                stage_cell(&mut state, 0, 1, "ada@example.com");
+            }
+            if deleted {
+                stage_delete(&mut state, &[0], true);
+            }
+            let cx = TableContext {
+                tab_id: 1,
+                schema: "public",
+                table: "customers",
+                embedded: false,
+                read_only: false,
+                saving: false,
+                exporting: false,
+            };
+            let mut pointer = None;
+            let mut output = egui::FullOutput::default();
+            for frame in 0..6 {
+                output = context.run(
+                    egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            Vec2::new(1200.0, 700.0),
+                        )),
+                        time: Some(f64::from(frame) * 0.5),
+                        events: pointer
+                            .filter(|_| frame == 1)
+                            .map_or_else(Vec::new, |pos| vec![egui::Event::PointerMoved(pos)]),
+                        ..Default::default()
+                    },
+                    |ctx| {
+                        egui::CentralPanel::default().show(ctx, |ui| {
+                            show(ui, &cx, &mut state);
+                        });
+                    },
+                );
+                if pointer.is_none() {
+                    pointer = output.shapes.iter().find_map(|shape| match &shape.shape {
+                        egui::Shape::Text(text)
+                            if text.galley.job.text == note && text.galley.elided =>
+                        {
+                            Some(text.pos + Vec2::new(10.0, 6.0))
+                        }
+                        _ => None,
+                    });
+                }
+            }
+            assert!(pointer.is_some(), "the hovered cell must be truncated");
+            let tooltip = output.shapes.iter().any(|shape| {
+                matches!(
+                    &shape.shape,
+                    egui::Shape::Text(text) if text.galley.job.text == note && !text.galley.elided
+                )
+            });
+            assert_eq!(
+                tooltip,
+                !edited && !deleted,
+                "edited={edited}, deleted={deleted}"
+            );
+            let preview = output.shapes.iter().any(|shape| {
+                matches!(
+                    &shape.shape,
+                    egui::Shape::Text(text) if text.galley.job.text == if deleted {
+                        "Pending delete"
+                    } else {
+                        "Pending edit"
+                    }
+                )
+            });
+            assert_eq!(preview, edited || deleted);
+        }
     }
 
     #[test]
