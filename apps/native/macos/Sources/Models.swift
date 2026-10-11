@@ -416,8 +416,9 @@ enum Helpers {
         func record(_ values: [Any]) -> String {
             values.map { value in
                 let text = displayValue(value)
-                return text.contains("\"") || text.contains(",") || text.contains("\r") || text.contains("\n")
-                    ? "\"\(text.replacingOccurrences(of: "\"", with: "\"\""))\"" : text
+                // CSV delimiters are scalars, even when CRLF is one grapheme.
+                return text.unicodeScalars.contains { $0 == "\"" || $0 == "," || $0 == "\r" || $0 == "\n" }
+                    ? "\"\(text.replacingOccurrences(of: "\"", with: "\"\"", options: .literal))\"" : text
             }.joined(separator: ",")
         }
         return ([record(columns.map { $0 as Any })] + rows.map { record(Array($0.prefix(columns.count))) }).joined(separator: "\n")
