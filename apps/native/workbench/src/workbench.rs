@@ -2410,7 +2410,10 @@ impl Workbench {
                         };
                         let refresh = ui
                             .add_enabled(
-                                !running && !exporting && tab.last_executed.is_some() && !embedded_dirty,
+                                !running
+                                    && !exporting
+                                    && tab.last_executed.is_some()
+                                    && !embedded_dirty,
                                 theme::secondary_button(refresh_label).icon(Icon::Refresh),
                             )
                             .on_hover_text(tip)
@@ -2418,37 +2421,45 @@ impl Workbench {
                         if refresh.clicked() {
                             run = tab.last_executed.clone().map(|sql| (sql, true));
                         }
-                        if let Some(result) = self.query_results.get(&tab_id) {
-                            if tab.embedded.is_none() && !result.columns.is_empty() {
-                                chip(ui, "Read-only result", theme::MUTED).on_hover_text(
-                                    "This query does not resolve to one complete table, so Anybase cannot safely map edits back to rows.",
-                                );
-                            }
-                            if result.truncated {
-                                chip(ui, "truncated", theme::MODIFIED);
-                            }
-                        }
                         ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                            ui.add(egui::Label::new(
-                                RichText::new(&tab.title)
-                                    .font(theme::semibold(15.0))
-                                    .color(theme::TEXT_STRONG),
-                            ).truncate());
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(&tab.title)
+                                        .font(theme::semibold(15.0))
+                                        .color(theme::TEXT_STRONG),
+                                )
+                                .truncate(),
+                            );
                             if let Some(result) = self.query_results.get(&tab_id)
-                                && !running && !self.query_errors.get(&tab_id).is_some_and(|m| m.kind == messages::Kind::Error)
+                                && !running
+                                && !self
+                                    .query_errors
+                                    .get(&tab_id)
+                                    .is_some_and(|m| m.kind == messages::Kind::Error)
                             {
-                                let mut status = format!("Query completed in {} ms", result.duration_ms);
+                                let mut status =
+                                    format!("Query completed in {} ms", result.duration_ms);
                                 if tab.embedded.is_none() {
-                                    status.push_str(&format!(" · {} rows", theme::count(result.row_count as u64)));
+                                    status.push_str(&format!(
+                                        " · {} rows",
+                                        theme::count(result.row_count as u64)
+                                    ));
                                     if let Some(affected) = result.affected_rows {
-                                        status.push_str(&format!(" · {} affected", theme::count(affected)));
+                                        status.push_str(&format!(
+                                            " · {} affected",
+                                            theme::count(affected)
+                                        ));
                                     }
                                 }
-                                ui.add(egui::Label::new(
-                                    RichText::new(&status)
-                                        .font(ui_font(11.5))
-                                        .color(theme::MUTED),
-                                ).truncate()).on_hover_text(status);
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(&status)
+                                            .font(ui_font(11.5))
+                                            .color(theme::MUTED),
+                                    )
+                                    .truncate(),
+                                )
+                                .on_hover_text(status);
                             }
                         });
                     });
@@ -2523,9 +2534,9 @@ impl Workbench {
                                 ui.horizontal(|ui| {
                                     ui.label(
                                         RichText::new(if redis {
-                                            "The outlined command or selection will run · Command/Ctrl+Enter · results capped at 10,000 rows"
+                                            "The outlined command or selection will run · Command/Ctrl+Enter · Preview limit: 10,000 rows"
                                         } else {
-                                            "The outlined statement or selected SQL will run · Command/Ctrl+Enter · results capped at 10,000 rows"
+                                            "The outlined statement or selected SQL will run · Command/Ctrl+Enter · Preview limit: 10,000 rows"
                                         })
                                         .font(ui_font(11.5))
                                         .color(theme::FAINT),
@@ -3085,14 +3096,14 @@ impl Workbench {
                     ui.horizontal_wrapped(|ui| {
                         ui.add_enabled_ui(enabled, |ui| {
                             copy = icons::button(ui, Icon::Copy,
-                                Some(&format!("Copy visible ({})", theme::count(result.rows.len() as u64))),
-                                "Copy the returned result as CSV, including column headers").clicked();
+                                Some(&format!("Copy results ({})", theme::count(result.rows.len() as u64))),
+                                "Copy the displayed query results to the clipboard as CSV, including column headers").clicked();
                             export = icons::button(ui, Icon::Download,
-                                Some(if self.busy(RequestKind::Export, Some(tab_id)) { "Exporting…" } else { "Export all" }),
-                                "Save every returned row as CSV without re-running the query").clicked();
+                                Some(if self.busy(RequestKind::Export, Some(tab_id)) { "Saving…" } else { "Save CSV" }),
+                                "Save the displayed query results to a CSV file").clicked();
                         });
                         if result.truncated {
-                            ui.label(RichText::new("Copy/export includes returned rows only; result was truncated.")
+                            ui.label(RichText::new(format!("Showing first {} rows.", theme::count(result.rows.len() as u64)))
                                 .font(ui_font(11.5)).color(theme::MODIFIED));
                         }
                     });
@@ -3103,7 +3114,7 @@ impl Workbench {
                     tab_id,
                     Message::notice(
                         format!(
-                            "Copied {} visible rows as CSV.",
+                            "Copied {} result rows as CSV.",
                             theme::count(result.rows.len() as u64)
                         ),
                         self.now,
@@ -4008,15 +4019,15 @@ mod tests {
                 }
             })
             .collect();
-        assert!(texts.iter().any(|text| text.galley.text() == "Export all"));
+        assert!(texts.iter().any(|text| text.galley.text() == "Save CSV"));
         assert!(
             texts
                 .iter()
-                .any(|text| text.galley.text().contains("returned rows only"))
+                .any(|text| text.galley.text() == "Showing first 2 rows.")
         );
         let copy = texts
             .iter()
-            .find(|text| text.galley.text() == "Copy visible (2)")
+            .find(|text| text.galley.text() == "Copy results (2)")
             .unwrap();
         let position = copy.pos + copy.galley.size() / 2.0;
         frame(vec![

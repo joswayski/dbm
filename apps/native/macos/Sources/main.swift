@@ -724,8 +724,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, NS
         panel.nameFieldStringValue = "\(safe).csv"
         panel.allowedContentTypes = [.commaSeparatedText]
         panel.message = bool(result["truncated"])
-            ? "This result was truncated. Only the \(rows.count) returned rows will be exported."
-            : "Export the returned result without re-running the query."
+            ? "Save the first \(rows.count.formatted()) rows shown in the result preview."
+            : "Save the displayed query results as CSV."
         panel.beginSheetModal(for: window) { [weak self] response in
             guard let self else { return }
             guard response == .OK, let url = panel.url else {
@@ -974,8 +974,8 @@ final class SnapshotDriver {
             (view as? GButton).map { [$0] } ?? view.subviews.flatMap(buttons)
         }
         let actions = buttons(pane)
-        guard let copy = actions.first(where: { $0.title == "Copy visible" }),
-              let export = actions.first(where: { $0.title == "Export all" }) else {
+        guard let copy = actions.first(where: { $0.title == "Copy results" }),
+              let export = actions.first(where: { $0.title == "Save CSV" }) else {
             preconditionFailure("Manual query results must offer copy and export")
         }
         precondition(copy.isEnabled && export.isEnabled)
