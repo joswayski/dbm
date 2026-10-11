@@ -118,6 +118,7 @@ snapshots (`--demo --snapshot-dir`).
 | Redis: typed key views and edits (strings, hashes, lists, sets, sorted sets), key index | Done through the shared table view | Done through the shared table view |
 | Tabs: rename, collapse, close guards for staged edits | Done | Done |
 | Keyboard: Delete stages deletion, Escape clears/reverts, Enter commits edits | Done | Done |
+| Keyboard: new connection, new query, close tab (⌘N/⌘T/⌘W, Ctrl+N/T/W) | Done | Done |
 | Updates: Check for updates / Update to …, signed download, in-place swap | Done | Done |
 | Accessibility | AccessKit enabled; screen readers not yet validated | Native AppKit controls; not yet validated |
 | Light theme | Not implemented | Not implemented |

@@ -1635,11 +1635,6 @@ impl Workbench {
             });
         let width = ui.available_width();
         let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 44.0), Sense::click());
-        let response = if connected {
-            response
-        } else {
-            response.on_hover_text("Connect")
-        };
         response.widget_info(|| {
             egui::WidgetInfo::selected(egui::WidgetType::Button, true, active, &profile.name)
         });
@@ -1671,11 +1666,17 @@ impl Workbench {
         } else {
             format!("{}@{}", profile.username, profile.host)
         };
-        let subtitle = single_line(
-            format!("{} · {target}", engine_label(profile.engine)),
-            ui_font(11.0),
-            theme::FAINT,
-        );
+        let subtitle_text = format!("{} · {target}", engine_label(profile.engine));
+        let subtitle = single_line(subtitle_text.clone(), ui_font(11.0), theme::FAINT);
+        // The full name and target when either is cut off.
+        let response = match (name.elided || subtitle.elided, connected) {
+            (true, true) => response.on_hover_text(format!("{}\n{subtitle_text}", profile.name)),
+            (true, false) => {
+                response.on_hover_text(format!("Connect to {}\n{subtitle_text}", profile.name))
+            }
+            (false, true) => response,
+            (false, false) => response.on_hover_text("Connect"),
+        };
         ui.painter().galley(
             egui::Pos2::new(text_left, rect.top() + 6.0),
             name,
@@ -3034,9 +3035,23 @@ impl Workbench {
                 .flatten()
                 .map(|t| tab.sql[..t.from].chars().count()..tab.sql[..t.to].chars().count())
         };
+        // Highlighting tokenizes the whole script, so reuse the last job until
+        // the text changes; the cursor blink alone repaints. (Galleys aren't
+        // kept: they go stale when egui rebuilds its font atlas.)
+        let layout_id = editor_id.with("layout");
         let mut layouter = move |ui: &egui::Ui, text: &dyn egui::TextBuffer, _wrap: f32| {
-            let job = editor_layout(engine, text.as_str());
-            ui.fonts_mut(|fonts| fonts.layout_job(job))
+            let text = text.as_str();
+            let key = egui::util::hash((engine == DatabaseEngine::Redis, text));
+            let job = ui
+                .data(|d| d.get_temp::<(u64, std::sync::Arc<LayoutJob>)>(layout_id))
+                .filter(|(hash, _)| *hash == key)
+                .map(|(_, job)| job)
+                .unwrap_or_else(|| {
+                    let job = std::sync::Arc::new(editor_layout(engine, text));
+                    ui.data_mut(|d| d.insert_temp(layout_id, (key, job.clone())));
+                    job
+                });
+            ui.fonts_mut(|fonts| fonts.layout_job(LayoutJob::clone(&job)))
         };
         let line_count = tab.sql.split('\n').count().max(1);
         let output = egui::ScrollArea::both()
@@ -3261,7 +3276,8 @@ impl Workbench {
                 Some(profile),
             );
         }
-        let entries = self.histories.get(&key).cloned().unwrap_or_default();
+        let entries = self.histories.get(&key).map_or(&[][..], Vec::as_slice);
+        let entries = &entries[..entries.len().min(100)];
         Frame::new()
             .inner_margin(Margin::symmetric(12, 9))
             .show(ui, |ui| {
@@ -3292,13 +3308,15 @@ impl Workbench {
             return None;
         }
         let mut picked = None;
+        // `.history-list { padding: 4px }`, rows 6 px rounded.
+        ui.add_space(4.0);
+        ui.spacing_mut().item_spacing.y = 0.0;
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
-            .show(ui, |ui| {
-                // `.history-list { padding: 4px }`, rows 6 px rounded.
-                ui.add_space(4.0);
+            // Only the visible rows are laid out.
+            .show_rows(ui, 48.0, entries.len(), |ui, rows| {
                 ui.spacing_mut().item_spacing.y = 0.0;
-                for entry in entries.iter().take(100) {
+                for entry in &entries[rows] {
                     let time = entry
                         .executed_at
                         .with_timezone(&chrono::Local)
@@ -3308,8 +3326,9 @@ impl Workbench {
                     let (outer, response) =
                         ui.allocate_exact_size(Vec2::new(width, 48.0), Sense::click());
                     let rect = outer.shrink2(Vec2::new(4.0, 0.0));
-                    let response = response
-                        .on_hover_text(format!("{} ms\n\n{}", entry.duration_ms, entry.sql));
+                    let response = response.on_hover_ui(|ui| {
+                        ui.label(format!("{} ms\n\n{}", entry.duration_ms, entry.sql));
+                    });
                     response.widget_info(|| {
                         egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &entry.sql)
                     });
