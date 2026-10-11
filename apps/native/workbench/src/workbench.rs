@@ -3646,8 +3646,6 @@ fn modal<R>(
         .order(egui::Order::Foreground)
         .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
         .fixed_size([width, 0.0])
-        .max_height((ctx.content_rect().height() - 80.0).max(0.0))
-        .vscroll(true)
         .frame(
             Frame::new()
                 .fill(theme::POPOVER)
@@ -3661,7 +3659,20 @@ fn modal<R>(
                     color: Color32::from_black_alpha(140),
                 }),
         )
-        .show(ctx, add)
+        .show(ctx, |ui| {
+            // The body is as tall as its content and scrolls only when the
+            // window is too short. Inside a window, a scroll area is otherwise
+            // only as tall as the space offered (64 px here), which hid the
+            // whole connection form behind a scrollbar.
+            let max_height = (ctx.content_rect().height() - 80.0 - 36.0).max(64.0);
+            // A solid bar takes its own space instead of covering the fields.
+            ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
+            egui::ScrollArea::vertical()
+                .max_height(max_height)
+                .min_scrolled_height(max_height)
+                .show(ui, add)
+                .inner
+        })
         .and_then(|response| response.inner)
 }
 
@@ -4923,6 +4934,37 @@ mod tests {
         let _ = ctx.end_pass();
         assert!(app.profile_form.is_none(), "Escape closes the dialog");
         assert!(app.queued.is_empty(), "the password load is dropped");
+    }
+
+    #[test]
+    fn connection_dialog_shows_its_form_instead_of_a_tiny_scroller() {
+        let mut app = app();
+        app.profile_form = Some(ProfileForm::fresh());
+        let ctx = app.context.clone();
+        let input = |height: f32| egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                Vec2::new(1280.0, height),
+            )),
+            ..Default::default()
+        };
+        let dialog_height = |app: &mut Workbench, height: f32| {
+            for _ in 0..3 {
+                let _ = ctx.run(input(height), |ctx| app.profile_dialog(ctx));
+            }
+            ctx.memory(|m| m.area_rect(egui::Id::new("Connection")))
+                .expect("dialog shown")
+                .height()
+        };
+        // Tall windows fit the whole form; short ones cap the dialog and
+        // scroll its body.
+        let tall = dialog_height(&mut app, 1000.0);
+        assert!(tall > 500.0, "dialog was {tall} px tall");
+        let short = dialog_height(&mut app, 600.0);
+        assert!(
+            short > 400.0 && short <= 600.0 - 40.0,
+            "dialog was {short} px tall"
+        );
     }
 
     #[test]
