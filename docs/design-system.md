@@ -119,8 +119,9 @@ platform or egui fallback fonts.
 
 Expanded table and query-result cells reserve space at the right edge for a
 14 px overlapping-rectangles copy icon in a transparent 28 × 28 px button.
-It uses `--secondary` at rest and a hover wash, with a "Copy value" tooltip and
-accessible name. Hide it while editing or when the column is collapsed.
+Show it only while that cell is hovered; hide it when the pointer leaves,
+while editing, or when the column is collapsed. It uses `--secondary` and a
+button hover wash, with a "Copy value" tooltip and accessible name.
 
 ## Components
 

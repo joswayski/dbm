@@ -305,7 +305,8 @@ final class GridCellView: NSView {
     var modified = false
     var deleted = false
     /// A collapsed column shows a faint "…" instead of the value.
-    var collapsed = false { didSet { copyButton.isHidden = collapsed; needsDisplay = true } }
+    var collapsed = false { didSet { copyButton.isHidden = collapsed || !hovering; needsDisplay = true } }
+    private var hovering = false
     /// While a header's collapse/expand control is hovered, other columns
     /// dim and the target column is washed, as `.column-action-*` does.
     var columnAction = ColumnAction.none {
@@ -328,6 +329,7 @@ final class GridCellView: NSView {
     override init(frame: NSRect) {
         super.init(frame: frame)
         addSubview(copyButton)
+        copyButton.isHidden = true
         NSLayoutConstraint.activate([
             copyButton.widthAnchor.constraint(equalToConstant: 28),
             copyButton.heightAnchor.constraint(equalToConstant: 28),
@@ -339,6 +341,25 @@ final class GridCellView: NSView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     override var isFlipped: Bool { true }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.filter { $0.owner === self }.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
+                                       owner: self, userInfo: nil))
+        hovering = window.map { visibleRect.contains(convert($0.mouseLocationOutsideOfEventStream, from: nil)) } ?? false
+        copyButton.isHidden = collapsed || !hovering
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        hovering = true
+        copyButton.isHidden = collapsed
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        hovering = false
+        copyButton.isHidden = true
+    }
 
     override func draw(_ dirtyRect: NSRect) {
         if columnAction == .target {
@@ -384,7 +405,7 @@ final class GridCellView: NSView {
 
     override func accessibilityRole() -> NSAccessibility.Role? { .cell }
     override func accessibilityValue() -> Any? { displayValue(value) }
-    override func accessibilityChildren() -> [Any]? { collapsed ? [] : [copyButton] }
+    override func accessibilityChildren() -> [Any]? { copyButton.isHidden ? [] : [copyButton] }
     override func isAccessibilityElement() -> Bool { true }
 }
 

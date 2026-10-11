@@ -1126,6 +1126,9 @@ fn value_cell(ui: &mut egui::Ui, value: &Value, text: RichText, right: bool, too
         Vec2::splat(28.0),
     );
     let mut button_ui = ui.new_child(egui::UiBuilder::new().max_rect(button_rect));
+    if !ui.rect_contains_pointer(rect) {
+        button_ui.set_invisible();
+    }
     if icons::button(&mut button_ui, Icon::Copy, None, "Copy value")
         .on_hover_cursor(egui::CursorIcon::PointingHand)
         .clicked()
@@ -2943,6 +2946,10 @@ pub mod tests {
                 .iter()
                 .filter(|(_, node)| node.label() == Some("Copy value"))
                 .map(|(_, node)| {
+                    assert!(
+                        node.is_disabled(),
+                        "copy controls stay hidden until hovered"
+                    );
                     let bounds = node.bounds().unwrap();
                     egui::pos2(
                         ((bounds.x0 + bounds.x1) / 2.0) as f32,
@@ -2953,6 +2960,16 @@ pub mod tests {
             buttons.sort_by(|a, b| a.y.total_cmp(&b.y).then(a.x.total_cmp(&b.x)));
             assert_eq!(buttons.len(), expected.len());
             for (pos, expected) in buttons.into_iter().zip(expected) {
+                let output = frame(vec![egui::Event::PointerMoved(pos)]);
+                let enabled = output
+                    .platform_output
+                    .accesskit_update
+                    .unwrap()
+                    .nodes
+                    .iter()
+                    .filter(|(_, node)| node.label() == Some("Copy value") && !node.is_disabled())
+                    .count();
+                assert_eq!(enabled, 1, "only the hovered cell offers copying");
                 frame(vec![
                     egui::Event::PointerMoved(pos),
                     egui::Event::PointerButton {
@@ -2982,6 +2999,18 @@ pub mod tests {
                     .collect();
                 assert_eq!(copied, vec![expected], "query_results={query_results}");
             }
+            let output = frame(vec![egui::Event::PointerMoved(egui::pos2(0.0, 0.0))]);
+            assert!(
+                output
+                    .platform_output
+                    .accesskit_update
+                    .unwrap()
+                    .nodes
+                    .iter()
+                    .filter(|(_, node)| node.label() == Some("Copy value"))
+                    .all(|(_, node)| node.is_disabled()),
+                "copy controls hide when the pointer leaves"
+            );
             assert!(state.selected.is_empty());
             assert!(state.editing.is_none());
             assert_eq!(state.pending[&0].changes[1], json!(long));

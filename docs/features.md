@@ -53,8 +53,9 @@ What the app does today, what is deliberately not built yet, and what it stores 
   other sort orders still load the complete list before paging.
 - Resizable sidebars and columns, collapsible wide fields, and multi-row
   selection for staged edits and deletes.
-- A small copy button in each expanded table or query-result cell copies its
-  full value, including text truncated in the grid and staged edits. Strings
+- A small copy button appears only on the hovered, expanded table or
+  query-result cell and copies its full value, including text truncated in
+  the grid and staged edits. Strings
   retain line breaks, structured values copy as JSON, and null values as `NULL`.
   Copying a cell does not select or edit its row; the existing CSV actions still
   copy rows with column headers.
