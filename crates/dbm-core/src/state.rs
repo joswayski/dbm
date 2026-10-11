@@ -12,6 +12,7 @@ use crate::models::{
     SaveProfileInput,
 };
 use crate::session::DbSession;
+use crate::sql_text::history_text;
 use crate::storage::LocalStore;
 
 pub struct AppState {
@@ -155,15 +156,19 @@ impl AppState {
             // hide its original error if reconnecting also fails.
             let _ = self.connect(session.profile().clone()).await;
         }
-        self.store.add_history(&QueryHistoryEntry {
-            id: Uuid::new_v4(),
-            profile_id: request.profile_id,
-            database,
-            sql: request.sql,
-            executed_at: chrono::Utc::now(),
-            duration_ms: response.as_ref().map_or(0, |result| result.duration_ms),
-            success: response.is_ok(),
-        })?;
+        // Passwords never reach the SQLite file: credential statements are
+        // saved with their literals redacted, or not at all.
+        if let Some(sql) = history_text(session.profile().engine, &request.sql) {
+            self.store.add_history(&QueryHistoryEntry {
+                id: Uuid::new_v4(),
+                profile_id: request.profile_id,
+                database,
+                sql,
+                executed_at: chrono::Utc::now(),
+                duration_ms: response.as_ref().map_or(0, |result| result.duration_ms),
+                success: response.is_ok(),
+            })?;
+        }
         response
     }
 }

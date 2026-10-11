@@ -104,7 +104,9 @@ button appears above the installed version. Failed manual checks offer
 **Retry update**, with the error in its tooltip. Installing asks for
 confirmation, because unsaved query text and staged edits are discarded. It
 then downloads the platform's artifact, verifies its minisign signature
-against the public key in `crates/dbm-update`, swaps it in, and restarts.
+against the public key in `crates/dbm-update` (including that the signed
+`file:` name in the trusted comment matches the artifact's URL, so release
+assets must keep the name they were signed under), swaps it in, and restarts.
 
 - **macOS:** the new bundle must also pass `codesign --verify`, and is swapped
   in after Anybase quits. The restart launches a fresh instance and activates

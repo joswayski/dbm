@@ -31,6 +31,7 @@ verified-TLS database validation; both remain outstanding.
   the app's read-only mode is a safeguard, not an authorization boundary.
 - Connect opens the SQL/Redis workbench. Query results are capped at 1,000 rows;
   schema/key exploration and read-only table/key pages use 25 rows per page.
+  The mobile Rust bridge clamps larger requests to these caps.
 - Database selection, refresh, loading/errors, and explicit local demo fixtures.
 - The desktop Graphite workbench layout and bundled Space Mono fonts:
   connection identity, colored tab edges, compact controls and dense grids.
@@ -74,8 +75,9 @@ bypass or plaintext fallback is available in mobile profiles.
 ## Storage and lifecycle
 
 Each install has its own sandbox SQLite file containing connection metadata and
-SQL/command history, **never database passwords**. History itself may contain
-sensitive SQL. Passwords stay in Rust session memory; re-enter them when
+SQL/command history, **never database passwords**: password-setting SQL is
+saved with its literals redacted and credential-bearing Redis commands are not
+saved. History itself may contain other sensitive SQL. Passwords stay in Rust session memory; re-enter them when
 connecting after disconnect, backgrounding or relaunch. This first slice does
 not persist credentials in Keychain/Keystore. Desktop OS-keyring behavior is unchanged.
 

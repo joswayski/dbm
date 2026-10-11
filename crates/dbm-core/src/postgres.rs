@@ -1,15 +1,20 @@
+use std::collections::HashMap;
 use std::pin::pin;
 use std::time::{Duration, Instant};
 
 use crate::error::{AppError, AppResult};
+use crate::export::RowSink;
 use crate::models::{
-    ConnectionProfile, DatabaseRef, FilterCondition, FilterOperator, MutationBatch, MutationResult,
-    OrderSpec, QueryColumn, QueryResponse, RowMutation, SchemaNode, TableColumn, TableMetadata,
-    TablePage, TablePageRequest, TlsMode, escape_like, json_integer,
+    ConnectionProfile, DatabaseEngine, DatabaseRef, FilterCondition, FilterOperator, MutationBatch,
+    MutationResult, OrderSpec, QueryColumn, QueryResponse, RowMutation, SchemaNode, TableColumn,
+    TableMetadata, TablePage, TablePageRequest, TlsMode, escape_like, json_integer,
+    reenables_writes, sql_statement_words,
 };
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
 use futures_util::TryStreamExt;
 use serde_json::Value;
+use tokio_postgres::config::SslMode;
+use tokio_postgres::error::SqlState;
 use tokio_postgres::types::{FromSql, Type};
 use tokio_postgres::{Client, Config, NoTls, Row, SimpleQueryMessage};
 
@@ -33,12 +38,16 @@ impl PgSession {
         if profile.read_only {
             // Let the server reject writes the statement-keyword check cannot see,
             // such as data-modifying CTEs, COPY, or functions with side effects.
-            if let Err(error) = client
+            // Without it the profile would not really be read-only, so refuse.
+            client
                 .batch_execute("SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY")
                 .await
-            {
-                tracing::warn!(%error, "could not make the read-only session read-only on the server");
-            }
+                .map_err(|error| {
+                    AppError::Database(format!(
+                        "could not make the read-only session read-only on the server: {}",
+                        database_message(error)
+                    ))
+                })?;
         }
         Ok(Self { profile, client })
     }
@@ -68,28 +77,26 @@ impl PgSession {
     }
 
     pub async fn schema_tree(&self) -> AppResult<Vec<SchemaNode>> {
-        let schema_rows = self
-            .client
-            .query(
+        // Both catalog queries are pipelined on the connection.
+        let (schema_rows, table_rows) = futures_util::future::try_join(
+            self.client.query(
                 "SELECT schema_name
                  FROM information_schema.schemata
                  WHERE schema_name NOT LIKE 'pg_%'
                    AND schema_name <> 'information_schema'
                  ORDER BY schema_name",
                 &[],
-            )
-            .await?;
-        let table_rows = self
-            .client
-            .query(
+            ),
+            self.client.query(
                 "SELECT table_schema, table_name, table_type
                  FROM information_schema.tables
                  WHERE table_schema NOT LIKE 'pg_%'
                    AND table_schema <> 'information_schema'
                  ORDER BY table_schema, table_name",
                 &[],
-            )
-            .await?;
+            ),
+        )
+        .await?;
 
         let mut schemas = schema_rows
             .into_iter()
@@ -104,15 +111,17 @@ impl PgSession {
                 })
             })
             .collect::<AppResult<Vec<_>>>()?;
+        let positions = schemas
+            .iter()
+            .enumerate()
+            .map(|(index, node)| (node.name.clone(), index))
+            .collect::<HashMap<_, _>>();
         for row in table_rows {
             let schema: String = row.try_get(0)?;
             let table: String = row.try_get(1)?;
             let table_type: String = row.try_get(2)?;
-            if let Some(schema_node) = schemas
-                .iter_mut()
-                .find(|node| node.schema.as_deref() == Some(schema.as_str()))
-            {
-                schema_node.children.push(SchemaNode {
+            if let Some(&index) = positions.get(&schema) {
+                schemas[index].children.push(SchemaNode {
                     name: table.clone(),
                     kind: if table_type == "VIEW" {
                         "view".into()
@@ -129,21 +138,43 @@ impl PgSession {
     }
 
     pub async fn table_metadata(&self, schema: &str, table: &str) -> AppResult<TableMetadata> {
+        // One round trip: the columns, plus the relation kind and primary key
+        // computed once as uncorrelated subqueries.
         let rows = self
             .client
-            .query(
-                "SELECT ordinal_position, column_name, data_type, is_nullable, column_default
+            .query_typed(
+                "WITH rel AS (
+                     SELECT c.oid, c.relkind
+                     FROM pg_class c
+                     JOIN pg_namespace n ON n.oid = c.relnamespace
+                     WHERE n.nspname = $1 AND c.relname = $2
+                 ),
+                 pk AS (
+                     SELECT array_agg(a.attname::text ORDER BY a.attnum) AS columns
+                     FROM rel
+                     JOIN pg_index i ON i.indrelid = rel.oid AND i.indisprimary
+                     JOIN pg_attribute a ON a.attrelid = rel.oid AND a.attnum = ANY(i.indkey)
+                 )
+                 SELECT ordinal_position, column_name, data_type, is_nullable, column_default,
+                        (SELECT relkind FROM rel), (SELECT columns FROM pk)
                  FROM information_schema.columns
                  WHERE table_schema = $1 AND table_name = $2
                  ORDER BY ordinal_position",
-                &[&schema, &table],
+                &[(&schema, Type::NAME), (&table, Type::NAME)],
             )
             .await?;
-        if rows.is_empty() {
+        let Some(first) = rows.first() else {
             return Err(AppError::InvalidInput(format!(
                 "table {schema}.{table} was not found"
             )));
-        }
+        };
+        // Views and foreign tables have no system columns, so selecting xmin from
+        // them fails. Only heap-backed relations get optimistic xmin checks.
+        let relkind: Option<i8> = first.try_get(5)?;
+        let has_xmin = relkind.is_some_and(|kind| matches!(kind as u8, b'r' | b'p' | b'm'));
+        let primary_key = first
+            .try_get::<_, Option<Vec<String>>>(6)?
+            .unwrap_or_default();
         let columns = rows
             .into_iter()
             .map(|row| {
@@ -156,37 +187,6 @@ impl PgSession {
                 })
             })
             .collect::<Result<Vec<_>, tokio_postgres::Error>>()?;
-        let primary_key = self
-            .client
-            .query(
-                "SELECT a.attname
-                 FROM pg_index i
-                 JOIN pg_class c ON c.oid = i.indrelid
-                 JOIN pg_namespace n ON n.oid = c.relnamespace
-                 JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = ANY(i.indkey)
-                 WHERE i.indisprimary AND n.nspname = $1 AND c.relname = $2
-                 ORDER BY a.attnum",
-                &[&schema, &table],
-            )
-            .await?
-            .into_iter()
-            .map(|row| row.try_get(0))
-            .collect::<Result<Vec<String>, _>>()?;
-        // Views and foreign tables have no system columns, so selecting xmin from
-        // them fails. Only heap-backed relations get optimistic xmin checks.
-        let relkind: Option<i8> = self
-            .client
-            .query_opt(
-                "SELECT c.relkind
-                 FROM pg_class c
-                 JOIN pg_namespace n ON n.oid = c.relnamespace
-                 WHERE n.nspname = $1 AND c.relname = $2",
-                &[&schema, &table],
-            )
-            .await?
-            .map(|row| row.try_get(0))
-            .transpose()?;
-        let has_xmin = relkind.is_some_and(|kind| matches!(kind as u8, b'r' | b'p' | b'm'));
         Ok(TableMetadata {
             schema: schema.to_owned(),
             table: table.to_owned(),
@@ -220,6 +220,7 @@ impl PgSession {
             .iter()
             .map(|column| quote_identifier(&column.name))
             .collect::<Vec<_>>();
+        // Preparing (without executing) reveals the result column types.
         let statement = self
             .client
             .prepare(&page_sql(quoted_columns.clone()))
@@ -229,27 +230,30 @@ impl PgSession {
             .iter()
             .map(|column| column.type_().clone())
             .collect::<Vec<_>>();
-        let rows = if column_types.iter().all(decodes_natively) {
-            self.client.query(&statement, &[]).await?
-        } else {
-            // Types without a native decoder (numeric, uuid, enums, arrays, ...) are
-            // read in their text form rather than showing up as NULL.
-            // The alias must differ from the column name: ORDER BY resolves a bare
-            // name to an output column first and would otherwise sort the text.
-            let columns = quoted_columns
-                .into_iter()
-                .zip(&column_types)
-                .enumerate()
-                .map(|(index, (column, ty))| {
-                    if decodes_natively(ty) {
-                        column
-                    } else {
-                        format!("{column}::text AS \"__dbm_text_{index}\"")
-                    }
-                })
-                .collect();
-            self.client.query(&page_sql(columns), &[]).await?
+        let page = async {
+            if column_types.iter().all(decodes_natively) {
+                self.client.query(&statement, &[]).await
+            } else {
+                let columns = text_cast_columns(quoted_columns, &column_types);
+                // Unprepared, in one round trip.
+                self.client.query_typed(&page_sql(columns), &[]).await
+            }
         };
+        let count = async {
+            if !request.include_total.unwrap_or(true) {
+                return None;
+            }
+            let count_sql = format!("SELECT COUNT(*)::bigint FROM {table_name}{predicate}");
+            self.client
+                .query_typed(&count_sql, &[])
+                .await
+                .ok()
+                .and_then(|rows| rows.first()?.try_get::<_, i64>(0).ok())
+                .and_then(|count| u64::try_from(count).ok())
+        };
+        // The page and the count are pipelined on the connection.
+        let (rows, total_rows) = futures_util::future::join(page, count).await;
+        let rows = rows?;
         let has_more = rows.len() > usize::try_from(limit).unwrap_or(usize::MAX);
         let rows = rows
             .into_iter()
@@ -260,17 +264,6 @@ impl PgSession {
                     .collect::<Vec<_>>()
             })
             .collect::<Vec<_>>();
-        let total_rows = if request.include_total.unwrap_or(true) {
-            let count_sql = format!("SELECT COUNT(*)::bigint FROM {table_name}{predicate}");
-            self.client
-                .query_one(&count_sql, &[])
-                .await
-                .ok()
-                .and_then(|row| row.try_get::<_, i64>(0).ok())
-                .and_then(|count| u64::try_from(count).ok())
-        } else {
-            None
-        };
         let columns = metadata
             .columns
             .iter()
@@ -286,6 +279,53 @@ impl PgSession {
             limit,
             has_more,
         })
+    }
+
+    /// Streams every row matching `request`'s filters and order (its offset
+    /// and limit are ignored) to `sink`, from one statement. Unlike paging,
+    /// this sees one consistent snapshot and needs no stable order, so tables
+    /// without a primary key export each row exactly once.
+    pub async fn export_rows(
+        &self,
+        request: &TablePageRequest,
+        sink: &mut RowSink<'_>,
+    ) -> AppResult<u64> {
+        let metadata = self.table_metadata(&request.schema, &request.table).await?;
+        let table_name = qualified_name(&request.schema, &request.table)?;
+        let predicate = build_predicate(&metadata, &request.filters)?;
+        let order_by = build_order_by(&metadata, request.order_by.as_ref())?;
+        let select = |columns: Vec<String>| {
+            format!(
+                "SELECT {} FROM {table_name}{predicate}{order_by}",
+                columns.join(", ")
+            )
+        };
+        let quoted_columns = metadata
+            .columns
+            .iter()
+            .map(|column| quote_identifier(&column.name))
+            .collect::<Vec<_>>();
+        let column_types = self
+            .client
+            .prepare(&select(quoted_columns.clone()))
+            .await?
+            .columns()
+            .iter()
+            .map(|column| column.type_().clone())
+            .collect::<Vec<_>>();
+        let sql = select(text_cast_columns(quoted_columns, &column_types));
+        let no_params = std::iter::empty::<(&(dyn tokio_postgres::types::ToSql + Sync), Type)>();
+        let mut rows = pin!(self.client.query_typed_raw(&sql, no_params).await?);
+        let mut written = 0;
+        while let Some(row) = rows.try_next().await? {
+            sink(
+                (0..row.len())
+                    .map(|index| value_from_row(&row, index))
+                    .collect(),
+            )?;
+            written += 1;
+        }
+        Ok(written)
     }
 
     pub async fn run_query(&self, sql: &str, max_rows: Option<u32>) -> AppResult<QueryResponse> {
@@ -412,14 +452,14 @@ impl PgSession {
             ));
         }
         let table_name = qualified_name(&batch.schema, &batch.table)?;
-        // Validate the whole batch before BEGIN: an invalid later key must not
+        // Validate the whole batch before writing: an invalid later key must not
         // leave earlier edits pending in this persistent workbench connection.
         let predicates = batch
             .mutations
             .iter()
             .map(|mutation| mutation_predicate(&metadata, mutation))
             .collect::<AppResult<Vec<_>>>()?;
-        self.client.batch_execute("BEGIN").await?;
+        let scope = self.begin_grid_write().await?;
         let mut applied = 0;
         let mut conflicts = Vec::new();
         for (mutation, predicate) in batch.mutations.iter().zip(predicates) {
@@ -457,7 +497,7 @@ impl PgSession {
             let changed = match self.client.execute(&statement, &[]).await {
                 Ok(changed) => changed,
                 Err(error) => {
-                    let _ = self.client.batch_execute("ROLLBACK").await;
+                    let _ = self.client.batch_execute(scope.rollback()).await;
                     return Err(error.into());
                 }
             };
@@ -467,11 +507,67 @@ impl PgSession {
                 applied += 1;
             }
         }
-        if let Err(error) = self.client.batch_execute("COMMIT").await {
-            let _ = self.client.batch_execute("ROLLBACK").await;
+        if let Err(error) = self.client.batch_execute(scope.commit()).await {
+            let _ = self.client.batch_execute(scope.rollback()).await;
             return Err(error.into());
         }
         Ok(MutationResult { applied, conflicts })
+    }
+
+    /// Grid writes share the SQL workbench connection, where the user may have
+    /// an open transaction. BEGIN/COMMIT there would commit (or roll back) the
+    /// user's own work, so inside a transaction the batch runs in a savepoint
+    /// and becomes permanent when the user's transaction commits. A statement
+    /// outside a transaction block starts its own, so its timestamp equals the
+    /// transaction's; probing this way leaves no errors in the server log.
+    async fn begin_grid_write(&self) -> AppResult<GridWriteScope> {
+        // A single simple-protocol message, so outside a block the statement
+        // and its implicit transaction start together. (Extended-protocol
+        // messages each restart the statement clock.) Fails with 25P02 if the
+        // user's transaction already failed.
+        let probe = self
+            .client
+            .simple_query("SELECT transaction_timestamp() <> statement_timestamp()")
+            .await?;
+        let in_transaction = probe.iter().any(|message| {
+            matches!(message, tokio_postgres::SimpleQueryMessage::Row(row) if row.get(0) == Some("t"))
+        });
+        if in_transaction {
+            self.client
+                .batch_execute("SAVEPOINT dbm_grid_write")
+                .await?;
+            Ok(GridWriteScope::Savepoint)
+        } else {
+            self.client.batch_execute("BEGIN").await?;
+            Ok(GridWriteScope::Transaction)
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GridWriteScope {
+    /// No transaction was open; the batch has its own.
+    Transaction,
+    /// The batch is nested in the user's open workbench transaction.
+    Savepoint,
+}
+
+impl GridWriteScope {
+    fn commit(self) -> &'static str {
+        match self {
+            Self::Transaction => "COMMIT",
+            Self::Savepoint => "RELEASE SAVEPOINT dbm_grid_write",
+        }
+    }
+
+    fn rollback(self) -> &'static str {
+        match self {
+            Self::Transaction => "ROLLBACK",
+            // Undo only the batch and leave the user's transaction usable.
+            Self::Savepoint => {
+                "ROLLBACK TO SAVEPOINT dbm_grid_write; RELEASE SAVEPOINT dbm_grid_write"
+            }
+        }
     }
 }
 
@@ -495,10 +591,13 @@ fn returns_rows(sql: &str) -> bool {
     ) || sql.to_ascii_lowercase().contains("returning")
 }
 
+/// Scripts with several statements cannot be prepared; the server reports
+/// SQLSTATE 42601 ("cannot insert multiple commands into a prepared
+/// statement", translated per server locale). Genuine syntax errors share the
+/// code, but the simple protocol parses the whole script before running any of
+/// it, so they are reported the same way without executing anything.
 fn is_multiple_commands_error(error: &tokio_postgres::Error) -> bool {
-    error
-        .as_db_error()
-        .is_some_and(|error| error.message().contains("multiple commands"))
+    error.code() == Some(&SqlState::SYNTAX_ERROR)
 }
 
 /// Types `value_from_row` decodes from the binary protocol. Everything else is
@@ -574,33 +673,93 @@ async fn connect_client(profile: &ConnectionProfile, password: Option<&str>) -> 
                 })?,
             );
         }
+    } else if matches!(profile.tls_mode, TlsMode::Preferred) {
+        // Preferred TLS falls back to plaintext anyway, so like libpq's
+        // sslmode=prefer (and MySQL and Redis here) it encrypts without
+        // verifying the server. Required, or a configured CA, verifies.
+        connector
+            .danger_accept_invalid_certs(true)
+            .danger_accept_invalid_hostnames(true);
     }
     let connector = connector
         .build()
         .map_err(|error| AppError::database(&error))?;
-    let mut config = base_config(profile, password);
     let make_connector = postgres_native_tls::MakeTlsConnector::new(connector);
-    match config.connect(make_connector).await {
+    match base_config(profile, password).connect(make_connector).await {
         Ok((client, connection)) => {
-            tokio::spawn(async move {
-                if let Err(error) = connection.await {
-                    tracing::error!(%error, "postgres connection closed");
-                }
-            });
+            spawn_connection(connection);
             Ok(client)
         }
-        Err(_error) if matches!(profile.tls_mode, TlsMode::Preferred) => {
-            config = base_config(profile, password);
-            let (client, connection) = config.connect(NoTls).await?;
-            tokio::spawn(async move {
-                if let Err(error) = connection.await {
-                    tracing::error!(%error, "postgres connection closed");
+        Err(tls_error)
+            if matches!(profile.tls_mode, TlsMode::Preferred)
+                && plaintext_fallback_may_help(&tls_error) =>
+        {
+            let mut config = base_config(profile, password);
+            config.ssl_mode(SslMode::Disable);
+            match config.connect(NoTls).await {
+                Ok((client, connection)) => {
+                    spawn_connection(connection);
+                    Ok(client)
                 }
-            });
-            Ok(client)
+                // A server answer (bad password, unknown database, pg_hba
+                // rejecting plaintext) explains the failure on its own.
+                Err(plain_error) if plain_error.as_db_error().is_some() => Err(plain_error.into()),
+                Err(plain_error) => Err(AppError::Database(format!(
+                    "{}; plaintext fallback also failed: {}",
+                    database_message(tls_error),
+                    database_message(plain_error)
+                ))),
+            }
         }
         Err(error) => Err(AppError::from(error)),
     }
+}
+
+fn database_message(error: tokio_postgres::Error) -> String {
+    match AppError::from(error) {
+        AppError::Database(message) => message,
+        other => other.to_string(),
+    }
+}
+
+/// Whether a failed TLS attempt for a Preferred profile is worth retrying
+/// without TLS. Server answers such as authentication failures carry a
+/// SQLSTATE and would only fail again, and an unreachable or refusing host
+/// would double the wait. TLS handshake failures, and servers that drop the
+/// connection during TLS negotiation, may still accept plaintext.
+fn plaintext_fallback_may_help(error: &tokio_postgres::Error) -> bool {
+    if error.as_db_error().is_some() {
+        return false;
+    }
+    let mut source = std::error::Error::source(error);
+    while let Some(current) = source {
+        if current.downcast_ref::<native_tls::Error>().is_some() {
+            return true;
+        }
+        if let Some(io) = current.downcast_ref::<std::io::Error>() {
+            return matches!(
+                io.kind(),
+                std::io::ErrorKind::UnexpectedEof
+                    | std::io::ErrorKind::ConnectionReset
+                    | std::io::ErrorKind::ConnectionAborted
+                    | std::io::ErrorKind::BrokenPipe
+            );
+        }
+        source = current.source();
+    }
+    false
+}
+
+fn spawn_connection<S, T>(connection: tokio_postgres::Connection<S, T>)
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
+    tokio::spawn(async move {
+        if let Err(error) = connection.await {
+            tracing::error!(%error, "postgres connection closed");
+        }
+    });
 }
 
 async fn connect_without_tls(
@@ -608,11 +767,7 @@ async fn connect_without_tls(
     password: Option<&str>,
 ) -> AppResult<Client> {
     let (client, connection) = base_config(profile, password).connect(NoTls).await?;
-    tokio::spawn(async move {
-        if let Err(error) = connection.await {
-            tracing::error!(%error, "postgres connection closed");
-        }
-    });
+    spawn_connection(connection);
     Ok(client)
 }
 
@@ -626,7 +781,14 @@ fn base_config(profile: &ConnectionProfile, password: Option<&str>) -> Config {
         .application_name("Anybase")
         .connect_timeout(Duration::from_secs(10))
         .keepalives(true)
-        .keepalives_idle(Duration::from_secs(60));
+        .keepalives_idle(Duration::from_secs(60))
+        // tokio-postgres defaults to `prefer`, which silently continues in
+        // plaintext when the server, or anyone in between, declines TLS.
+        .ssl_mode(match profile.tls_mode {
+            TlsMode::Disabled => SslMode::Disable,
+            TlsMode::Preferred => SslMode::Prefer,
+            TlsMode::Required => SslMode::Require,
+        });
     if let Some(password) = password {
         config.password(password);
     }
@@ -637,23 +799,30 @@ fn quote_identifier(identifier: &str) -> String {
     format!("\"{}\"", identifier.replace('"', "\"\""))
 }
 
+/// Whether a read-only profile must refuse `sql`: any statement starts with a
+/// writing keyword or would switch the session back to read-write. Comments
+/// and quoted text are ignored. The server-side read-only session still
+/// rejects writes this cannot recognize.
 fn is_mutating_statement(sql: &str) -> bool {
-    matches!(
-        sql.split_whitespace()
-            .next()
-            .unwrap_or_default()
-            .to_ascii_lowercase()
-            .as_str(),
-        "insert"
-            | "update"
-            | "delete"
-            | "alter"
-            | "drop"
-            | "truncate"
-            | "create"
-            | "grant"
-            | "revoke"
-    )
+    sql_statement_words(DatabaseEngine::Postgres, sql)
+        .iter()
+        .any(|words| {
+            reenables_writes(words)
+                || words.first().is_some_and(|word| {
+                    matches!(
+                        word.as_str(),
+                        "insert"
+                            | "update"
+                            | "delete"
+                            | "alter"
+                            | "drop"
+                            | "truncate"
+                            | "create"
+                            | "grant"
+                            | "revoke"
+                    )
+                })
+        })
 }
 
 fn qualified_name(schema: &str, table: &str) -> AppResult<String> {
@@ -812,6 +981,25 @@ fn json_to_sql(value: &Value) -> String {
         Value::String(value) => quote_literal(value),
         Value::Array(_) | Value::Object(_) => quote_literal(&value.to_string()),
     }
+}
+
+/// Selects types without a native decoder (numeric, uuid, enums, arrays, ...)
+/// in their text form rather than letting them show up as NULL. The alias must
+/// differ from the column name: ORDER BY resolves a bare name to an output
+/// column first and would otherwise sort the text.
+fn text_cast_columns(quoted_columns: Vec<String>, column_types: &[Type]) -> Vec<String> {
+    quoted_columns
+        .into_iter()
+        .zip(column_types)
+        .enumerate()
+        .map(|(index, (column, ty))| {
+            if decodes_natively(ty) {
+                column
+            } else {
+                format!("{column}::text AS \"__dbm_text_{index}\"")
+            }
+        })
+        .collect()
 }
 
 fn value_from_row(row: &Row, index: usize) -> Value {
@@ -1022,6 +1210,67 @@ mod tests {
             "ALTER TABLE users ADD COLUMN note text"
         ));
         assert!(!is_mutating_statement("SELECT * FROM users"));
+        assert!(is_mutating_statement("/* note */\n  delete from users"));
+        assert!(is_mutating_statement("SELECT 1; DROP TABLE users"));
+        assert!(is_mutating_statement("BEGIN READ WRITE"));
+        assert!(is_mutating_statement(
+            "SET SESSION CHARACTERISTICS AS TRANSACTION READ WRITE"
+        ));
+        assert!(is_mutating_statement("RESET ALL"));
+        assert!(is_mutating_statement("DISCARD ALL"));
+        assert!(!is_mutating_statement(
+            "SELECT 'drop'; -- delete\nSHOW search_path"
+        ));
+        assert!(!is_mutating_statement("BEGIN READ ONLY"));
+    }
+
+    fn test_profile(tls_mode: TlsMode) -> ConnectionProfile {
+        let now = Utc::now();
+        ConnectionProfile {
+            id: uuid::Uuid::nil(),
+            name: "test".into(),
+            color: None,
+            engine: crate::models::DatabaseEngine::Postgres,
+            host: "db.example.com".into(),
+            port: 5432,
+            username: "postgres".into(),
+            default_database: "postgres".into(),
+            tls_mode,
+            ca_cert_path: None,
+            ssh: None,
+            read_only: false,
+            open_on_startup: false,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    #[test]
+    fn ssl_mode_follows_the_profile_tls_mode() {
+        for (tls_mode, ssl_mode) in [
+            (TlsMode::Disabled, SslMode::Disable),
+            (TlsMode::Preferred, SslMode::Prefer),
+            (TlsMode::Required, SslMode::Require),
+        ] {
+            assert_eq!(
+                base_config(&test_profile(tls_mode.clone()), None).get_ssl_mode(),
+                ssl_mode,
+                "{tls_mode:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn preferred_tls_does_not_fall_back_when_the_host_is_unreachable() {
+        // Nothing listens on port 1, so the attempt fails before any TLS or
+        // server answer; retrying in plaintext would only double the wait.
+        let mut profile = test_profile(TlsMode::Preferred);
+        profile.host = "127.0.0.1".into();
+        profile.port = 1;
+        let Err(error) = base_config(&profile, None).connect(NoTls).await else {
+            panic!("nothing listens on port 1");
+        };
+        assert!(!plaintext_fallback_may_help(&error), "{error}");
     }
 
     #[test]
@@ -1099,6 +1348,94 @@ mod tests {
                 }),
                 include_total: Some(true),
             }
+        }
+
+        #[tokio::test]
+        async fn grid_writes_do_not_end_an_open_workbench_transaction() {
+            let Some(profile) = profile(false) else {
+                return;
+            };
+            let session = PgSession::connect(profile, None).await.expect("connect");
+            let table = format!("dbm_test_{}", Uuid::new_v4().simple());
+            session
+                .client
+                .batch_execute(&format!(
+                    "CREATE TABLE public.{table} (id int PRIMARY KEY, label text);
+                     INSERT INTO public.{table} VALUES (1, 'original'), (2, 'other')"
+                ))
+                .await
+                .expect("fixture");
+            let edit = |id: i32, label: &str| MutationBatch {
+                profile_id: Uuid::nil(),
+                database: session.profile().default_database.clone(),
+                schema: "public".into(),
+                table: table.clone(),
+                mutations: vec![RowMutation {
+                    original: vec![Value::from(id), Value::Null],
+                    changes: vec![Value::from(id), Value::from(label)],
+                    primary_key: vec![Value::from(id)],
+                    xmin: None,
+                    deleted: false,
+                }],
+            };
+            let labels = || async {
+                session
+                    .client
+                    .query(
+                        &format!("SELECT label FROM public.{table} ORDER BY id"),
+                        &[],
+                    )
+                    .await
+                    .expect("labels")
+                    .iter()
+                    .map(|row| row.get::<_, String>(0))
+                    .collect::<Vec<_>>()
+            };
+
+            session.run_query("BEGIN", None).await.expect("begin");
+            session
+                .run_query(
+                    &format!("UPDATE public.{table} SET label = 'workbench' WHERE id = 2"),
+                    None,
+                )
+                .await
+                .expect("workbench update");
+            let result = session
+                .apply_mutations(&edit(1, "grid"))
+                .await
+                .expect("grid edit inside the open transaction");
+            assert_eq!(result.applied, 1);
+            // A failing grid write rolls back only its own savepoint.
+            let mut failing = edit(1, "never");
+            failing.mutations[0].changes[1] = Value::from("x".repeat(10));
+            session
+                .client
+                .batch_execute(&format!(
+                    "ALTER TABLE public.{table} ADD CONSTRAINT short CHECK (length(label) < 10)"
+                ))
+                .await
+                .expect("constraint");
+            session
+                .apply_mutations(&failing)
+                .await
+                .expect_err("check constraint");
+            assert_eq!(labels().await, vec!["grid", "workbench"]);
+            // The user's transaction is still open and decides the outcome.
+            session.run_query("ROLLBACK", None).await.expect("rollback");
+            assert_eq!(labels().await, vec!["original", "other"]);
+
+            // Without an open transaction the grid commits on its own.
+            session
+                .apply_mutations(&edit(1, "saved"))
+                .await
+                .expect("grid edit");
+            session.run_query("ROLLBACK", None).await.expect("no-op");
+            assert_eq!(labels().await, vec!["saved", "other"]);
+            session
+                .client
+                .batch_execute(&format!("DROP TABLE public.{table}"))
+                .await
+                .expect("cleanup");
         }
 
         #[tokio::test]
@@ -1232,6 +1569,18 @@ mod tests {
                 .await
                 .expect("connection remains usable");
             assert_eq!(response.rows, vec![vec![Value::from(7)]]);
+            // Syntax errors share SQLSTATE 42601 with unpreparable scripts; the
+            // simple-protocol retry still reports them without running anything.
+            let error = session
+                .run_query("SELECT 1 AS first; SELEC 2", Some(3))
+                .await
+                .expect_err("syntax error");
+            assert!(error.to_string().contains("SQLSTATE 42601"), "{error}");
+            let error = session
+                .run_query("SELECT FROM WHERE", Some(3))
+                .await
+                .expect_err("syntax error");
+            assert!(error.to_string().contains("SQLSTATE 42601"), "{error}");
         }
 
         #[tokio::test]
@@ -1268,7 +1617,20 @@ mod tests {
                 .await
                 .expect("table page");
             assert!(page.metadata.has_xmin);
+            assert_eq!(page.metadata.primary_key, vec!["id".to_owned()]);
             assert_eq!(page.total_rows, Some(2));
+            let tree = session.schema_tree().await.expect("schema tree");
+            let node = tree
+                .iter()
+                .find(|node| node.name == schema)
+                .expect("test schema in tree");
+            assert_eq!(
+                node.children
+                    .iter()
+                    .map(|child| (child.name.as_str(), child.kind.as_str()))
+                    .collect::<Vec<_>>(),
+                vec![("item_labels", "view"), ("items", "table")]
+            );
             let first = &page.rows[0];
             assert_eq!(
                 first[0],
@@ -1386,6 +1748,24 @@ mod tests {
                 .await
                 .expect_err("read-only transaction rejects the CTE delete");
             assert!(error.to_string().contains("read-only"), "{error}");
+            for sql in [
+                "BEGIN READ WRITE",
+                "SET SESSION CHARACTERISTICS AS TRANSACTION READ WRITE",
+                "SET default_transaction_read_only = off",
+                "RESET ALL",
+                "DISCARD ALL",
+            ] {
+                let error = reader
+                    .run_query(sql, None)
+                    .await
+                    .expect_err("read-only profiles cannot switch the session to read-write");
+                assert!(error.to_string().contains("read-only"), "{sql}: {error}");
+            }
+            let mode = reader
+                .run_query("SHOW default_transaction_read_only", None)
+                .await
+                .expect("show");
+            assert_eq!(mode.rows, vec![vec![Value::String("on".into())]]);
             writer
                 .client
                 .batch_execute(&format!("DROP TABLE {table}"))

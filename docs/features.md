@@ -5,7 +5,13 @@ What the app does today, what is deliberately not built yet, and what it stores 
 ## Released desktop apps
 
 - PostgreSQL, MySQL, and Redis direct connections with disabled, preferred, or
-  required TLS. Connection attempts give up after 20 seconds.
+  required TLS. Required verifies the server certificate (against the
+  profile's CA when one is set, in addition to the system roots) and never
+  continues in plaintext. Preferred encrypts without verifying the certificate
+  unless a CA is set, and falls back to plaintext only when TLS itself fails
+  (for Redis, also when the TLS handshake takes longer than 5 seconds), not
+  after errors such as a rejected password. Connection attempts give up after
+  20 seconds.
 - Local connection profiles and query history in an application SQLite database.
 - Each connection remembers the database last successfully selected in the
   sidebar, including Redis database indices. That selection becomes the saved
@@ -43,14 +49,22 @@ What the app does today, what is deliberately not built yet, and what it stores 
   structured multi-filtering, ordering, visible-page CSV copy, and full filtered
   CSV export. Redis connections show numbered databases, a SCAN-backed key
   index, and per-type key folders (strings, hashes, lists, sets, sorted sets,
-  streams).
-- CSV exports replace the chosen file only after every page is written
-  successfully. A failed export leaves an existing file unchanged.
+  streams) that each show up to 250 keys, sampled in one SCAN pass.
+- CSV exports of PostgreSQL and MySQL tables stream every matching row from
+  one statement, so tables without a primary key export each row exactly once
+  (PostgreSQL reads one consistent snapshot). Redis exports page through keys
+  in order. The chosen file is replaced only after every row is written
+  successfully; a failed export leaves an existing file unchanged. A connection
+  lost mid-export reconnects once and restarts the export.
 - Redis key-index pages scan the complete matching keyspace, deduplicate keys,
   and default to key-name order; browsing and export have no 5,000-key cutoff.
   Unfiltered key-name pages fetch type and TTL only for visible keys. Filtering
   or sorting by metadata inspects all matching keys, so large keyspaces can take
   longer. Pages and exports are not snapshots of concurrent database changes.
+  Key filters other than equals, contains, starts with, and ends with scan
+  every key. Key names that are not valid UTF-8 are left out of the key index
+  and sidebar. Binary values, hash fields, and set members show as `\x…` hex,
+  and values over 256 KiB are truncated.
 - Unfiltered Redis lists in ascending index order fetch only the requested page
   plus one lookahead element, with `LLEN` supplying the total. Filtering or
   other sort orders still load the complete list before paging.
@@ -71,16 +85,31 @@ What the app does today, what is deliberately not built yet, and what it stores 
 - Inline edits and staged deletes for primary-key-backed tables. PostgreSQL
   edits are guarded by `xmin` optimistic concurrency; MySQL edits match on the
   primary key. Redis table views edit strings, hashes, lists, sets, and sorted
-  sets in place, and can delete keys from the key index. Read-only profile
+  sets in place, and can delete keys from the key index. Values, hash fields,
+  and members shown as `\x…` hex or truncated cannot be saved, so a preview
+  never overwrites stored data; keys, list elements, and hash fields that only
+  have such a value can still be deleted. Key-index TTL edits take seconds:
+  blank or negative removes the expiry, and 0 is rejected instead of deleting
+  the key. Editing a string value keeps its expiry on Redis 6.0 and later.
+  Read-only profile
   mode blocks GUI writes on every engine; PostgreSQL and MySQL sessions for
   read-only profiles are also marked read-only on the server, so writes the
-  app cannot recognize are rejected too.
+  app cannot recognize are rejected too. Statements that would switch such a
+  session back to read-write (`BEGIN READ WRITE`, `SET ... READ WRITE`,
+  `SET transaction_read_only`, `RESET ALL`, `DISCARD ALL`) are refused.
+- PostgreSQL table edits share the SQL workbench connection. When a workbench
+  transaction is open, a save runs inside a savepoint and becomes permanent
+  only when that transaction commits; otherwise it commits on its own.
 - Table writes carry their target database and are rejected if the connection
-  switched databases while the write was queued. Redis list batches apply
-  higher indices first so staged deletes do not shift later edits onto other
-  elements; this does not protect against concurrent edits by other clients.
+  switched databases while the write was queued. Redis list batches are
+  saved in one transaction, so staged deletes never shift other edits onto
+  different elements. A list row whose element no longer shows the value it
+  was loaded with (for example after another client pushed to the list) is
+  reported as a conflict instead of being written.
 - PostgreSQL values of any type display, including `numeric`, `uuid`, enums,
   and arrays. Integers beyond ±2^53 are shown and edited as exact text.
+- MySQL binary values (`BINARY`, `VARBINARY`, `BLOB`) that are not plain text
+  are shown as `\x` hex, and hex entered that way is saved and filtered as bytes.
 - SQL tabs with syntax highlighting and keyword completion, query result
   grids, a 10,000-row safety cap, and per-profile history. Connecting a profile opens a query tab so you can run
   SQL immediately. Redis connections open a command workbench (`PING` by
@@ -135,4 +164,8 @@ implementation is added and tested on all three OSes.
 
 The app stores non-secret profile metadata, settings, and up to 500 history
 entries in the platform application data directory. Passwords are never put in
-that SQLite file. There is no telemetry, account, or sync service.
+that SQLite file. There is no telemetry, account, or sync service. History keeps
+password-setting SQL (such as `ALTER ROLE ... PASSWORD` or
+`CREATE USER ... IDENTIFIED BY`) with its string literals replaced by `'***'`,
+and leaves out Redis commands that carry credentials (`AUTH`, `ACL SETUSER`
+passwords, `CONFIG SET requirepass`, `MIGRATE ... AUTH`).

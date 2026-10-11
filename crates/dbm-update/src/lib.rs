@@ -155,12 +155,49 @@ fn decode_text(encoded: &str, what: &str) -> Result<String, String> {
 }
 
 fn verify_with(data: &[u8], signature: &str, public_key: &str) -> Result<(), String> {
+    verify_signature(data, signature, public_key).map(drop)
+}
+
+/// Verifies `data` and returns the signature's trusted comment, which the
+/// verified global signature covers.
+fn verify_signature(data: &[u8], signature: &str, public_key: &str) -> Result<String, String> {
     let key = minisign_verify::PublicKey::decode(&decode_text(public_key, "key")?)
         .map_err(|_| "The update key is invalid.".to_owned())?;
     let signature = minisign_verify::Signature::decode(&decode_text(signature, "signature")?)
         .map_err(|_| "The update signature is invalid.".to_owned())?;
     key.verify(data, &signature, false)
-        .map_err(|_| "The update's signature does not match; it was not installed.".to_owned())
+        .map_err(|_| "The update's signature does not match; it was not installed.".to_owned())?;
+    Ok(signature.trusted_comment().to_owned())
+}
+
+/// Verifies an artifact downloaded from `url`. `tools/dbm-sign` (like the
+/// Tauri signer before it) signs `timestamp:<secs>\tfile:<name>` as the
+/// trusted comment, using the same file name the release publishes, so a
+/// signed artifact cannot be offered under another artifact's name, such as
+/// the AppImage in place of the bare Linux executable. A signature without a
+/// `file:` field is still accepted so nothing already published stops working.
+fn verify_artifact(
+    data: &[u8],
+    signature: &str,
+    public_key: &str,
+    url: &str,
+) -> Result<(), String> {
+    let trusted = verify_signature(data, signature, public_key)?;
+    let signed_name = trusted
+        .split('\t')
+        .find_map(|field| field.strip_prefix("file:"));
+    match signed_name {
+        Some(name) if Some(name) != url_file_name(url) => {
+            Err("The update's signature is for a different file; it was not installed.".into())
+        }
+        _ => Ok(()),
+    }
+}
+
+/// The last path segment of `url`, without a query or fragment.
+fn url_file_name(url: &str) -> Option<&str> {
+    let path = url.split(['?', '#']).next().unwrap_or(url);
+    path.rsplit('/').next().filter(|name| !name.is_empty())
 }
 
 /// Downloads `update` into `directory`, verifies its signature, and returns
@@ -179,7 +216,12 @@ pub fn download(update: &Available, directory: &Path) -> Result<PathBuf, String>
     if data.len() as u64 > MAX_DOWNLOAD_BYTES {
         return Err("The update is larger than expected; it was not installed.".into());
     }
-    verify(&data, &update.signature)?;
+    verify_artifact(
+        &data,
+        &update.signature,
+        &debug_override("DBM_UPDATE_PUBLIC_KEY", PUBLIC_KEY),
+        &update.url,
+    )?;
     let name = update
         .url
         .rsplit('/')
@@ -259,6 +301,56 @@ mod tests {
         assert!(
             verify(data, &signature).is_err(),
             "only the release key is trusted"
+        );
+    }
+
+    /// Signs with a given trusted comment, like `tools/dbm-sign` does.
+    fn signed_as(data: &[u8], trusted: &str) -> (String, String) {
+        let pair = minisign::KeyPair::generate_unencrypted_keypair().unwrap();
+        let public = pair.pk.to_box().unwrap().to_string();
+        let signature = minisign::sign(
+            None,
+            &pair.sk,
+            data,
+            Some(trusted),
+            Some("signature from dbm secret key"),
+        )
+        .unwrap()
+        .to_string();
+        let encode = |text: String| base64::engine::general_purpose::STANDARD.encode(text);
+        (encode(public), encode(signature))
+    }
+
+    #[test]
+    fn signatures_are_bound_to_the_artifact_name() {
+        let data = b"dbm native build";
+        let base = "https://github.com/joswayski/dbm/releases/download/v2026.10.11.1";
+        let (public, signature) = signed_as(data, "timestamp:1760000000\tfile:DBM-Linux-x64");
+        let check = |url: &str| verify_artifact(data, &signature, &public, url);
+        assert_eq!(check(&format!("{base}/DBM-Linux-x64")), Ok(()));
+        assert_eq!(check(&format!("{base}/DBM-Linux-x64?raw=1")), Ok(()));
+        assert!(check(&format!("{base}/DBM-Linux-x86_64.AppImage")).is_err());
+        assert!(check(&format!("{base}/")).is_err());
+
+        // Signatures without a file field (none are published) still verify.
+        let (public, signature) = signed_as(data, "timestamp:1760000000");
+        assert_eq!(
+            verify_artifact(data, &signature, &public, &format!("{base}/x")),
+            Ok(())
+        );
+        // A tampered trusted comment fails the global signature.
+        let (public, signature) = signed_as(data, "timestamp:1760000000\tfile:DBM-Linux-x64");
+        let text = decode_text(&signature, "signature").unwrap();
+        let forged = text.replace("file:DBM-Linux-x64", "file:DBM-Linux-x86_64.AppImage");
+        let forged = base64::engine::general_purpose::STANDARD.encode(forged);
+        assert!(
+            verify_artifact(
+                data,
+                &forged,
+                &public,
+                &format!("{base}/DBM-Linux-x86_64.AppImage")
+            )
+            .is_err()
         );
     }
 }
