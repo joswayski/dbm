@@ -23,6 +23,7 @@ const SCAN_COUNT: usize = 1_000;
 /// Keys per TYPE/TTL pipeline, so huge keyspaces are not sent in one request.
 const PIPELINE_KEYS: usize = 1_000;
 const MAX_VALUE_BYTES: usize = 256 * 1024;
+const TRUNCATION_MARKER: &str = "… (truncated)";
 const KEY_TYPES: [&str; 6] = ["string", "hash", "list", "set", "zset", "stream"];
 
 pub struct RedisSession {
@@ -642,38 +643,55 @@ async fn load_key_rows(
     }
 }
 
+enum KeyIndexAction {
+    Delete,
+    Expire(i64),
+    Persist,
+    Check,
+}
+
 async fn apply_key_index_mutations(
     conn: &mut MultiplexedConnection,
     batch: &MutationBatch,
 ) -> AppResult<MutationResult> {
-    let mut applied = 0;
-    let mut conflicts = Vec::new();
+    // Validate the whole batch before writing so one bad row cannot leave it
+    // partly applied.
+    let mut actions = Vec::with_capacity(batch.mutations.len());
     for mutation in &batch.mutations {
         let key = json_to_string(mutation.primary_key.first().unwrap_or(&JsonValue::Null));
         if key.is_empty() {
             return Err(AppError::InvalidInput("Redis key is required".into()));
         }
-        let exists: bool = redis_rs::cmd("EXISTS").arg(&key).query_async(conn).await?;
-        if !exists {
-            conflicts.push(mutation.primary_key.clone());
-            continue;
-        }
-        if mutation.deleted {
-            let _: i64 = redis_rs::cmd("DEL").arg(&key).query_async(conn).await?;
-            applied += 1;
-            continue;
-        }
-        if mutation.original.get(1) != mutation.changes.get(1) {
+        let action = if mutation.deleted {
+            KeyIndexAction::Delete
+        } else if mutation.original.get(1) != mutation.changes.get(1) {
             return Err(AppError::Unsupported(
                 "Redis key types cannot be changed from the table editor".into(),
             ));
-        }
-        if mutation.original.get(2) != mutation.changes.get(2) {
-            apply_ttl(conn, &key, mutation.changes.get(2)).await?;
-        }
-        applied += 1;
+        } else if mutation.original.get(2) != mutation.changes.get(2) {
+            match parse_ttl(mutation.changes.get(2))? {
+                Some(seconds) => KeyIndexAction::Expire(seconds),
+                None => KeyIndexAction::Persist,
+            }
+        } else {
+            KeyIndexAction::Check
+        };
+        actions.push((key, action));
     }
-    Ok(MutationResult { applied, conflicts })
+    // One round trip. Each row's counted reply says whether its key still
+    // existed; PERSIST also returns 0 for keys without a TTL, so EXISTS
+    // decides those rows.
+    let mut pipe = redis_rs::pipe();
+    for (key, action) in &actions {
+        match action {
+            KeyIndexAction::Delete => pipe.cmd("DEL").arg(key),
+            KeyIndexAction::Expire(seconds) => pipe.cmd("EXPIRE").arg(key).arg(seconds),
+            KeyIndexAction::Persist => pipe.cmd("EXISTS").arg(key).cmd("PERSIST").arg(key).ignore(),
+            KeyIndexAction::Check => pipe.cmd("EXISTS").arg(key),
+        };
+    }
+    let found = row_replies(conn, &pipe).await?;
+    Ok(mutation_result(batch.mutations.iter(), found))
 }
 
 async fn apply_key_mutations(
@@ -697,97 +715,178 @@ async fn apply_key_mutations(
             batch.table, batch.schema
         )));
     }
-    let mut mutations: Vec<_> = batch.mutations.iter().collect();
-    if key_type == "list" {
-        // A deletion shifts every later index. Apply higher original indices
-        // first, including updates, so none of this batch targets a shifted row.
-        let mut indexed = mutations
-            .into_iter()
-            .map(|mutation| {
-                let index = json_to_i64(mutation.primary_key.first().unwrap_or(&JsonValue::Null))?;
-                Ok((index, mutation))
-            })
-            .collect::<AppResult<Vec<_>>>()?;
-        indexed.sort_by_key(|(index, _)| std::cmp::Reverse(*index));
-        mutations = indexed.into_iter().map(|(_, mutation)| mutation).collect();
+    for mutation in &batch.mutations {
+        ensure_lossless_edit(&key_type, mutation)?;
     }
-    let mut applied = 0;
-    let mut conflicts = Vec::new();
-    for mutation in mutations {
-        let changed = match key_type.as_str() {
-            "string" => apply_string_mutation(conn, &batch.table, mutation).await?,
-            "hash" => apply_hash_mutation(conn, &batch.table, mutation).await?,
-            "list" => apply_list_mutation(conn, &batch.table, mutation).await?,
-            "set" => apply_set_mutation(conn, &batch.table, mutation).await?,
-            "zset" => apply_zset_mutation(conn, &batch.table, mutation).await?,
-            "stream" => apply_stream_mutation(conn, &batch.table, mutation).await?,
-            other => {
-                return Err(AppError::Unsupported(format!(
-                    "Redis type {other} cannot be edited"
-                )));
+    let key = batch.table.as_str();
+    let mut mutations: Vec<_> = batch.mutations.iter().collect();
+    let applied = match key_type.as_str() {
+        "string" => apply_string_mutations(conn, key, &mutations).await?,
+        "hash" => apply_hash_mutations(conn, key, &mutations).await?,
+        "list" => {
+            // A deletion shifts every later index. Apply higher original
+            // indices first, including updates, so none of this batch targets
+            // a shifted row.
+            let mut indexed = mutations
+                .into_iter()
+                .map(|mutation| {
+                    let index =
+                        json_to_i64(mutation.primary_key.first().unwrap_or(&JsonValue::Null))?;
+                    Ok((index, mutation))
+                })
+                .collect::<AppResult<Vec<_>>>()?;
+            indexed.sort_by_key(|(index, _)| std::cmp::Reverse(*index));
+            mutations = indexed.into_iter().map(|(_, mutation)| mutation).collect();
+            // Index-addressed edits stay one row at a time: an out-of-range
+            // LSET must be a conflict for that row, but an error reply fails
+            // a whole redis-rs pipeline.
+            let mut applied = Vec::with_capacity(mutations.len());
+            for mutation in &mutations {
+                applied.push(apply_list_mutation(conn, key, mutation).await?);
             }
-        };
-        if changed {
-            applied += 1;
+            applied
+        }
+        "set" => apply_set_mutations(conn, key, &mutations).await?,
+        "zset" => apply_zset_mutations(conn, key, &mutations).await?,
+        "stream" => apply_stream_mutations(conn, key, &mutations).await?,
+        other => {
+            return Err(AppError::Unsupported(format!(
+                "Redis type {other} cannot be edited"
+            )));
+        }
+    };
+    Ok(mutation_result(mutations, applied))
+}
+
+/// Counts applied rows and reports the rest as conflicts, in batch order.
+fn mutation_result<'a>(
+    mutations: impl IntoIterator<Item = &'a RowMutation>,
+    applied: impl IntoIterator<Item = bool>,
+) -> MutationResult {
+    let mut result = MutationResult {
+        applied: 0,
+        conflicts: Vec::new(),
+    };
+    for (mutation, applied) in mutations.into_iter().zip(applied) {
+        if applied {
+            result.applied += 1;
         } else {
-            conflicts.push(mutation.primary_key.clone());
+            result.conflicts.push(mutation.primary_key.clone());
         }
     }
-    Ok(MutationResult { applied, conflicts })
+    result
 }
 
-async fn apply_string_mutation(
+/// Runs a pipeline whose non-ignored replies each decide one row: nil or a
+/// zero count means the key, field, or member was missing.
+async fn row_replies(
     conn: &mut MultiplexedConnection,
-    key: &str,
-    mutation: &RowMutation,
-) -> AppResult<bool> {
-    let exists: bool = redis_rs::cmd("EXISTS").arg(key).query_async(conn).await?;
-    if !exists {
-        return Ok(false);
+    pipe: &redis_rs::Pipeline,
+) -> AppResult<Vec<bool>> {
+    if pipe.is_empty() {
+        return Ok(Vec::new());
     }
-    if mutation.deleted {
-        let _: i64 = redis_rs::cmd("DEL").arg(key).query_async(conn).await?;
-        return Ok(true);
-    }
-    let value = json_to_string(mutation.changes.get(1).unwrap_or(&JsonValue::Null));
-    redis_rs::cmd("SET")
-        .arg(key)
-        .arg(value)
-        .query_async::<Value>(conn)
-        .await?;
-    Ok(true)
+    let replies: Vec<Value> = pipe.query_async(conn).await?;
+    Ok(replies
+        .iter()
+        .map(|reply| match reply {
+            Value::Nil => false,
+            Value::Int(count) => *count > 0,
+            _ => true,
+        })
+        .collect())
 }
 
-async fn apply_hash_mutation(
+/// Table views show binary data as `\x…` hex and cut long values at
+/// `MAX_VALUE_BYTES`. Saving that preview would replace the real data, and a
+/// preview field or member name would address a different one, so such rows
+/// cannot be saved. Literal text of the same shape is refused as well, since
+/// the preview alone cannot tell them apart. Deleting a key, list element, or
+/// field whose value is a preview is still allowed.
+fn ensure_lossless_edit(key_type: &str, mutation: &RowMutation) -> AppResult<()> {
+    let name_is_preview = matches!(key_type, "hash" | "set" | "zset")
+        && mutation.primary_key.first().is_some_and(is_lossy_preview);
+    let value_is_preview = !mutation.deleted
+        && matches!(key_type, "string" | "hash" | "list")
+        && mutation.original.get(1).is_some_and(is_lossy_preview);
+    if name_is_preview || value_is_preview {
+        return Err(AppError::Unsupported(
+            "values shown as hex (binary data) or truncated cannot be saved from the table editor without losing data".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn is_lossy_preview(value: &JsonValue) -> bool {
+    let JsonValue::String(text) = value else {
+        return false;
+    };
+    text.ends_with(TRUNCATION_MARKER)
+        || text.strip_prefix("\\x").is_some_and(|hex| {
+            !hex.is_empty()
+                && hex.len() % 2 == 0
+                && hex.bytes().all(|byte| byte.is_ascii_hexdigit())
+        })
+}
+
+async fn apply_string_mutations(
     conn: &mut MultiplexedConnection,
     key: &str,
-    mutation: &RowMutation,
-) -> AppResult<bool> {
-    let field = json_to_string(mutation.primary_key.first().unwrap_or(&JsonValue::Null));
-    let exists: bool = redis_rs::cmd("HEXISTS")
-        .arg(key)
-        .arg(&field)
-        .query_async(conn)
-        .await?;
-    if !exists {
-        return Ok(false);
+    mutations: &[&RowMutation],
+) -> AppResult<Vec<bool>> {
+    let mut pipe = redis_rs::pipe();
+    for mutation in mutations {
+        if mutation.deleted {
+            pipe.cmd("DEL").arg(key);
+        } else {
+            // XX only overwrites an existing key, so a key deleted since the
+            // page loaded is a conflict instead of being recreated.
+            let value = json_to_string(mutation.changes.get(1).unwrap_or(&JsonValue::Null));
+            pipe.cmd("SET").arg(key).arg(value).arg("XX");
+        }
     }
-    if mutation.deleted {
-        let _: i64 = redis_rs::cmd("HDEL")
-            .arg(key)
-            .arg(&field)
-            .query_async(conn)
-            .await?;
-        return Ok(true);
+    row_replies(conn, &pipe).await
+}
+
+async fn apply_hash_mutations(
+    conn: &mut MultiplexedConnection,
+    key: &str,
+    mutations: &[&RowMutation],
+) -> AppResult<Vec<bool>> {
+    let field = |mutation: &RowMutation| {
+        json_to_string(mutation.primary_key.first().unwrap_or(&JsonValue::Null))
+    };
+    // HSET would create a missing field, so updated fields are checked first,
+    // all in one round trip. Deletes are decided by HDEL's count.
+    let mut check = redis_rs::pipe();
+    for mutation in mutations.iter().filter(|mutation| !mutation.deleted) {
+        check.cmd("HEXISTS").arg(key).arg(field(mutation));
     }
-    let value = json_to_string(mutation.changes.get(1).unwrap_or(&JsonValue::Null));
-    redis_rs::cmd("HSET")
-        .arg(key)
-        .arg(&field)
-        .arg(value)
-        .query_async::<Value>(conn)
-        .await?;
-    Ok(true)
+    let mut exists = row_replies(conn, &check).await?.into_iter();
+    let mut write = redis_rs::pipe();
+    let mut applied = Vec::with_capacity(mutations.len());
+    for mutation in mutations {
+        if mutation.deleted {
+            write.cmd("HDEL").arg(key).arg(field(mutation));
+            applied.push(None);
+        } else if exists.next() == Some(true) {
+            let value = json_to_string(mutation.changes.get(1).unwrap_or(&JsonValue::Null));
+            write
+                .cmd("HSET")
+                .arg(key)
+                .arg(field(mutation))
+                .arg(value)
+                .ignore();
+            applied.push(Some(true));
+        } else {
+            applied.push(Some(false));
+        }
+    }
+    let mut deleted = row_replies(conn, &write).await?.into_iter();
+    Ok(applied
+        .into_iter()
+        .map(|applied| applied.unwrap_or_else(|| deleted.next().unwrap_or(false)))
+        .collect())
 }
 
 async fn apply_list_mutation(
@@ -835,106 +934,94 @@ async fn apply_list_mutation(
     Ok(true)
 }
 
-async fn apply_set_mutation(
+async fn apply_set_mutations(
     conn: &mut MultiplexedConnection,
     key: &str,
-    mutation: &RowMutation,
-) -> AppResult<bool> {
-    let member = json_to_string(mutation.primary_key.first().unwrap_or(&JsonValue::Null));
-    let exists: bool = redis_rs::cmd("SISMEMBER")
-        .arg(key)
-        .arg(&member)
-        .query_async(conn)
-        .await?;
-    if !exists {
-        return Ok(false);
+    mutations: &[&RowMutation],
+) -> AppResult<Vec<bool>> {
+    let mut pipe = redis_rs::pipe();
+    for mutation in mutations {
+        let member = json_to_string(mutation.primary_key.first().unwrap_or(&JsonValue::Null));
+        // A set row has only its member, so a non-delete only confirms it
+        // still exists.
+        let command = if mutation.deleted {
+            "SREM"
+        } else {
+            "SISMEMBER"
+        };
+        pipe.cmd(command).arg(key).arg(member);
     }
-    if mutation.deleted {
-        let _: i64 = redis_rs::cmd("SREM")
-            .arg(key)
-            .arg(&member)
-            .query_async(conn)
-            .await?;
-        return Ok(true);
-    }
-    Ok(true)
+    row_replies(conn, &pipe).await
 }
 
-async fn apply_zset_mutation(
+async fn apply_zset_mutations(
     conn: &mut MultiplexedConnection,
     key: &str,
-    mutation: &RowMutation,
-) -> AppResult<bool> {
-    let member = json_to_string(mutation.primary_key.first().unwrap_or(&JsonValue::Null));
-    let score: Value = redis_rs::cmd("ZSCORE")
-        .arg(key)
-        .arg(&member)
-        .query_async(conn)
-        .await?;
-    if matches!(score, Value::Nil) {
-        return Ok(false);
-    }
-    if mutation.deleted {
-        let _: i64 = redis_rs::cmd("ZREM")
+    mutations: &[&RowMutation],
+) -> AppResult<Vec<bool>> {
+    let mut pipe = redis_rs::pipe();
+    for mutation in mutations {
+        let member = json_to_string(mutation.primary_key.first().unwrap_or(&JsonValue::Null));
+        if mutation.deleted {
+            pipe.cmd("ZREM").arg(key).arg(member);
+            continue;
+        }
+        let score = json_to_string(mutation.changes.get(1).unwrap_or(&JsonValue::Null));
+        if score.parse::<f64>().map_or(true, f64::is_nan) {
+            return Err(AppError::InvalidInput(format!(
+                "sorted set score {score:?} is not a number"
+            )));
+        }
+        // ZSCORE decides the row; ZADD XX never creates a missing member.
+        pipe.cmd("ZSCORE")
             .arg(key)
             .arg(&member)
-            .query_async(conn)
-            .await?;
-        return Ok(true);
+            .cmd("ZADD")
+            .arg(key)
+            .arg("XX")
+            .arg(score)
+            .arg(&member)
+            .ignore();
     }
-    let next_score = json_to_string(mutation.changes.get(1).unwrap_or(&JsonValue::Null));
-    redis_rs::cmd("ZADD")
-        .arg(key)
-        .arg(next_score)
-        .arg(&member)
-        .query_async::<Value>(conn)
-        .await?;
-    Ok(true)
+    row_replies(conn, &pipe).await
 }
 
-async fn apply_stream_mutation(
+async fn apply_stream_mutations(
     conn: &mut MultiplexedConnection,
     key: &str,
-    mutation: &RowMutation,
-) -> AppResult<bool> {
-    if !mutation.deleted {
+    mutations: &[&RowMutation],
+) -> AppResult<Vec<bool>> {
+    if mutations.iter().any(|mutation| !mutation.deleted) {
         return Err(AppError::Unsupported(
             "stream entries can only be deleted from the table editor".into(),
         ));
     }
-    let id = json_to_string(mutation.primary_key.first().unwrap_or(&JsonValue::Null));
-    let removed: i64 = redis_rs::cmd("XDEL")
-        .arg(key)
-        .arg(&id)
-        .query_async(conn)
-        .await?;
-    Ok(removed > 0)
+    let mut pipe = redis_rs::pipe();
+    for mutation in mutations {
+        let id = json_to_string(mutation.primary_key.first().unwrap_or(&JsonValue::Null));
+        pipe.cmd("XDEL").arg(key).arg(id);
+    }
+    row_replies(conn, &pipe).await
 }
 
-async fn apply_ttl(
-    conn: &mut MultiplexedConnection,
-    key: &str,
-    ttl: Option<&JsonValue>,
-) -> AppResult<()> {
-    let ttl = ttl
-        .map(json_to_string)
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "-1".into())
+/// Parses an edited TTL cell. Blank or negative means no expiry, matching
+/// the -1 Redis reports for persistent keys. Zero is refused because
+/// `EXPIRE key 0` deletes the key; deletes use the explicit delete action.
+fn parse_ttl(ttl: Option<&JsonValue>) -> AppResult<Option<i64>> {
+    let text = ttl.map(json_to_string).unwrap_or_default();
+    if text.is_empty() {
+        return Ok(None);
+    }
+    let seconds = text
         .parse::<i64>()
         .map_err(|_| AppError::InvalidInput("TTL must be an integer number of seconds".into()))?;
-    if ttl < 0 {
-        redis_rs::cmd("PERSIST")
-            .arg(key)
-            .query_async::<Value>(conn)
-            .await?;
-    } else {
-        redis_rs::cmd("EXPIRE")
-            .arg(key)
-            .arg(ttl)
-            .query_async::<Value>(conn)
-            .await?;
+    match seconds {
+        0 => Err(AppError::InvalidInput(
+            "TTL 0 would delete the key; use -1 to remove the expiry, or delete the key".into(),
+        )),
+        seconds if seconds < 0 => Ok(None),
+        seconds => Ok(Some(seconds)),
     }
-    Ok(())
 }
 
 fn key_index_metadata() -> TableMetadata {
@@ -1623,7 +1710,7 @@ fn bulk_to_json(bytes: &[u8]) -> JsonValue {
         Ok(mut text) => {
             if text.len() > MAX_VALUE_BYTES {
                 text.truncate(text.floor_char_boundary(MAX_VALUE_BYTES));
-                text.push_str("… (truncated)");
+                text.push_str(TRUNCATION_MARKER);
             }
             JsonValue::String(text)
         }
@@ -2807,6 +2894,392 @@ mod tests {
             keys(FilterOperator::LessThan, "user").await,
             ["User:2", "admin"]
         );
+    }
+
+    fn row_mutation(
+        original: Vec<JsonValue>,
+        changes: Vec<JsonValue>,
+        deleted: bool,
+    ) -> RowMutation {
+        RowMutation {
+            primary_key: vec![original[0].clone()],
+            original,
+            changes,
+            xmin: None,
+            deleted,
+        }
+    }
+
+    fn batch(
+        session: &RedisSession,
+        schema: &str,
+        table: &str,
+        mutations: Vec<RowMutation>,
+    ) -> MutationBatch {
+        MutationBatch {
+            profile_id: session.profile().id,
+            database: session.profile().default_database.clone(),
+            schema: schema.into(),
+            table: table.into(),
+            mutations,
+        }
+    }
+
+    #[tokio::test]
+    async fn key_edits_report_missing_rows_as_conflicts_without_creating_them() {
+        let Some((_server, session)) = start_test_redis().await else {
+            eprintln!("skipping live Redis test because redis-server is unavailable");
+            return;
+        };
+        session.run_query("HSET h a 1 b 2 c 3", None).await.unwrap();
+        session.run_query("SADD s a b", None).await.unwrap();
+        session.run_query("ZADD z 1 a 2 b", None).await.unwrap();
+        session.run_query("SET greeting hi", None).await.unwrap();
+        session.run_query("CONFIG RESETSTAT", None).await.unwrap();
+        let pair = |a: &str, b: &str| vec![JsonValue::from(a), JsonValue::from(b)];
+
+        let result = session
+            .apply_mutations(&batch(
+                &session,
+                "hash",
+                "h",
+                vec![
+                    row_mutation(pair("a", "1"), pair("a", "1"), true),
+                    row_mutation(pair("gone", "1"), pair("gone", "1"), true),
+                    row_mutation(pair("b", "2"), pair("b", "two"), false),
+                    row_mutation(pair("missing", "1"), pair("missing", "new"), false),
+                ],
+            ))
+            .await
+            .unwrap();
+        assert_eq!(result.applied, 2);
+        assert_eq!(
+            result.conflicts,
+            vec![
+                vec![JsonValue::from("gone")],
+                vec![JsonValue::from("missing")]
+            ]
+        );
+        let hash = session.run_query("HGETALL h", None).await.unwrap().rows;
+        assert_eq!(hash, vec![pair("b", "two"), pair("c", "3")]);
+
+        let result = session
+            .apply_mutations(&batch(
+                &session,
+                "set",
+                "s",
+                vec![
+                    row_mutation(vec!["a".into()], vec!["a".into()], true),
+                    row_mutation(vec!["x".into()], vec!["x".into()], true),
+                    row_mutation(vec!["b".into()], vec!["b".into()], false),
+                ],
+            ))
+            .await
+            .unwrap();
+        assert_eq!(result.applied, 2);
+        assert_eq!(result.conflicts, vec![vec![JsonValue::from("x")]]);
+
+        let score =
+            |member: &str, score: f64| vec![JsonValue::from(member), JsonValue::from(score)];
+        let error = session
+            .apply_mutations(&batch(
+                &session,
+                "zset",
+                "z",
+                vec![
+                    row_mutation(score("a", 1.0), score("a", 1.0), true),
+                    row_mutation(
+                        score("b", 2.0),
+                        vec![JsonValue::from("b"), JsonValue::from("lots")],
+                        false,
+                    ),
+                ],
+            ))
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("not a number"), "{error}");
+        assert_eq!(
+            session.run_query("ZCARD z", None).await.unwrap().rows,
+            vec![vec![JsonValue::from(2)]],
+            "an invalid score rejects the batch before any write"
+        );
+        let result = session
+            .apply_mutations(&batch(
+                &session,
+                "zset",
+                "z",
+                vec![
+                    row_mutation(score("a", 1.0), score("a", 1.0), true),
+                    row_mutation(score("b", 2.0), score("b", 5.0), false),
+                    row_mutation(score("x", 1.0), score("x", 9.0), false),
+                ],
+            ))
+            .await
+            .unwrap();
+        assert_eq!(result.applied, 2);
+        assert_eq!(result.conflicts, vec![vec![JsonValue::from("x")]]);
+        assert_eq!(
+            session
+                .run_query("ZRANGE z 0 -1 WITHSCORES", None)
+                .await
+                .unwrap()
+                .rows,
+            vec![pair("b", "5")]
+        );
+
+        // Each batch costs one round trip, plus one existence check for hash
+        // updates; nothing checks rows one at a time.
+        let stats = session.run_query("INFO commandstats", None).await.unwrap();
+        let stats = stats.rows[0][0].as_str().unwrap().to_owned();
+        assert!(!stats.contains("cmdstat_exists:"), "{stats}");
+        for expected in [
+            "cmdstat_hexists:calls=2,",
+            "cmdstat_sismember:calls=1,",
+            "cmdstat_zscore:calls=2,",
+        ] {
+            assert!(stats.contains(expected), "{expected}: {stats}");
+        }
+
+        // The key disappears after the page loaded: SET XX must not recreate it.
+        let edit = batch(
+            &session,
+            "string",
+            "greeting",
+            vec![row_mutation(
+                pair("greeting", "hi"),
+                pair("greeting", "hello"),
+                false,
+            )],
+        );
+        assert_eq!(session.apply_mutations(&edit).await.unwrap().applied, 1);
+        {
+            let mut conn = session.conn().await;
+            let result = apply_string_mutations(&mut conn, "deleted", &[&edit.mutations[0]])
+                .await
+                .unwrap();
+            assert_eq!(result, vec![false]);
+        }
+        assert_eq!(
+            session
+                .run_query("EXISTS deleted", None)
+                .await
+                .unwrap()
+                .rows,
+            vec![vec![JsonValue::from(0)]]
+        );
+    }
+
+    #[tokio::test]
+    async fn key_index_ttl_edits_never_delete_keys() {
+        let Some((_server, session)) = start_test_redis().await else {
+            eprintln!("skipping live Redis test because redis-server is unavailable");
+            return;
+        };
+        session.run_query("MSET a 1 b 1 c 1", None).await.unwrap();
+        session.run_query("EXPIRE c 100", None).await.unwrap();
+        let row =
+            |key: &str, ttl: JsonValue| vec![JsonValue::from(key), JsonValue::from("string"), ttl];
+        let ttl_edit = |key: &str, ttl: JsonValue| {
+            row_mutation(row(key, JsonValue::from(-1)), row(key, ttl), false)
+        };
+        let error = session
+            .apply_mutations(&batch(
+                &session,
+                "keys",
+                "all",
+                vec![
+                    row_mutation(
+                        row("b", JsonValue::from(-1)),
+                        row("b", JsonValue::from(-1)),
+                        true,
+                    ),
+                    ttl_edit("a", JsonValue::from(0)),
+                ],
+            ))
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("TTL 0"), "{error}");
+        assert_eq!(
+            session.run_query("EXISTS a b", None).await.unwrap().rows,
+            vec![vec![JsonValue::from(2)]],
+            "a rejected batch writes nothing"
+        );
+
+        let result = session
+            .apply_mutations(&batch(
+                &session,
+                "keys",
+                "all",
+                vec![
+                    ttl_edit("a", JsonValue::from(60)),
+                    row_mutation(
+                        row("c", JsonValue::from(100)),
+                        row("c", JsonValue::from(-1)),
+                        false,
+                    ),
+                    ttl_edit("missing", JsonValue::from(60)),
+                    row_mutation(
+                        row("gone", JsonValue::from(-1)),
+                        row("gone", JsonValue::from(-5)),
+                        false,
+                    ),
+                    row_mutation(
+                        row("b", JsonValue::from(-1)),
+                        row("b", JsonValue::from(-1)),
+                        true,
+                    ),
+                ],
+            ))
+            .await
+            .unwrap();
+        assert_eq!(result.applied, 3);
+        assert_eq!(
+            result.conflicts,
+            vec![
+                vec![JsonValue::from("missing")],
+                vec![JsonValue::from("gone")]
+            ]
+        );
+        let ttl = |key: &'static str| {
+            let session = &session;
+            async move {
+                session
+                    .run_query(&format!("TTL {key}"), None)
+                    .await
+                    .unwrap()
+                    .rows[0][0]
+                    .as_i64()
+                    .unwrap()
+            }
+        };
+        assert!((1..=60).contains(&ttl("a").await));
+        assert_eq!(ttl("c").await, -1);
+        assert_eq!(ttl("b").await, -2);
+        assert_eq!(ttl("missing").await, -2, "EXPIRE never creates keys");
+        assert_eq!(parse_ttl(Some(&JsonValue::from(""))).unwrap(), None);
+        assert_eq!(parse_ttl(None).unwrap(), None);
+        assert!(parse_ttl(Some(&JsonValue::from("soon"))).is_err());
+    }
+
+    #[tokio::test]
+    async fn previews_of_binary_or_truncated_values_cannot_be_saved() {
+        let Some((_server, session)) = start_test_redis().await else {
+            eprintln!("skipping live Redis test because redis-server is unavailable");
+            return;
+        };
+        let long = "a".repeat(MAX_VALUE_BYTES + 10);
+        {
+            let mut conn = session.conn().await;
+            redis_rs::pipe()
+                .cmd("SET")
+                .arg("bin")
+                .arg(b"\xff\x00".as_slice())
+                .ignore()
+                .cmd("SET")
+                .arg("long")
+                .arg(&long)
+                .ignore()
+                .cmd("SET")
+                .arg("literal")
+                .arg(r"\xzz")
+                .ignore()
+                .cmd("HSET")
+                .arg("h")
+                .arg(b"\xfe".as_slice())
+                .arg("v")
+                .arg("ok")
+                .arg(b"\xff".as_slice())
+                .ignore()
+                .cmd("RPUSH")
+                .arg("l")
+                .arg(b"\xff".as_slice())
+                .ignore()
+                .cmd("SADD")
+                .arg("s")
+                .arg(b"\xff".as_slice())
+                .ignore()
+                .query_async::<()>(&mut *conn)
+                .await
+                .unwrap();
+        }
+        let shown = |schema: &'static str, table: &'static str| {
+            let request = page_request(&session, schema, table);
+            let session = &session;
+            async move { session.table_page(&request).await.unwrap().rows }
+        };
+        let refused = |schema: &'static str, table: &'static str, mutation: RowMutation| {
+            let batch = batch(&session, schema, table, vec![mutation]);
+            let session = &session;
+            async move {
+                let error = session.apply_mutations(&batch).await.unwrap_err();
+                assert!(error.to_string().contains("hex"), "{error}");
+            }
+        };
+        let edited = |row: &[JsonValue], value: &str| {
+            row_mutation(
+                row.to_vec(),
+                vec![row[0].clone(), JsonValue::from(value)],
+                false,
+            )
+        };
+
+        let bin = shown("string", "bin").await.remove(0);
+        refused("string", "bin", edited(&bin, "x")).await;
+        let long_row = shown("string", "long").await.remove(0);
+        assert!(long_row[1].as_str().unwrap().ends_with(TRUNCATION_MARKER));
+        refused("string", "long", edited(&long_row, "x")).await;
+        assert_eq!(
+            session.run_query("STRLEN long", None).await.unwrap().rows,
+            vec![vec![JsonValue::from(long.len())]]
+        );
+        let hash = shown("hash", "h").await;
+        let binary_field = hash.iter().find(|row| row[0] == r"\xfe").unwrap();
+        let binary_value = hash.iter().find(|row| row[0] == "ok").unwrap();
+        refused("hash", "h", edited(binary_field, "x")).await;
+        refused(
+            "hash",
+            "h",
+            row_mutation(binary_field.clone(), binary_field.clone(), true),
+        )
+        .await;
+        refused("hash", "h", edited(binary_value, "x")).await;
+        let list = shown("list", "l").await.remove(0);
+        refused("list", "l", edited(&list, "x")).await;
+        let set = shown("set", "s").await.remove(0);
+        refused("set", "s", row_mutation(set.clone(), set, true)).await;
+
+        // Deleting a row whose value is only a preview is safe, and text that
+        // is not a hex preview stays editable.
+        for (schema, table, mutation) in [
+            (
+                "hash",
+                "h",
+                row_mutation(binary_value.clone(), binary_value.clone(), true),
+            ),
+            ("list", "l", row_mutation(list.clone(), list.clone(), true)),
+            (
+                "string",
+                "bin",
+                row_mutation(bin.clone(), bin.clone(), true),
+            ),
+        ] {
+            let result = session
+                .apply_mutations(&batch(&session, schema, table, vec![mutation]))
+                .await
+                .unwrap();
+            assert_eq!(result.applied, 1, "{schema}");
+        }
+        let literal = shown("string", "literal").await.remove(0);
+        let result = session
+            .apply_mutations(&batch(
+                &session,
+                "string",
+                "literal",
+                vec![edited(&literal, "ok")],
+            ))
+            .await
+            .unwrap();
+        assert_eq!(result.applied, 1);
     }
 
     #[tokio::test]
