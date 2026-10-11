@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::pin::pin;
 use std::time::{Duration, Instant};
 
@@ -75,28 +76,26 @@ impl PgSession {
     }
 
     pub async fn schema_tree(&self) -> AppResult<Vec<SchemaNode>> {
-        let schema_rows = self
-            .client
-            .query(
+        // Both catalog queries are pipelined on the connection.
+        let (schema_rows, table_rows) = futures_util::future::try_join(
+            self.client.query(
                 "SELECT schema_name
                  FROM information_schema.schemata
                  WHERE schema_name NOT LIKE 'pg_%'
                    AND schema_name <> 'information_schema'
                  ORDER BY schema_name",
                 &[],
-            )
-            .await?;
-        let table_rows = self
-            .client
-            .query(
+            ),
+            self.client.query(
                 "SELECT table_schema, table_name, table_type
                  FROM information_schema.tables
                  WHERE table_schema NOT LIKE 'pg_%'
                    AND table_schema <> 'information_schema'
                  ORDER BY table_schema, table_name",
                 &[],
-            )
-            .await?;
+            ),
+        )
+        .await?;
 
         let mut schemas = schema_rows
             .into_iter()
@@ -111,15 +110,17 @@ impl PgSession {
                 })
             })
             .collect::<AppResult<Vec<_>>>()?;
+        let positions = schemas
+            .iter()
+            .enumerate()
+            .map(|(index, node)| (node.name.clone(), index))
+            .collect::<HashMap<_, _>>();
         for row in table_rows {
             let schema: String = row.try_get(0)?;
             let table: String = row.try_get(1)?;
             let table_type: String = row.try_get(2)?;
-            if let Some(schema_node) = schemas
-                .iter_mut()
-                .find(|node| node.schema.as_deref() == Some(schema.as_str()))
-            {
-                schema_node.children.push(SchemaNode {
+            if let Some(&index) = positions.get(&schema) {
+                schemas[index].children.push(SchemaNode {
                     name: table.clone(),
                     kind: if table_type == "VIEW" {
                         "view".into()
@@ -136,21 +137,43 @@ impl PgSession {
     }
 
     pub async fn table_metadata(&self, schema: &str, table: &str) -> AppResult<TableMetadata> {
+        // One round trip: the columns, plus the relation kind and primary key
+        // computed once as uncorrelated subqueries.
         let rows = self
             .client
-            .query(
-                "SELECT ordinal_position, column_name, data_type, is_nullable, column_default
+            .query_typed(
+                "WITH rel AS (
+                     SELECT c.oid, c.relkind
+                     FROM pg_class c
+                     JOIN pg_namespace n ON n.oid = c.relnamespace
+                     WHERE n.nspname = $1 AND c.relname = $2
+                 ),
+                 pk AS (
+                     SELECT array_agg(a.attname::text ORDER BY a.attnum) AS columns
+                     FROM rel
+                     JOIN pg_index i ON i.indrelid = rel.oid AND i.indisprimary
+                     JOIN pg_attribute a ON a.attrelid = rel.oid AND a.attnum = ANY(i.indkey)
+                 )
+                 SELECT ordinal_position, column_name, data_type, is_nullable, column_default,
+                        (SELECT relkind FROM rel), (SELECT columns FROM pk)
                  FROM information_schema.columns
                  WHERE table_schema = $1 AND table_name = $2
                  ORDER BY ordinal_position",
-                &[&schema, &table],
+                &[(&schema, Type::NAME), (&table, Type::NAME)],
             )
             .await?;
-        if rows.is_empty() {
+        let Some(first) = rows.first() else {
             return Err(AppError::InvalidInput(format!(
                 "table {schema}.{table} was not found"
             )));
-        }
+        };
+        // Views and foreign tables have no system columns, so selecting xmin from
+        // them fails. Only heap-backed relations get optimistic xmin checks.
+        let relkind: Option<i8> = first.try_get(5)?;
+        let has_xmin = relkind.is_some_and(|kind| matches!(kind as u8, b'r' | b'p' | b'm'));
+        let primary_key = first
+            .try_get::<_, Option<Vec<String>>>(6)?
+            .unwrap_or_default();
         let columns = rows
             .into_iter()
             .map(|row| {
@@ -163,37 +186,6 @@ impl PgSession {
                 })
             })
             .collect::<Result<Vec<_>, tokio_postgres::Error>>()?;
-        let primary_key = self
-            .client
-            .query(
-                "SELECT a.attname
-                 FROM pg_index i
-                 JOIN pg_class c ON c.oid = i.indrelid
-                 JOIN pg_namespace n ON n.oid = c.relnamespace
-                 JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = ANY(i.indkey)
-                 WHERE i.indisprimary AND n.nspname = $1 AND c.relname = $2
-                 ORDER BY a.attnum",
-                &[&schema, &table],
-            )
-            .await?
-            .into_iter()
-            .map(|row| row.try_get(0))
-            .collect::<Result<Vec<String>, _>>()?;
-        // Views and foreign tables have no system columns, so selecting xmin from
-        // them fails. Only heap-backed relations get optimistic xmin checks.
-        let relkind: Option<i8> = self
-            .client
-            .query_opt(
-                "SELECT c.relkind
-                 FROM pg_class c
-                 JOIN pg_namespace n ON n.oid = c.relnamespace
-                 WHERE n.nspname = $1 AND c.relname = $2",
-                &[&schema, &table],
-            )
-            .await?
-            .map(|row| row.try_get(0))
-            .transpose()?;
-        let has_xmin = relkind.is_some_and(|kind| matches!(kind as u8, b'r' | b'p' | b'm'));
         Ok(TableMetadata {
             schema: schema.to_owned(),
             table: table.to_owned(),
@@ -227,6 +219,7 @@ impl PgSession {
             .iter()
             .map(|column| quote_identifier(&column.name))
             .collect::<Vec<_>>();
+        // Preparing (without executing) reveals the result column types.
         let statement = self
             .client
             .prepare(&page_sql(quoted_columns.clone()))
@@ -236,27 +229,45 @@ impl PgSession {
             .iter()
             .map(|column| column.type_().clone())
             .collect::<Vec<_>>();
-        let rows = if column_types.iter().all(decodes_natively) {
-            self.client.query(&statement, &[]).await?
-        } else {
-            // Types without a native decoder (numeric, uuid, enums, arrays, ...) are
-            // read in their text form rather than showing up as NULL.
-            // The alias must differ from the column name: ORDER BY resolves a bare
-            // name to an output column first and would otherwise sort the text.
-            let columns = quoted_columns
-                .into_iter()
-                .zip(&column_types)
-                .enumerate()
-                .map(|(index, (column, ty))| {
-                    if decodes_natively(ty) {
-                        column
-                    } else {
-                        format!("{column}::text AS \"__dbm_text_{index}\"")
-                    }
-                })
-                .collect();
-            self.client.query(&page_sql(columns), &[]).await?
+        let page = async {
+            if column_types.iter().all(decodes_natively) {
+                self.client.query(&statement, &[]).await
+            } else {
+                // Types without a native decoder (numeric, uuid, enums, arrays, ...) are
+                // read in their text form rather than showing up as NULL.
+                // The alias must differ from the column name: ORDER BY resolves a bare
+                // name to an output column first and would otherwise sort the text.
+                let columns = quoted_columns
+                    .into_iter()
+                    .zip(&column_types)
+                    .enumerate()
+                    .map(|(index, (column, ty))| {
+                        if decodes_natively(ty) {
+                            column
+                        } else {
+                            format!("{column}::text AS \"__dbm_text_{index}\"")
+                        }
+                    })
+                    .collect();
+                // Unprepared, in one round trip.
+                self.client.query_typed(&page_sql(columns), &[]).await
+            }
         };
+        let count = async {
+            if !request.include_total.unwrap_or(true) {
+                return None;
+            }
+            let count_sql = format!("SELECT COUNT(*)::bigint FROM {table_name}{predicate}");
+            self.client
+                .query_typed(&count_sql, &[])
+                .await
+                .ok()
+                .and_then(|rows| rows.first()?.try_get::<_, i64>(0).ok())
+                .and_then(|count| u64::try_from(count).ok())
+        };
+        // The page and the count are pipelined on the connection.
+        let (rows, total_rows) = futures_util::future::join(page, count).await;
+        let rows = rows?;
         let has_more = rows.len() > usize::try_from(limit).unwrap_or(usize::MAX);
         let rows = rows
             .into_iter()
@@ -267,17 +278,6 @@ impl PgSession {
                     .collect::<Vec<_>>()
             })
             .collect::<Vec<_>>();
-        let total_rows = if request.include_total.unwrap_or(true) {
-            let count_sql = format!("SELECT COUNT(*)::bigint FROM {table_name}{predicate}");
-            self.client
-                .query_one(&count_sql, &[])
-                .await
-                .ok()
-                .and_then(|row| row.try_get::<_, i64>(0).ok())
-                .and_then(|count| u64::try_from(count).ok())
-        } else {
-            None
-        };
         let columns = metadata
             .columns
             .iter()
@@ -1554,7 +1554,20 @@ mod tests {
                 .await
                 .expect("table page");
             assert!(page.metadata.has_xmin);
+            assert_eq!(page.metadata.primary_key, vec!["id".to_owned()]);
             assert_eq!(page.total_rows, Some(2));
+            let tree = session.schema_tree().await.expect("schema tree");
+            let node = tree
+                .iter()
+                .find(|node| node.name == schema)
+                .expect("test schema in tree");
+            assert_eq!(
+                node.children
+                    .iter()
+                    .map(|child| (child.name.as_str(), child.kind.as_str()))
+                    .collect::<Vec<_>>(),
+                vec![("item_labels", "view"), ("items", "table")]
+            );
             let first = &page.rows[0];
             assert_eq!(
                 first[0],
