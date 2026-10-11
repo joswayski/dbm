@@ -35,8 +35,9 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 const MAX_REQUEST_BYTES: usize = 1_048_576;
-/// Session-free helpers are pure functions over the request, and copying a
-/// 10,000-row result as CSV sends every row, so they accept far more.
+/// Session-free helpers are pure functions over the request. Some carry a
+/// whole schema tree or script (`SELECT *` resolution, highlighting), so they
+/// accept far more.
 const MAX_HELPER_REQUEST_BYTES: usize = 256 * 1_048_576;
 
 /// Rows written so far by each running export, keyed by destination path,

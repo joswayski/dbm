@@ -69,7 +69,7 @@ and writes a PNG of each; CI uses it to review the macOS UI.
 `--demo`, every build uses the real saved profiles and writes query history to
 the same local store. Queries are capped at 10,000 rows; the AppKit bridge
 limits database requests to 1 MiB and session-free helper requests, such as
-copying rows as CSV, to 256 MiB. Neither limit bounds memory consumed by very
+resolving `SELECT *` against a large schema tree, to 256 MiB. Neither limit bounds memory consumed by very
 large individual cells.
 
 Linux builds need OpenSSL/pkg-config and X11/Wayland development libraries;
