@@ -14,7 +14,10 @@ What the app does today, what is deliberately not built yet, and what it stores 
   a SQL or Redis workbench tab when Anybase launches, without running workbench queries.
   It defaults to on for new and existing desktop profiles and can be turned off
   per connection. Startup connection errors use the normal error banner; other
-  profiles still open. Mobile clients continue to connect manually.
+  profiles still open. Connection errors identify the saved profile and host;
+  an address-lookup error means the hostname could not be resolved. Check the
+  saved host and any required private network or VPN, then reconnect. Mobile
+  clients continue to connect manually.
 - Passwords through the macOS Keychain, Windows Credential Manager, or Linux
   secret service via `keyring`.
 - The connection editor displays the current URL with its password masked.

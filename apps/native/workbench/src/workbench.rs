@@ -355,6 +355,7 @@ pub struct Workbench {
     /// The window's width this frame, for layout defaults.
     window_width: f32,
     startup_window_checked: bool,
+    focus_after_update: bool,
 }
 
 impl Workbench {
@@ -404,6 +405,7 @@ impl Workbench {
             now: 0.0,
             window_width: crate::DEFAULT_WINDOW_SIZE.x,
             startup_window_checked: false,
+            focus_after_update: std::env::args_os().any(|arg| arg == "--after-update"),
         };
         app.send(Command::LoadProfiles, "Loading connections", None);
         app
@@ -1243,6 +1245,13 @@ impl eframe::App for Workbench {
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if std::mem::take(&mut self.focus_after_update) {
+            // Only the first frame after an update takes focus; subsequent
+            // frames must not steal it back from another application.
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        }
         self.ensure_startup_window_size(ctx);
         self.now = ctx.input(|input| input.time);
         if !self.demo {

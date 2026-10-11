@@ -21,7 +21,7 @@ pub enum DbSession {
 
 impl DbSession {
     pub async fn connect(profile: ConnectionProfile, password: Option<String>) -> AppResult<Self> {
-        let target = format!("{}:{}", profile.host, profile.port);
+        let target = format!("“{}” ({}:{})", profile.name, profile.host, profile.port);
         tokio::time::timeout(CONNECT_TIMEOUT, Self::open(profile, password))
             .await
             .map_err(|_| {
@@ -30,6 +30,12 @@ impl DbSession {
                     CONNECT_TIMEOUT.as_secs()
                 ))
             })?
+            .map_err(|error| match error {
+                AppError::Database(message) => {
+                    AppError::Database(format!("could not connect to {target}: {message}"))
+                }
+                other => other,
+            })
     }
 
     async fn open(profile: ConnectionProfile, password: Option<String>) -> AppResult<Self> {
@@ -104,6 +110,51 @@ impl DbSession {
     pub async fn close(&self) {
         if let Self::Mysql(session) = self {
             session.close().await;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn failed_connections_identify_the_profile_and_host_without_credentials() {
+        for (engine, port, database) in [
+            (DatabaseEngine::Postgres, 5432, "postgres"),
+            (DatabaseEngine::Mysql, 3306, "mysql"),
+            (DatabaseEngine::Redis, 6379, "0"),
+        ] {
+            let now = chrono::Utc::now();
+            let profile = ConnectionProfile {
+                id: uuid::Uuid::new_v4(),
+                name: "Startup connection".into(),
+                color: None,
+                engine,
+                host: "dbm-test.invalid".into(),
+                port,
+                username: "private-user".into(),
+                default_database: database.into(),
+                tls_mode: crate::models::TlsMode::Disabled,
+                ca_cert_path: None,
+                ssh: None,
+                read_only: true,
+                open_on_startup: true,
+                created_at: now,
+                updated_at: now,
+            };
+            let error = match DbSession::connect(profile, Some("private-password".into())).await {
+                Ok(_) => panic!("a reserved .invalid hostname must not connect"),
+                Err(error) => error.to_string(),
+            };
+            assert!(
+                error.starts_with(&format!(
+                    "database error: could not connect to “Startup connection” (dbm-test.invalid:{port}): "
+                )),
+                "{engine:?}: {error}"
+            );
+            assert!(!error.contains("private-user"), "{error}");
+            assert!(!error.contains("private-password"), "{error}");
         }
     }
 }
