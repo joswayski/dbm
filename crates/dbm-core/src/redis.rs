@@ -824,33 +824,11 @@ async fn apply_key_mutations(
         ensure_lossless_edit(&key_type, mutation)?;
     }
     let key = batch.table.as_str();
-    let mut mutations: Vec<_> = batch.mutations.iter().collect();
+    let mutations: Vec<_> = batch.mutations.iter().collect();
     let applied = match key_type.as_str() {
         "string" => apply_string_mutations(conn, key, &mutations).await?,
         "hash" => apply_hash_mutations(conn, key, &mutations).await?,
-        "list" => {
-            // A deletion shifts every later index. Apply higher original
-            // indices first, including updates, so none of this batch targets
-            // a shifted row.
-            let mut indexed = mutations
-                .into_iter()
-                .map(|mutation| {
-                    let index =
-                        json_to_i64(mutation.primary_key.first().unwrap_or(&JsonValue::Null))?;
-                    Ok((index, mutation))
-                })
-                .collect::<AppResult<Vec<_>>>()?;
-            indexed.sort_by_key(|(index, _)| std::cmp::Reverse(*index));
-            mutations = indexed.into_iter().map(|(_, mutation)| mutation).collect();
-            // Index-addressed edits stay one row at a time: an out-of-range
-            // LSET must be a conflict for that row, but an error reply fails
-            // a whole redis-rs pipeline.
-            let mut applied = Vec::with_capacity(mutations.len());
-            for mutation in &mutations {
-                applied.push(apply_list_mutation(conn, key, mutation).await?);
-            }
-            applied
-        }
+        "list" => apply_list_mutations(conn, key, &mutations).await?,
         "set" => apply_set_mutations(conn, key, &mutations).await?,
         "zset" => apply_zset_mutations(conn, key, &mutations).await?,
         "stream" => apply_stream_mutations(conn, key, &mutations).await?,
@@ -1026,49 +1004,69 @@ async fn apply_hash_mutations(
         .collect())
 }
 
-async fn apply_list_mutation(
+/// List rows are addressed by index, which shifts when other clients push or
+/// remove elements. One pipelined LINDEX reads every target first; a row whose
+/// element is gone or no longer shows the value it was loaded with is a
+/// conflict. The rest are written in one MULTI/EXEC: updates LSET in place,
+/// and deletes LSET a marker unique to this batch that one final LREM removes,
+/// so no delete shifts another row of the batch.
+async fn apply_list_mutations(
     conn: &mut MultiplexedConnection,
     key: &str,
-    mutation: &RowMutation,
-) -> AppResult<bool> {
-    let index = json_to_i64(mutation.primary_key.first().unwrap_or(&JsonValue::Null))?;
-    let current: Value = redis_rs::cmd("LINDEX")
-        .arg(key)
-        .arg(index)
-        .query_async(conn)
-        .await?;
-    if matches!(current, Value::Nil) {
-        return Ok(false);
+    mutations: &[&RowMutation],
+) -> AppResult<Vec<bool>> {
+    if mutations.is_empty() {
+        return Ok(Vec::new());
     }
-    if mutation.deleted {
-        let sentinel = format!("dbm-deleted-{}", Uuid::new_v4());
-        if redis_rs::cmd("LSET")
-            .arg(key)
-            .arg(index)
-            .arg(&sentinel)
-            .query_async::<Value>(conn)
-            .await
-            .is_err()
-        {
-            return Ok(false);
-        }
-        let _: i64 = redis_rs::cmd("LREM")
-            .arg(key)
-            .arg(1)
-            .arg(&sentinel)
-            .query_async(conn)
-            .await?;
-        return Ok(true);
+    let indexes = mutations
+        .iter()
+        .map(|mutation| json_to_i64(mutation.primary_key.first().unwrap_or(&JsonValue::Null)))
+        .collect::<AppResult<Vec<_>>>()?;
+    let mut check = redis_rs::pipe();
+    for index in &indexes {
+        check.cmd("LINDEX").arg(key).arg(*index);
     }
-    let value = json_to_string(mutation.changes.get(1).unwrap_or(&JsonValue::Null));
-    redis_rs::cmd("LSET")
-        .arg(key)
-        .arg(index)
-        .arg(value)
-        .query_async::<Value>(conn)
-        .await
-        .map_err(|_| AppError::Database("list index is out of range".into()))?;
-    Ok(true)
+    let current: Vec<Option<Vec<u8>>> = check.query_async(conn).await?;
+    let applied: Vec<bool> = mutations
+        .iter()
+        .zip(&current)
+        .map(|(mutation, current)| {
+            current
+                .as_deref()
+                .is_some_and(|bytes| mutation.original.get(1) == Some(&bulk_to_json(bytes)))
+        })
+        .collect();
+    let marker = format!("dbm-deleted-{}", Uuid::new_v4());
+    let mut write = redis_rs::pipe();
+    write.atomic();
+    let mut deletes = false;
+    for ((mutation, index), _) in mutations
+        .iter()
+        .zip(&indexes)
+        .zip(&applied)
+        .filter(|(_, applied)| **applied)
+    {
+        let value = if mutation.deleted {
+            deletes = true;
+            marker.clone()
+        } else {
+            json_to_string(mutation.changes.get(1).unwrap_or(&JsonValue::Null))
+        };
+        write.cmd("LSET").arg(key).arg(*index).arg(value).ignore();
+    }
+    if deletes {
+        write.cmd("LREM").arg(key).arg(0).arg(&marker).ignore();
+    }
+    if applied.contains(&true) {
+        // LSET fails only if the list shrank since the check; Redis still runs
+        // the transaction's other commands, including the marker cleanup.
+        write.query_async::<()>(conn).await.map_err(|error| {
+            AppError::Database(format!(
+                "the list changed while saving ({error}); reload it and try again"
+            ))
+        })?;
+    }
+    Ok(applied)
 }
 
 async fn apply_set_mutations(
@@ -2481,6 +2479,78 @@ mod tests {
                 .rows,
             expected
         );
+    }
+
+    #[tokio::test]
+    async fn list_batches_detect_shifted_rows_and_apply_in_one_transaction() {
+        let Some((_server, session)) = start_test_redis().await else {
+            eprintln!("skipping live Redis test because redis-server is unavailable");
+            return;
+        };
+        let mutation = |index: i64, original: &str, changed: &str, deleted| RowMutation {
+            original: vec![JsonValue::from(index), JsonValue::from(original)],
+            changes: vec![JsonValue::from(index), JsonValue::from(changed)],
+            primary_key: vec![JsonValue::from(index)],
+            xmin: None,
+            deleted,
+        };
+        let batch = |mutations| MutationBatch {
+            profile_id: session.profile().id,
+            database: session.profile().default_database.clone(),
+            schema: "list".into(),
+            table: "tasks".into(),
+            mutations,
+        };
+        async fn items(session: &RedisSession) -> Vec<String> {
+            session
+                .run_query("LRANGE tasks 0 -1", None)
+                .await
+                .unwrap()
+                .rows
+                .into_iter()
+                .map(|row| row[0].as_str().unwrap_or_default().to_owned())
+                .collect()
+        }
+
+        // Another client pushed to the front after the page loaded: every
+        // index now names a different element, so nothing is written.
+        session.run_query("RPUSH tasks A B C", None).await.unwrap();
+        session.run_query("LPUSH tasks Z", None).await.unwrap();
+        let result = session
+            .apply_mutations(&batch(vec![
+                mutation(0, "A", "A", true),
+                mutation(1, "B", "edited", false),
+            ]))
+            .await
+            .unwrap();
+        assert_eq!(result.applied, 0);
+        assert_eq!(result.conflicts.len(), 2);
+        assert_eq!(items(&session).await, ["Z", "A", "B", "C"]);
+
+        // A large mixed batch: every other row deleted, the rest edited.
+        session.run_query("DEL tasks", None).await.unwrap();
+        let values: Vec<String> = (0..300).map(|i| format!("v{i}")).collect();
+        session
+            .run_query(&format!("RPUSH tasks {}", values.join(" ")), None)
+            .await
+            .unwrap();
+        let mutations = values
+            .iter()
+            .enumerate()
+            .map(|(index, value)| {
+                let deleted = index % 2 == 0;
+                mutation(index as i64, value, &format!("{value}!"), deleted)
+            })
+            .collect();
+        let result = session.apply_mutations(&batch(mutations)).await.unwrap();
+        assert_eq!((result.applied, result.conflicts.len()), (300, 0));
+        let expected: Vec<_> = values
+            .iter()
+            .skip(1)
+            .step_by(2)
+            .map(|v| format!("{v}!"))
+            .collect();
+        assert_eq!(items(&session).await, expected);
     }
 
     #[tokio::test]

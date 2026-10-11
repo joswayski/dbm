@@ -101,9 +101,11 @@ What the app does today, what is deliberately not built yet, and what it stores 
   transaction is open, a save runs inside a savepoint and becomes permanent
   only when that transaction commits; otherwise it commits on its own.
 - Table writes carry their target database and are rejected if the connection
-  switched databases while the write was queued. Redis list batches apply
-  higher indices first so staged deletes do not shift later edits onto other
-  elements; this does not protect against concurrent edits by other clients.
+  switched databases while the write was queued. Redis list batches are
+  saved in one transaction, so staged deletes never shift other edits onto
+  different elements. A list row whose element no longer shows the value it
+  was loaded with (for example after another client pushed to the list) is
+  reported as a conflict instead of being written.
 - PostgreSQL values of any type display, including `numeric`, `uuid`, enums,
   and arrays. Integers beyond ±2^53 are shown and edited as exact text.
 - MySQL binary values (`BINARY`, `VARBINARY`, `BLOB`) that are not plain text
