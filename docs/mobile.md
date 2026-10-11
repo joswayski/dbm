@@ -132,6 +132,12 @@ package step is not proof that the later UI tests pass. Downloads expire after
 Anybase's existing desktop release workflow remains unchanged; merging app changes
 still publishes desktop updates, not mobile store releases.
 
+The iPhone development job installs private Rust executables in a runner-temp
+`CARGO_HOME` and excludes its `bin` from Rust caching. Cleanup of another runner's
+shared `~/.cargo/bin` cannot remove these executables. Installed toolchains still
+reuse the default `RUSTUP_HOME`; this is not full runner isolation. Local build
+commands and the signed mobile release workflow are unchanged.
+
 Workflow configuration alone is not proof that a revision passed; the
 [distribution status](#distribution-status) above links to a verified release.
 SwiftUI is not compiled on Linux. Physical-device behavior and live, verified-TLS
