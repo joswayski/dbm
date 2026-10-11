@@ -211,9 +211,12 @@ impl LocalStore {
         Ok(())
     }
 
+    /// Adds an entry and trims the profile to its newest 500 in one transaction,
+    /// so a run costs one commit and a failed trim leaves history unchanged.
     pub fn add_history(&self, entry: &QueryHistoryEntry) -> AppResult<()> {
-        let connection = self.open()?;
-        connection.execute(
+        let mut connection = self.open()?;
+        let transaction = connection.transaction()?;
+        transaction.execute(
             "INSERT INTO query_history (
                 id, profile_id, database_name, sql, executed_at, duration_ms, success
              ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -227,7 +230,7 @@ impl LocalStore {
                 i64::from(u8::from(entry.success)),
             ],
         )?;
-        connection.execute(
+        transaction.execute(
             "DELETE FROM query_history
              WHERE profile_id = ?1 AND id NOT IN (
                  SELECT id FROM query_history
@@ -235,6 +238,7 @@ impl LocalStore {
              )",
             [entry.profile_id.to_string()],
         )?;
+        transaction.commit()?;
         Ok(())
     }
 
@@ -599,5 +603,41 @@ mod tests {
         assert_eq!(analytics_history.len(), 1);
         assert_eq!(analytics_history[0].id, analytics_entry.id);
         std::fs::remove_file(path).expect("remove temp db");
+    }
+
+    #[test]
+    fn history_insert_and_trim_commit_together() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let store = LocalStore::from_path(directory.path().join("state.sqlite3")).expect("store");
+        let profile_id = Uuid::new_v4();
+        let entry = |minutes: i64| QueryHistoryEntry {
+            id: Uuid::new_v4(),
+            profile_id,
+            database: "postgres".into(),
+            sql: format!("SELECT {minutes}"),
+            executed_at: Utc::now() + chrono::Duration::minutes(minutes),
+            duration_ms: 1,
+            success: true,
+        };
+        for minutes in 0..501 {
+            store.add_history(&entry(minutes)).expect("add history");
+        }
+        let history = store.list_history(profile_id, "postgres", 1000).unwrap();
+        assert_eq!(history.len(), 500);
+        assert_eq!(history.last().unwrap().sql, "SELECT 1");
+
+        // If trimming fails, the new entry is rolled back with it.
+        store
+            .open()
+            .unwrap()
+            .execute_batch(
+                "CREATE TRIGGER fail_trim BEFORE DELETE ON query_history
+                 BEGIN SELECT RAISE(ABORT, 'trim failed'); END;",
+            )
+            .unwrap();
+        assert!(store.add_history(&entry(600)).is_err());
+        let history = store.list_history(profile_id, "postgres", 1000).unwrap();
+        assert_eq!(history.len(), 500);
+        assert_eq!(history[0].sql, "SELECT 500");
     }
 }
