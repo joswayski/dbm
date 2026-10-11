@@ -378,7 +378,7 @@ async fn keys_table_page(
 ) -> AppResult<TablePage> {
     let metadata = key_index_metadata();
     let limit = request.limit.clamp(1, MAX_PAGE_SIZE);
-    let pattern = scan_pattern(&request.filters)?;
+    let pattern = scan_pattern(&request.filters);
     let type_filter = type_filter(&request.filters);
     // Offset pagination needs the complete keyspace in a deterministic order.
     // SCAN can repeat keys, so deduplicate before counting or slicing.
@@ -1024,23 +1024,42 @@ fn type_label(key_type: &str) -> &'static str {
     }
 }
 
-fn scan_pattern(filters: &[FilterCondition]) -> AppResult<String> {
+/// A SCAN MATCH pattern that every key passing the first `key` filter
+/// matches. It only narrows the scan: `row_matches` still applies every filter,
+/// so operators SCAN cannot express scan the whole keyspace.
+fn scan_pattern(filters: &[FilterCondition]) -> String {
     let Some(filter) = filters.iter().find(|filter| filter.column == "key") else {
-        return Ok("*".into());
+        return "*".into();
     };
     let value = filter.value.as_deref().unwrap_or_default();
-    Ok(match filter.operator {
-        FilterOperator::Equals => value.to_owned(),
-        FilterOperator::Contains => format!("*{value}*"),
-        FilterOperator::StartsWith => format!("{value}*"),
-        FilterOperator::EndsWith => format!("*{value}"),
-        FilterOperator::In => {
-            return Err(AppError::InvalidInput(
-                "Redis key IN filters are not supported; use equals, contains, starts with, or ends with".into(),
-            ));
+    match filter.operator {
+        FilterOperator::Equals => glob_literal(value, false),
+        // These match case-insensitively in `row_matches`, but SCAN MATCH is
+        // case-sensitive, so letters become `[aA]` classes.
+        FilterOperator::Contains => format!("*{}*", glob_literal(value, true)),
+        FilterOperator::StartsWith => format!("{}*", glob_literal(value, true)),
+        FilterOperator::EndsWith => format!("*{}", glob_literal(value, true)),
+        _ => "*".into(),
+    }
+}
+
+/// Escapes Redis glob syntax so `value` matches only itself.
+fn glob_literal(value: &str, ascii_case_insensitive: bool) -> String {
+    let mut pattern = String::with_capacity(value.len());
+    for character in value.chars() {
+        if ascii_case_insensitive && character.is_ascii_alphabetic() {
+            pattern.push('[');
+            pattern.push(character.to_ascii_lowercase());
+            pattern.push(character.to_ascii_uppercase());
+            pattern.push(']');
+        } else {
+            if matches!(character, '*' | '?' | '[' | ']' | '\\') {
+                pattern.push('\\');
+            }
+            pattern.push(character);
         }
-        _ => format!("*{value}*"),
-    })
+    }
+    pattern
 }
 
 fn type_filter(filters: &[FilterCondition]) -> Option<String> {
@@ -1779,6 +1798,35 @@ mod tests {
         );
         assert_eq!(response.rows.len(), 2);
         assert_eq!(response.rows[0][0], JsonValue::String("name".into()));
+    }
+
+    #[test]
+    fn scan_patterns_escape_globs_and_only_narrow_supported_operators() {
+        let pattern = |operator, value: &str| {
+            scan_pattern(&[FilterCondition {
+                column: "key".into(),
+                operator,
+                value: Some(value.into()),
+            }])
+        };
+        assert_eq!(
+            pattern(FilterOperator::Equals, r"a*b?[c]\d"),
+            r"a\*b\?\[c\]\\d"
+        );
+        assert_eq!(pattern(FilterOperator::Contains, "u:1*"), r"*[uU]:1\**");
+        assert_eq!(pattern(FilterOperator::StartsWith, "Ab"), "[aA][bB]*");
+        assert_eq!(pattern(FilterOperator::EndsWith, "é?"), r"*é\?");
+        for operator in [
+            FilterOperator::NotEquals,
+            FilterOperator::In,
+            FilterOperator::NotIn,
+            FilterOperator::GreaterThan,
+            FilterOperator::LessThanOrEqual,
+            FilterOperator::IsNull,
+        ] {
+            assert_eq!(pattern(operator, "user"), "*");
+        }
+        assert_eq!(scan_pattern(&[]), "*");
     }
 
     struct TestRedis {
@@ -2698,6 +2746,67 @@ mod tests {
         assert!(!is_scan_type_unsupported(&wrong_type), "{wrong_type:?}");
         let io = redis_rs::RedisError::from(std::io::Error::other("connection reset"));
         assert!(!is_scan_type_unsupported(&io));
+    }
+
+    #[tokio::test]
+    async fn key_filters_match_literally_and_support_every_operator() {
+        let Some((_server, session)) = start_test_redis().await else {
+            eprintln!("skipping live Redis test because redis-server is unavailable");
+            return;
+        };
+        session
+            .run_query("MSET user[1] a user1 b User:2 c admin d", None)
+            .await
+            .unwrap();
+        let keys = |operator, value: &str| {
+            let mut request = page_request(&session, "keys", "all");
+            request.filters = vec![FilterCondition {
+                column: "key".into(),
+                operator,
+                value: Some(value.into()),
+            }];
+            let session = &session;
+            async move {
+                session
+                    .table_page(&request)
+                    .await
+                    .unwrap()
+                    .rows
+                    .into_iter()
+                    .map(|row| row[0].as_str().unwrap().to_owned())
+                    .collect::<Vec<_>>()
+            }
+        };
+        assert_eq!(keys(FilterOperator::Equals, "user[1]").await, ["user[1]"]);
+        assert_eq!(
+            keys(FilterOperator::Equals, "user?").await,
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            keys(FilterOperator::Contains, "USER").await,
+            ["User:2", "user1", "user[1]"]
+        );
+        assert_eq!(keys(FilterOperator::StartsWith, "user[").await, ["user[1]"]);
+        assert_eq!(
+            keys(FilterOperator::NotEquals, "user1").await,
+            ["User:2", "admin", "user[1]"]
+        );
+        assert_eq!(
+            keys(FilterOperator::In, "user1, admin").await,
+            ["admin", "user1"]
+        );
+        assert_eq!(
+            keys(FilterOperator::NotIn, "user1, admin").await,
+            ["User:2", "user[1]"]
+        );
+        assert_eq!(
+            keys(FilterOperator::GreaterThan, "user").await,
+            ["user1", "user[1]"]
+        );
+        assert_eq!(
+            keys(FilterOperator::LessThan, "user").await,
+            ["User:2", "admin"]
+        );
     }
 
     #[tokio::test]
