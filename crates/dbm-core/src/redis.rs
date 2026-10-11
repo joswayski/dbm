@@ -283,10 +283,10 @@ async fn scan_keys(
         if use_type && let Some(key_type) = type_filter {
             cmd.arg("TYPE").arg(key_type);
         }
-        match cmd.query_async::<(u64, Vec<String>)>(conn).await {
+        match cmd.query_async::<(u64, Vec<Vec<u8>>)>(conn).await {
             Ok((next, batch)) => {
                 cursor = next;
-                keys.extend(batch);
+                keys.extend(utf8_key_names(batch));
                 if keys.len() >= limit || cursor == 0 {
                     keys.truncate(limit);
                     break;
@@ -450,7 +450,7 @@ async fn key_table_page(
         // Ordinary list browsing needs only this slice, not LRANGE 0 -1.
         // Fetch one extra element to detect another page, keeping absolute
         // indices so edits still address the original list positions.
-        let (total, values): (u64, Vec<String>) = redis_rs::pipe()
+        let (total, values): (u64, Vec<Vec<u8>>) = redis_rs::pipe()
             .cmd("LLEN")
             .arg(&request.table)
             .cmd("LRANGE")
@@ -467,7 +467,7 @@ async fn key_table_page(
             .map(|(index, value)| {
                 vec![
                     JsonValue::from(u64::from(request.offset) + index as u64),
-                    JsonValue::String(value),
+                    bulk_to_json(&value),
                 ]
             })
             .collect();
@@ -520,19 +520,19 @@ async fn load_key_rows(
             ]])
         }
         "hash" => {
-            let values: Vec<String> = redis_rs::cmd("HGETALL").arg(key).query_async(conn).await?;
+            let values: Vec<Vec<u8>> = redis_rs::cmd("HGETALL").arg(key).query_async(conn).await?;
             Ok(values
                 .chunks(2)
                 .filter_map(|chunk| {
                     Some(vec![
-                        JsonValue::String(chunk.first()?.clone()),
-                        JsonValue::String(chunk.get(1)?.clone()),
+                        bulk_to_json(chunk.first()?),
+                        bulk_to_json(chunk.get(1)?),
                     ])
                 })
                 .collect())
         }
         "list" => {
-            let values: Vec<String> = redis_rs::cmd("LRANGE")
+            let values: Vec<Vec<u8>> = redis_rs::cmd("LRANGE")
                 .arg(key)
                 .arg(0)
                 .arg(-1)
@@ -544,20 +544,20 @@ async fn load_key_rows(
                 .map(|(index, value)| {
                     vec![
                         JsonValue::Number(i64::try_from(index).unwrap_or(i64::MAX).into()),
-                        JsonValue::String(value),
+                        bulk_to_json(&value),
                     ]
                 })
                 .collect())
         }
         "set" => {
-            let values: Vec<String> = redis_rs::cmd("SMEMBERS").arg(key).query_async(conn).await?;
+            let values: Vec<Vec<u8>> = redis_rs::cmd("SMEMBERS").arg(key).query_async(conn).await?;
             Ok(values
-                .into_iter()
-                .map(|member| vec![JsonValue::String(member)])
+                .iter()
+                .map(|member| vec![bulk_to_json(member)])
                 .collect())
         }
         "zset" => {
-            let values: Vec<String> = redis_rs::cmd("ZRANGE")
+            let values: Vec<Vec<u8>> = redis_rs::cmd("ZRANGE")
                 .arg(key)
                 .arg(0)
                 .arg(-1)
@@ -568,8 +568,8 @@ async fn load_key_rows(
                 .chunks(2)
                 .filter_map(|chunk| {
                     Some(vec![
-                        JsonValue::String(chunk.first()?.clone()),
-                        score_json(chunk.get(1)?),
+                        bulk_to_json(chunk.first()?),
+                        score_json(&String::from_utf8_lossy(chunk.get(1)?)),
                     ])
                 })
                 .collect())
@@ -1569,6 +1569,13 @@ fn bulk_to_json(bytes: &[u8]) -> JsonValue {
     }
 }
 
+/// Key names are table names and mutation targets, so a lossy or hex preview
+/// could open or write a different key. Names that are not UTF-8 are skipped.
+fn utf8_key_names(keys: Vec<Vec<u8>>) -> impl Iterator<Item = String> {
+    keys.into_iter()
+        .filter_map(|key| String::from_utf8(key).ok())
+}
+
 fn value_as_string(value: Value) -> String {
     match json_from_redis(value) {
         JsonValue::String(value) => value,
@@ -2431,6 +2438,125 @@ mod tests {
         );
         assert_eq!(state.store.list_history(id, "3", 100).unwrap().len(), 2);
         std::fs::remove_file(path).unwrap();
+    }
+
+    fn page_request(session: &RedisSession, schema: &str, table: &str) -> TablePageRequest {
+        TablePageRequest {
+            profile_id: session.profile().id,
+            schema: schema.into(),
+            table: table.into(),
+            offset: 0,
+            limit: 100,
+            filters: Vec::new(),
+            order_by: None,
+            include_total: Some(true),
+        }
+    }
+
+    #[tokio::test]
+    async fn binary_keys_and_values_do_not_break_views() {
+        let Some((_server, session)) = start_test_redis().await else {
+            eprintln!("skipping live Redis test because redis-server is unavailable");
+            return;
+        };
+        {
+            let mut conn = session.conn().await;
+            redis_rs::pipe()
+                .cmd("SET")
+                .arg(b"bin:\xff".as_slice())
+                .arg("x")
+                .ignore()
+                .cmd("SET")
+                .arg("plain")
+                .arg(b"\x00\xff".as_slice())
+                .ignore()
+                .cmd("HSET")
+                .arg("h")
+                .arg(b"\xfe".as_slice())
+                .arg(b"\xfd".as_slice())
+                .arg("name")
+                .arg("Ada")
+                .ignore()
+                .cmd("RPUSH")
+                .arg("l")
+                .arg(b"\xff".as_slice())
+                .arg("ok")
+                .ignore()
+                .cmd("SADD")
+                .arg("s")
+                .arg(b"\xff".as_slice())
+                .arg("ok")
+                .ignore()
+                .cmd("ZADD")
+                .arg("z")
+                .arg(1)
+                .arg(b"\xff".as_slice())
+                .arg(2)
+                .arg("ok")
+                .ignore()
+                .query_async::<()>(&mut *conn)
+                .await
+                .unwrap();
+        }
+        let tree = session.schema_tree().await.unwrap();
+        let names: Vec<_> = tree
+            .iter()
+            .flat_map(|node| node.children.iter())
+            .filter_map(|child| child.table.as_deref())
+            .collect();
+        for key in ["plain", "h", "l", "s", "z"] {
+            assert!(names.contains(&key), "{key} missing from {names:?}");
+        }
+        assert!(!names.iter().any(|name| name.starts_with("bin:")));
+
+        let keys = session
+            .table_page(&page_request(&session, "keys", "all"))
+            .await
+            .unwrap();
+        let keys: Vec<_> = keys.rows.iter().map(|row| row[0].clone()).collect();
+        assert_eq!(keys, ["h", "l", "plain", "s", "z"].map(JsonValue::from));
+
+        let page = |schema: &'static str, table: &'static str| {
+            let request = page_request(&session, schema, table);
+            let session = &session;
+            async move { session.table_page(&request).await.unwrap().rows }
+        };
+        assert_eq!(
+            page("string", "plain").await,
+            vec![vec![JsonValue::from("plain"), JsonValue::from("\\x00ff")]]
+        );
+        assert_eq!(
+            page("hash", "h").await.len(),
+            2,
+            "binary hash fields are shown"
+        );
+        assert!(
+            page("hash", "h")
+                .await
+                .contains(&vec![JsonValue::from("\\xfe"), JsonValue::from("\\xfd")])
+        );
+        assert_eq!(
+            page("list", "l").await,
+            vec![
+                vec![JsonValue::from(0), JsonValue::from("\\xff")],
+                vec![JsonValue::from(1), JsonValue::from("ok")]
+            ]
+        );
+        let mut sorted = page_request(&session, "list", "l");
+        sorted.order_by = Some(OrderSpec {
+            column: "value".into(),
+            descending: true,
+        });
+        assert_eq!(
+            session.table_page(&sorted).await.unwrap().rows[1],
+            vec![JsonValue::from(0), JsonValue::from("\\xff")]
+        );
+        assert_eq!(page("set", "s").await.len(), 2);
+        assert!(
+            page("zset", "z")
+                .await
+                .contains(&vec![JsonValue::from("\\xff"), JsonValue::from(1.0)])
+        );
     }
 
     #[tokio::test]
