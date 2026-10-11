@@ -3,9 +3,10 @@ use std::time::{Duration, Instant};
 
 use crate::error::{AppError, AppResult};
 use crate::models::{
-    ConnectionProfile, DatabaseRef, FilterCondition, FilterOperator, MutationBatch, MutationResult,
-    OrderSpec, QueryColumn, QueryResponse, RowMutation, SchemaNode, TableColumn, TableMetadata,
-    TablePage, TablePageRequest, TlsMode, escape_like, json_integer,
+    ConnectionProfile, DatabaseEngine, DatabaseRef, FilterCondition, FilterOperator, MutationBatch,
+    MutationResult, OrderSpec, QueryColumn, QueryResponse, RowMutation, SchemaNode, TableColumn,
+    TableMetadata, TablePage, TablePageRequest, TlsMode, escape_like, json_integer,
+    reenables_writes, sql_statement_words,
 };
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
 use futures_util::TryStreamExt;
@@ -34,12 +35,16 @@ impl PgSession {
         if profile.read_only {
             // Let the server reject writes the statement-keyword check cannot see,
             // such as data-modifying CTEs, COPY, or functions with side effects.
-            if let Err(error) = client
+            // Without it the profile would not really be read-only, so refuse.
+            client
                 .batch_execute("SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY")
                 .await
-            {
-                tracing::warn!(%error, "could not make the read-only session read-only on the server");
-            }
+                .map_err(|error| {
+                    AppError::Database(format!(
+                        "could not make the read-only session read-only on the server: {}",
+                        database_message(error)
+                    ))
+                })?;
         }
         Ok(Self { profile, client })
     }
@@ -701,23 +706,30 @@ fn quote_identifier(identifier: &str) -> String {
     format!("\"{}\"", identifier.replace('"', "\"\""))
 }
 
+/// Whether a read-only profile must refuse `sql`: any statement starts with a
+/// writing keyword or would switch the session back to read-write. Comments
+/// and quoted text are ignored. The server-side read-only session still
+/// rejects writes this cannot recognize.
 fn is_mutating_statement(sql: &str) -> bool {
-    matches!(
-        sql.split_whitespace()
-            .next()
-            .unwrap_or_default()
-            .to_ascii_lowercase()
-            .as_str(),
-        "insert"
-            | "update"
-            | "delete"
-            | "alter"
-            | "drop"
-            | "truncate"
-            | "create"
-            | "grant"
-            | "revoke"
-    )
+    sql_statement_words(DatabaseEngine::Postgres, sql)
+        .iter()
+        .any(|words| {
+            reenables_writes(words)
+                || words.first().is_some_and(|word| {
+                    matches!(
+                        word.as_str(),
+                        "insert"
+                            | "update"
+                            | "delete"
+                            | "alter"
+                            | "drop"
+                            | "truncate"
+                            | "create"
+                            | "grant"
+                            | "revoke"
+                    )
+                })
+        })
 }
 
 fn qualified_name(schema: &str, table: &str) -> AppResult<String> {
@@ -1086,6 +1098,18 @@ mod tests {
             "ALTER TABLE users ADD COLUMN note text"
         ));
         assert!(!is_mutating_statement("SELECT * FROM users"));
+        assert!(is_mutating_statement("/* note */\n  delete from users"));
+        assert!(is_mutating_statement("SELECT 1; DROP TABLE users"));
+        assert!(is_mutating_statement("BEGIN READ WRITE"));
+        assert!(is_mutating_statement(
+            "SET SESSION CHARACTERISTICS AS TRANSACTION READ WRITE"
+        ));
+        assert!(is_mutating_statement("RESET ALL"));
+        assert!(is_mutating_statement("DISCARD ALL"));
+        assert!(!is_mutating_statement(
+            "SELECT 'drop'; -- delete\nSHOW search_path"
+        ));
+        assert!(!is_mutating_statement("BEGIN READ ONLY"));
     }
 
     fn test_profile(tls_mode: TlsMode) -> ConnectionProfile {
@@ -1499,6 +1523,24 @@ mod tests {
                 .await
                 .expect_err("read-only transaction rejects the CTE delete");
             assert!(error.to_string().contains("read-only"), "{error}");
+            for sql in [
+                "BEGIN READ WRITE",
+                "SET SESSION CHARACTERISTICS AS TRANSACTION READ WRITE",
+                "SET default_transaction_read_only = off",
+                "RESET ALL",
+                "DISCARD ALL",
+            ] {
+                let error = reader
+                    .run_query(sql, None)
+                    .await
+                    .expect_err("read-only profiles cannot switch the session to read-write");
+                assert!(error.to_string().contains("read-only"), "{sql}: {error}");
+            }
+            let mode = reader
+                .run_query("SHOW default_transaction_read_only", None)
+                .await
+                .expect("show");
+            assert_eq!(mode.rows, vec![vec![Value::String("on".into())]]);
             writer
                 .client
                 .batch_execute(&format!("DROP TABLE {table}"))

@@ -2,9 +2,10 @@ use std::time::{Duration, Instant};
 
 use crate::error::{AppError, AppResult};
 use crate::models::{
-    ConnectionProfile, DatabaseRef, FilterCondition, FilterOperator, MutationBatch, MutationResult,
-    OrderSpec, QueryColumn, QueryResponse, RowMutation, SchemaNode, TableColumn, TableMetadata,
-    TablePage, TablePageRequest, TlsMode, escape_like, json_integer, json_unsigned,
+    ConnectionProfile, DatabaseEngine, DatabaseRef, FilterCondition, FilterOperator, MutationBatch,
+    MutationResult, OrderSpec, QueryColumn, QueryResponse, RowMutation, SchemaNode, TableColumn,
+    TableMetadata, TablePage, TablePageRequest, TlsMode, escape_like, json_integer, json_unsigned,
+    reenables_writes, sql_statement_words,
 };
 use mysql_async::consts::ColumnType;
 use mysql_async::prelude::Queryable;
@@ -514,24 +515,31 @@ fn quote_identifier(identifier: &str) -> String {
     format!("`{}`", identifier.replace('`', "``"))
 }
 
+/// Whether a read-only profile must refuse `sql`: any statement starts with a
+/// writing keyword or would switch the session back to read-write. Comments
+/// and quoted text are ignored. The server-side read-only session still
+/// rejects writes this cannot recognize.
 fn is_mutating_statement(sql: &str) -> bool {
-    matches!(
-        sql.split_whitespace()
-            .next()
-            .unwrap_or_default()
-            .to_ascii_lowercase()
-            .as_str(),
-        "insert"
-            | "update"
-            | "delete"
-            | "replace"
-            | "alter"
-            | "drop"
-            | "truncate"
-            | "create"
-            | "grant"
-            | "revoke"
-    )
+    sql_statement_words(DatabaseEngine::Mysql, sql)
+        .iter()
+        .any(|words| {
+            reenables_writes(words)
+                || words.first().is_some_and(|word| {
+                    matches!(
+                        word.as_str(),
+                        "insert"
+                            | "update"
+                            | "delete"
+                            | "replace"
+                            | "alter"
+                            | "drop"
+                            | "truncate"
+                            | "create"
+                            | "grant"
+                            | "revoke"
+                    )
+                })
+        })
 }
 
 fn qualified_name(schema: &str, table: &str) -> AppResult<String> {
@@ -1020,6 +1028,22 @@ mod tests {
     }
 
     #[test]
+    fn read_only_detection_skips_comments_and_checks_every_statement() {
+        assert!(is_mutating_statement("/* hidden */ DELETE FROM files"));
+        assert!(is_mutating_statement(
+            "# note\nREPLACE INTO files VALUES (1)"
+        ));
+        assert!(is_mutating_statement(
+            "SELECT 1; UPDATE files SET path = ''"
+        ));
+        assert!(is_mutating_statement("SET SESSION TRANSACTION READ WRITE"));
+        assert!(is_mutating_statement("SET transaction_read_only = 0"));
+        assert!(is_mutating_statement("START TRANSACTION READ WRITE"));
+        assert!(!is_mutating_statement("SELECT 'delete'; SHOW TABLES"));
+        assert!(!is_mutating_statement("START TRANSACTION READ ONLY"));
+    }
+
+    #[test]
     fn time_values_use_total_hours() {
         assert_eq!(
             value_from_mysql(&Value::Time(true, 1, 2, 3, 4, 0)),
@@ -1304,10 +1328,16 @@ mod tests {
                 .run_query("/* hidden */ DELETE FROM files", None)
                 .await
                 .expect_err("read-only session rejects writes");
+            let message = error.to_string().to_ascii_lowercase();
             assert!(
-                error.to_string().to_ascii_lowercase().contains("read only"),
+                message.contains("read only") || message.contains("read-only"),
                 "{error}"
             );
+            let error = reader
+                .run_query("SET SESSION TRANSACTION READ WRITE", None)
+                .await
+                .expect_err("read-only profiles cannot switch the session to read-write");
+            assert!(error.to_string().contains("read-only"), "{error}");
             reader.close().await;
 
             session.close().await;
