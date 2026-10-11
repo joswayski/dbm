@@ -245,6 +245,51 @@ else:
         self.assertNotEqual(run.returncode, 0)
         self.assertFalse((self.directory / "calls").exists())
 
+    def test_ios_development_tools_survive_shared_bin_removal(self):
+        job = workflow("mobile.yml")["jobs"]["iphone"]
+        cargo_home = job["env"]["CARGO_HOME"].replace("${{ runner.temp }}", str(self.directory / "runner temp"))
+        bootstrap = next(step["run"] for step in job["steps"] if step.get("name") == "Install private Rust executables")
+        cache = next(step for step in job["steps"] if step.get("uses") == "Swatinem/rust-cache@v2")
+        self.assertEqual(cache["with"]["cache-bin"], "false")
+        shared = self.directory / "shared-bin"
+        shared.mkdir()
+        tool = self.directory / "private-tool"
+        executable(tool, '#!/bin/sh\nprintf "%s\\n" "$0"\n')
+        installer = self.directory / "installer"
+        executable(
+            installer,
+            '#!/bin/sh\nset -eu\nmkdir -p "$CARGO_HOME/bin"\n'
+            'for tool in rustup cargo rustc; do cp "$PRIVATE_TOOL" "$CARGO_HOME/bin/$tool"; done\n',
+        )
+        executable(self.bin / "curl", '#!/bin/sh\ncat "$INSTALLER"\n')
+        path_file = self.directory / "github-path"
+        for shared_installed in [False, True]:
+            with self.subTest(shared_installed=shared_installed):
+                shutil.rmtree(cargo_home, ignore_errors=True)
+                path_file.write_text("")
+                if shared_installed:
+                    for name in ["rustup", "cargo", "rustc"]:
+                        executable(shared / name, "#!/bin/sh\necho shared\n")
+                env = {
+                    "HOME": str(self.directory / "home"),
+                    "CARGO_HOME": cargo_home,
+                    "PATH": f"{shared}:{self.bin}:/usr/bin:/bin",
+                    "GITHUB_PATH": str(path_file),
+                    "INSTALLER": str(installer),
+                    "PRIVATE_TOOL": str(tool),
+                }
+                run = self.run_step("set -euo pipefail\n" + bootstrap, **env)
+                self.assertEqual(run.returncode, 0, run.stderr)
+                env["PATH"] = ":".join([*reversed(path_file.read_text().splitlines()), env["PATH"]])
+                # A different runner's cleanup must not remove this job's tools.
+                for binary in shared.iterdir():
+                    binary.unlink()
+                run = self.run_step("set -euo pipefail\nrustup; cargo; rustc", **env)
+                self.assertEqual(run.returncode, 0, run.stderr)
+                self.assertEqual(
+                    run.stdout.splitlines(), [f"{cargo_home}/bin/{name}" for name in ["rustup", "cargo", "rustc"]]
+                )
+
     def test_ios_archive_uses_release_device_signing_and_explicit_build_number(self):
         ios = self.directory / "apps/native/ios"
         ios.mkdir(parents=True)

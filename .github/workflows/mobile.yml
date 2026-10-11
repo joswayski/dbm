@@ -121,6 +121,9 @@ jobs:
     needs: route
     runs-on: ${{ needs.route.outputs.mac == 'true' && fromJSON('["self-hosted","josemac"]') || 'macos-15' }}
     timeout-minutes: 30
+    env:
+      # Other runner services share ~/.cargo; their cleanup must not remove our tools.
+      CARGO_HOME: ${{ runner.temp }}/dbm-cargo
     steps:
       - uses: actions/checkout@v4
       # Runs alongside the Rust toolchain and cache restore below, which do
@@ -154,12 +157,21 @@ jobs:
           xcrun simctl boot "$device"
           echo "DBM_IOS_SIMULATOR_ID=$device" >> "$GITHUB_ENV"
           echo "DBM_IOS_TEST_DESTINATION=platform=iOS Simulator,id=$device" >> "$GITHUB_ENV"
+      - name: Install private Rust executables
+        shell: bash
+        run: |
+          # Install even if shared rustup is on PATH; the toolchain action would reuse it.
+          curl --proto '=https' --tlsv1.2 --retry 10 --retry-connrefused --location --silent --show-error --fail https://sh.rustup.rs \
+            | sh -s -- --default-toolchain none --no-modify-path -y
+          echo "$CARGO_HOME/bin" >> "$GITHUB_PATH"
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.94.0
           targets: aarch64-apple-ios-sim,aarch64-apple-ios
       - uses: Swatinem/rust-cache@v2
         with:
+          # Keep private executables out of cache restore/save and destructive bin cleanup.
+          cache-bin: false
           save-if: ${{ github.ref == 'refs/heads/main' }}
       # Also applies the simulator's GITHUB_ENV values to the steps below.
       - name: Wait for the test simulator to be created
