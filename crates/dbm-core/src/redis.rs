@@ -892,14 +892,19 @@ async fn row_replies(
         return Ok(Vec::new());
     }
     let replies: Vec<Value> = pipe.query_async(conn).await?;
-    Ok(replies
+    Ok(row_flags(&replies))
+}
+
+/// Whether each reply applied its row: `nil` and zero counts did not.
+fn row_flags(replies: &[Value]) -> Vec<bool> {
+    replies
         .iter()
         .map(|reply| match reply {
             Value::Nil => false,
             Value::Int(count) => *count > 0,
             _ => true,
         })
-        .collect())
+        .collect()
 }
 
 /// Table views show binary data as `\x…` hex and cut long values at
@@ -939,18 +944,45 @@ async fn apply_string_mutations(
     key: &str,
     mutations: &[&RowMutation],
 ) -> AppResult<Vec<bool>> {
-    let mut pipe = redis_rs::pipe();
-    for mutation in mutations {
-        if mutation.deleted {
-            pipe.cmd("DEL").arg(key);
-        } else {
-            // XX only overwrites an existing key, so a key deleted since the
-            // page loaded is a conflict instead of being recreated.
-            let value = json_to_string(mutation.changes.get(1).unwrap_or(&JsonValue::Null));
-            pipe.cmd("SET").arg(key).arg(value).arg("XX");
+    let pipeline = |keep_ttl: bool| {
+        let mut pipe = redis_rs::pipe();
+        for mutation in mutations {
+            if mutation.deleted {
+                pipe.cmd("DEL").arg(key);
+            } else {
+                // XX only overwrites an existing key, so a key deleted since
+                // the page loaded is a conflict instead of being recreated.
+                // KEEPTTL (Redis 6.0+) keeps the key's expiry through the edit.
+                let value = json_to_string(mutation.changes.get(1).unwrap_or(&JsonValue::Null));
+                let set = pipe.cmd("SET").arg(key).arg(value).arg("XX");
+                if keep_ttl {
+                    set.arg("KEEPTTL");
+                }
+            }
         }
+        pipe
+    };
+    if mutations.is_empty() {
+        return Ok(Vec::new());
     }
-    row_replies(conn, &pipe).await
+    match pipeline(true).query_async::<Vec<Value>>(conn).await {
+        Ok(replies) => Ok(row_flags(&replies)),
+        // Servers before 6.0 reject KEEPTTL without writing. A delete in the
+        // same pipeline has already run, so only pure edits are retried.
+        Err(error)
+            if is_syntax_error(&error) && mutations.iter().all(|mutation| !mutation.deleted) =>
+        {
+            row_replies(conn, &pipeline(false)).await
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn is_syntax_error(error: &redis_rs::RedisError) -> bool {
+    error.code() == Some("ERR")
+        && error
+            .detail()
+            .is_some_and(|detail| detail.to_ascii_lowercase().contains("syntax"))
 }
 
 async fn apply_hash_mutations(
@@ -2089,6 +2121,41 @@ mod tests {
             created_at: now,
             updated_at: now,
         }
+    }
+
+    #[tokio::test]
+    async fn string_edits_keep_the_key_expiry() {
+        let Some((_server, session)) = start_test_redis().await else {
+            eprintln!("skipping live Redis test because redis-server is unavailable");
+            return;
+        };
+        session
+            .run_query("SET token old EX 3600", None)
+            .await
+            .expect("set string");
+        let edit = |value: &str| RowMutation {
+            original: vec![JsonValue::from("token"), JsonValue::from("old")],
+            changes: vec![JsonValue::from("token"), JsonValue::from(value)],
+            primary_key: vec![JsonValue::from("token")],
+            xmin: None,
+            deleted: false,
+        };
+        let saved = session
+            .apply_mutations(&MutationBatch {
+                profile_id: session.profile().id,
+                database: session.profile().default_database.clone(),
+                schema: "string".into(),
+                table: "token".into(),
+                mutations: vec![edit("new")],
+            })
+            .await
+            .expect("edit string");
+        assert_eq!((saved.applied, saved.conflicts.len()), (1, 0));
+        let value = session.run_query("GET token", None).await.expect("get");
+        assert_eq!(value.rows[0][0], JsonValue::from("new"));
+        let ttl = session.run_query("TTL token", None).await.expect("ttl");
+        let ttl = ttl.rows[0][0].as_i64().expect("ttl seconds");
+        assert!(ttl > 3500, "the expiry survives the edit, got {ttl}");
     }
 
     #[tokio::test]

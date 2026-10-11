@@ -86,7 +86,8 @@ What the app does today, what is deliberately not built yet, and what it stores 
   never overwrites stored data; keys, list elements, and hash fields that only
   have such a value can still be deleted. Key-index TTL edits take seconds:
   blank or negative removes the expiry, and 0 is rejected instead of deleting
-  the key. Read-only profile
+  the key. Editing a string value keeps its expiry on Redis 6.0 and later.
+  Read-only profile
   mode blocks GUI writes on every engine; PostgreSQL and MySQL sessions for
   read-only profiles are also marked read-only on the server, so writes the
   app cannot recognize are rejected too. Statements that would switch such a
