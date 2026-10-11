@@ -859,6 +859,7 @@ final class SnapshotDriver {
 
     func start() {
         checkHeaderCopying()
+        checkResultReplacement()
         let app = self.app
         let postgres = "00000000-0000-0000-0000-000000000001"
         let redis = "00000000-0000-0000-0000-000000000004"
@@ -914,6 +915,66 @@ final class SnapshotDriver {
             }),
         ]
         next(0)
+    }
+
+    /// Replacing a populated result with fewer rows must retire AppKit's
+    /// cached row views before adding columns for the next query.
+    private func checkResultReplacement() {
+        let grid = ResultGrid()
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1100, height: 300),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = grid.scroll
+        window.orderFront(nil)
+        defer { window.close() }
+
+        func check(headers: [String], values: [[String]]) {
+            grid.scroll.layoutSubtreeIfNeeded()
+            window.displayIfNeeded()
+            precondition(grid.table.numberOfRows == values.count)
+            precondition(grid.table.tableColumns.map(\.title) == headers)
+            for (row, expected) in values.enumerated() {
+                for (column, value) in expected.enumerated() {
+                    guard let cell = grid.table.view(atColumn: column, row: row, makeIfNecessary: true) as? GridCellView else {
+                        preconditionFailure("Result cell must exist after replacing query results")
+                    }
+                    precondition(cell.accessibilityValue() as? String == value, "Result cell must show the new query's value")
+                }
+            }
+        }
+
+        let initial: [[String: Any]] = [
+            ["name": "id", "dataType": "integer"], ["name": "name", "dataType": "text"],
+        ]
+        grid.show(columns: initial, rows: [[1, "one"], [2, "two"], [3, "three"], [4, "four"]])
+        check(headers: ["id", "name"], values: [["1", "one"], ["2", "two"], ["3", "three"], ["4", "four"]])
+        grid.table.selectRowIndexes(IndexSet(integer: 3), byExtendingSelection: false)
+
+        let assets: [[String: Any]] = [
+            ["name": "content_type", "dataType": "text"], ["name": "filename", "dataType": "text"],
+            ["name": "width", "dataType": "integer"], ["name": "height", "dataType": "integer"],
+            ["name": "duration_ms", "dataType": "integer"], ["name": "source_kbps", "dataType": "numeric"],
+            ["name": "stored_kbps", "dataType": "numeric"],
+        ]
+        let assetHeaders = ["content_type", "filename", "width", "height", "duration_ms", "source_kbps", "stored_kbps"]
+        grid.show(columns: assets, rows: [["video/mp4", "fixture.mp4", 1920, 1080, 1250, 1600, 800]])
+        check(headers: assetHeaders, values: [["video/mp4", "fixture.mp4", "1920", "1080", "1250", "1600", "800"]])
+        precondition(grid.table.selectedRowIndexes.isEmpty, "Selection must not refer to rows from the previous result")
+        let column = grid.table.tableColumns[0]
+        for row in [-1, 1, 3] {
+            precondition(grid.tableView(grid.table, viewFor: column, row: row) == nil, "Stale row requests must be ignored")
+        }
+
+        grid.show(columns: assets, rows: [])
+        check(headers: assetHeaders, values: [])
+        precondition(grid.tableView(grid.table, viewFor: grid.table.tableColumns[0], row: 0) == nil)
+        grid.show(columns: initial, rows: [[9, NSNull()], [10, "ten"]])
+        check(headers: ["id", "name"], values: [["9", "NULL"], ["10", "ten"]])
+        grid.show(columns: [], rows: [])
+        check(headers: [], values: [])
+        grid.show(columns: initial, rows: [[11, "eleven"]])
+        check(headers: ["id", "name"], values: [["11", "eleven"]])
+        print("Query result replacement regression checks passed")
     }
 
     /// Check the real hit target and pane layout for both result presentations.

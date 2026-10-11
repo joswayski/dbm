@@ -513,7 +513,10 @@ final class ResultGrid: NSObject, NSTableViewDataSource, NSTableViewDelegate {
     }
 
     func show(columns: [[String: Any]], rows: [[Any]]) {
-        self.rows = rows
+        // AppKit can request cells for cached rows while columns change.
+        // Retire the previous row views before rebuilding the result schema.
+        self.rows = []
+        table.reloadData()
         table.tableColumns.forEach(table.removeTableColumn)
         numeric = columns.map { Column(raw: $0).numeric }
         columnNames = columns.map { Column(raw: $0).name }
@@ -522,6 +525,7 @@ final class ResultGrid: NSObject, NSTableViewDataSource, NSTableViewDelegate {
             table.addGridColumn(id: String(index), title: model.name, dataType: "", primaryKey: false,
                                 width: defaultColumnWidth(model), rightAligned: numeric[index])
         }
+        self.rows = rows
         table.reloadData()
         // After layout, spread spare width across the columns, like the
         // desktop's auto-width result table.
@@ -541,7 +545,8 @@ final class ResultGrid: NSObject, NSTableViewDataSource, NSTableViewDelegate {
     func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? { GridRowView() }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        guard let tableColumn, let index = Int(tableColumn.identifier.rawValue) else { return nil }
+        guard rows.indices.contains(row), let tableColumn,
+              let index = Int(tableColumn.identifier.rawValue) else { return nil }
         let cell = (tableView.makeView(withIdentifier: .init("result-cell"), owner: nil) as? GridCellView) ?? {
             let view = GridCellView()
             view.identifier = .init("result-cell")
