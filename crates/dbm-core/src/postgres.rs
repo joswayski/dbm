@@ -12,6 +12,7 @@ use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
 use futures_util::TryStreamExt;
 use serde_json::Value;
 use tokio_postgres::config::SslMode;
+use tokio_postgres::error::SqlState;
 use tokio_postgres::types::{FromSql, Type};
 use tokio_postgres::{Client, Config, NoTls, Row, SimpleQueryMessage};
 
@@ -418,14 +419,14 @@ impl PgSession {
             ));
         }
         let table_name = qualified_name(&batch.schema, &batch.table)?;
-        // Validate the whole batch before BEGIN: an invalid later key must not
+        // Validate the whole batch before writing: an invalid later key must not
         // leave earlier edits pending in this persistent workbench connection.
         let predicates = batch
             .mutations
             .iter()
             .map(|mutation| mutation_predicate(&metadata, mutation))
             .collect::<AppResult<Vec<_>>>()?;
-        self.client.batch_execute("BEGIN").await?;
+        let scope = self.begin_grid_write().await?;
         let mut applied = 0;
         let mut conflicts = Vec::new();
         for (mutation, predicate) in batch.mutations.iter().zip(predicates) {
@@ -463,7 +464,7 @@ impl PgSession {
             let changed = match self.client.execute(&statement, &[]).await {
                 Ok(changed) => changed,
                 Err(error) => {
-                    let _ = self.client.batch_execute("ROLLBACK").await;
+                    let _ = self.client.batch_execute(scope.rollback()).await;
                     return Err(error.into());
                 }
             };
@@ -473,11 +474,56 @@ impl PgSession {
                 applied += 1;
             }
         }
-        if let Err(error) = self.client.batch_execute("COMMIT").await {
-            let _ = self.client.batch_execute("ROLLBACK").await;
+        if let Err(error) = self.client.batch_execute(scope.commit()).await {
+            let _ = self.client.batch_execute(scope.rollback()).await;
             return Err(error.into());
         }
         Ok(MutationResult { applied, conflicts })
+    }
+
+    /// Grid writes share the SQL workbench connection, where the user may have
+    /// an open transaction. BEGIN/COMMIT there would commit (or roll back) the
+    /// user's own work, so inside a transaction the batch runs in a savepoint
+    /// and becomes permanent when the user's transaction commits. SAVEPOINT
+    /// fails with 25P01 outside a transaction block, which is how an open
+    /// transaction is detected without a second connection.
+    async fn begin_grid_write(&self) -> AppResult<GridWriteScope> {
+        match self.client.batch_execute("SAVEPOINT dbm_grid_write").await {
+            Ok(()) => Ok(GridWriteScope::Savepoint),
+            Err(error) if error.code() == Some(&SqlState::NO_ACTIVE_SQL_TRANSACTION) => {
+                self.client.batch_execute("BEGIN").await?;
+                Ok(GridWriteScope::Transaction)
+            }
+            // For example 25P02: the user's transaction already failed.
+            Err(error) => Err(error.into()),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GridWriteScope {
+    /// No transaction was open; the batch has its own.
+    Transaction,
+    /// The batch is nested in the user's open workbench transaction.
+    Savepoint,
+}
+
+impl GridWriteScope {
+    fn commit(self) -> &'static str {
+        match self {
+            Self::Transaction => "COMMIT",
+            Self::Savepoint => "RELEASE SAVEPOINT dbm_grid_write",
+        }
+    }
+
+    fn rollback(self) -> &'static str {
+        match self {
+            Self::Transaction => "ROLLBACK",
+            // Undo only the batch and leave the user's transaction usable.
+            Self::Savepoint => {
+                "ROLLBACK TO SAVEPOINT dbm_grid_write; RELEASE SAVEPOINT dbm_grid_write"
+            }
+        }
     }
 }
 
@@ -1236,6 +1282,94 @@ mod tests {
                 }),
                 include_total: Some(true),
             }
+        }
+
+        #[tokio::test]
+        async fn grid_writes_do_not_end_an_open_workbench_transaction() {
+            let Some(profile) = profile(false) else {
+                return;
+            };
+            let session = PgSession::connect(profile, None).await.expect("connect");
+            let table = format!("dbm_test_{}", Uuid::new_v4().simple());
+            session
+                .client
+                .batch_execute(&format!(
+                    "CREATE TABLE public.{table} (id int PRIMARY KEY, label text);
+                     INSERT INTO public.{table} VALUES (1, 'original'), (2, 'other')"
+                ))
+                .await
+                .expect("fixture");
+            let edit = |id: i32, label: &str| MutationBatch {
+                profile_id: Uuid::nil(),
+                database: session.profile().default_database.clone(),
+                schema: "public".into(),
+                table: table.clone(),
+                mutations: vec![RowMutation {
+                    original: vec![Value::from(id), Value::Null],
+                    changes: vec![Value::from(id), Value::from(label)],
+                    primary_key: vec![Value::from(id)],
+                    xmin: None,
+                    deleted: false,
+                }],
+            };
+            let labels = || async {
+                session
+                    .client
+                    .query(
+                        &format!("SELECT label FROM public.{table} ORDER BY id"),
+                        &[],
+                    )
+                    .await
+                    .expect("labels")
+                    .iter()
+                    .map(|row| row.get::<_, String>(0))
+                    .collect::<Vec<_>>()
+            };
+
+            session.run_query("BEGIN", None).await.expect("begin");
+            session
+                .run_query(
+                    &format!("UPDATE public.{table} SET label = 'workbench' WHERE id = 2"),
+                    None,
+                )
+                .await
+                .expect("workbench update");
+            let result = session
+                .apply_mutations(&edit(1, "grid"))
+                .await
+                .expect("grid edit inside the open transaction");
+            assert_eq!(result.applied, 1);
+            // A failing grid write rolls back only its own savepoint.
+            let mut failing = edit(1, "never");
+            failing.mutations[0].changes[1] = Value::from("x".repeat(10));
+            session
+                .client
+                .batch_execute(&format!(
+                    "ALTER TABLE public.{table} ADD CONSTRAINT short CHECK (length(label) < 10)"
+                ))
+                .await
+                .expect("constraint");
+            session
+                .apply_mutations(&failing)
+                .await
+                .expect_err("check constraint");
+            assert_eq!(labels().await, vec!["grid", "workbench"]);
+            // The user's transaction is still open and decides the outcome.
+            session.run_query("ROLLBACK", None).await.expect("rollback");
+            assert_eq!(labels().await, vec!["original", "other"]);
+
+            // Without an open transaction the grid commits on its own.
+            session
+                .apply_mutations(&edit(1, "saved"))
+                .await
+                .expect("grid edit");
+            session.run_query("ROLLBACK", None).await.expect("no-op");
+            assert_eq!(labels().await, vec!["saved", "other"]);
+            session
+                .client
+                .batch_execute(&format!("DROP TABLE public.{table}"))
+                .await
+                .expect("cleanup");
         }
 
         #[tokio::test]
