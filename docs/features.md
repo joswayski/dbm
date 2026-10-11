@@ -14,7 +14,10 @@ What the app does today, what is deliberately not built yet, and what it stores 
   a SQL or Redis workbench tab when Anybase launches, without running workbench queries.
   It defaults to on for new and existing desktop profiles and can be turned off
   per connection. Startup connection errors use the normal error banner; other
-  profiles still open. Mobile clients continue to connect manually.
+  profiles still open. Connection errors identify the saved profile and host;
+  an address-lookup error means the hostname could not be resolved. Check the
+  saved host and any required private network or VPN, then reconnect. Mobile
+  clients continue to connect manually.
 - Passwords through the macOS Keychain, Windows Credential Manager, or Linux
   secret service via `keyring`.
 - The connection editor displays the current URL with its password masked.
@@ -53,6 +56,12 @@ What the app does today, what is deliberately not built yet, and what it stores 
   other sort orders still load the complete list before paging.
 - Resizable sidebars and columns, collapsible wide fields, and multi-row
   selection for staged edits and deletes.
+- A small copy button appears only on the hovered, expanded table or
+  query-result cell and copies its full value, including text truncated in
+  the grid and staged edits. Strings
+  retain line breaks, structured values copy as JSON, and null values as `NULL`.
+  Copying a cell does not select or edit its row; the existing CSV actions still
+  copy rows with column headers.
 - A row inspector next to table grids that shows every field of the selected
   row and can stage edits or a delete for it, plus a pending-changes bar with
   Discard and Save.

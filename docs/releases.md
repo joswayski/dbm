@@ -107,13 +107,18 @@ then downloads the platform's artifact, verifies its minisign signature
 against the public key in `crates/dbm-update`, swaps it in, and restarts.
 
 - **macOS:** the new bundle must also pass `codesign --verify`, and is swapped
-  in after Anybase quits. The app must sit in a folder the user can write to, such
-  as `/Applications`.
+  in after Anybase quits. The restart launches a fresh instance and activates
+  its main window; clicking the Dock icon also restores and activates the
+  window. The app must sit in a folder the user can write to, such as
+  `/Applications`.
 - **Windows:** the running executable is renamed aside and removed on the next
-  launch.
+  launch. The restarted app restores its window and requests foreground focus
+  once, without taking focus again on later frames.
 - **Linux:** the running executable is replaced; a copy running from an
   AppImage replaces the AppImage at `$APPIMAGE` instead, through the
-  `linux-x86_64-appimage` manifest entry.
+  `linux-x86_64-appimage` manifest entry. The restarted app restores its window
+  and requests foreground focus once; Wayland compositors control focus and
+  may ignore that request.
 
 `native-latest.json` lists the build number, version text, notes, and each
 platform's URL and signature. `darwin-aarch64` and `darwin-x86_64` both point

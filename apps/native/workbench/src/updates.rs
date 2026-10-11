@@ -213,7 +213,12 @@ fn replace_and_restart(download: &Path) -> Result<(), String> {
         std::fs::rename(&staged, &current).map_err(failed)?;
     }
     std::process::Command::new(&current)
-        .args(std::env::args_os().skip(1))
+        .args(
+            std::env::args_os()
+                .skip(1)
+                .filter(|arg| arg != "--after-update"),
+        )
+        .arg("--after-update")
         .spawn()
         .map_err(failed)?;
     std::process::exit(0);

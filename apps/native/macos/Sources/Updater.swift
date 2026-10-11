@@ -126,7 +126,7 @@ final class Updater {
         if mv "$DBM_CURRENT" "$DBM_OLD"; then
           if mv "$DBM_NEW" "$DBM_CURRENT"; then rm -rf "$DBM_OLD"; else mv "$DBM_OLD" "$DBM_CURRENT"; fi
         fi
-        open "$DBM_CURRENT"
+        /usr/bin/open -n "$DBM_CURRENT"
         """
         let swap = Process()
         swap.executableURL = URL(fileURLWithPath: "/bin/sh")

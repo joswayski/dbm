@@ -109,7 +109,7 @@ final class TreeRow: RowControl {
         }
         var x = 8 + CGFloat(depth) * 14
         if !node.isLeaf {
-            (open ? Icon.chevronDown : Icon.chevronRight).draw(in: NSRect(x: x, y: 7.5, width: 11, height: 11), color: Graphite.faint)
+            (open ? Icon.chevronDown : Icon.chevronRight).draw(in: NSRect(x: x, y: bounds.midY - 5.5, width: 11, height: 11), color: Graphite.faint)
         }
         x += 14
         let icon: Icon = !node.isLeaf ? .folder : node.kind == "key" ? .key : node.kind == "view" ? .view : .table
@@ -117,14 +117,17 @@ final class TreeRow: RowControl {
         // the connection colour mixed 55% with white.
         let iconColor = selected ? (color.blended(withFraction: 0.45, of: .white) ?? color)
             : node.kind == "schema" ? Graphite.muted : Graphite.faint
-        icon.draw(in: NSRect(x: x, y: 6.5, width: 13, height: 13), color: iconColor)
+        icon.draw(in: NSRect(x: x, y: bounds.midY - 6.5, width: 13, height: 13), color: iconColor)
         x += 20
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineBreakMode = .byTruncatingTail
-        NSAttributedString(string: node.name, attributes: [
+        let text = NSAttributedString(string: node.name, attributes: [
             .font: Graphite.ui(12.5, selected ? .medium : .regular),
             .foregroundColor: selected ? NSColor.white : hovering ? Graphite.text : Graphite.secondary, .paragraphStyle: paragraph,
-        ]).draw(with: NSRect(x: x, y: 5, width: bounds.width - x - 6, height: 17), options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
+        ])
+        let height = text.size().height
+        text.draw(with: NSRect(x: x, y: bounds.midY - height / 2, width: bounds.width - x - 6, height: height),
+                  options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
     }
 }
 

@@ -22,11 +22,17 @@ pub enum AppError {
 
 impl AppError {
     pub fn database(error: &(dyn StdError + 'static)) -> Self {
-        let mut messages = Vec::new();
+        let mut messages: Vec<String> = Vec::new();
         let mut current = Some(error);
         while let Some(source) = current {
             let message = source.to_string();
-            if !message.is_empty() && messages.last() != Some(&message) {
+            // Some drivers include their entire source in Display already.
+            // Keep distinct context, but do not append the same cause again.
+            if !message.is_empty()
+                && !messages.iter().any(|existing| {
+                    existing == &message || existing.ends_with(&format!(": {message}"))
+                })
+            {
                 messages.push(message);
             }
             current = source.source();
@@ -108,6 +114,27 @@ pub type AppResult<T> = Result<T, AppError>;
 #[cfg(test)]
 mod tests {
     use super::AppError;
+
+    #[test]
+    fn database_errors_do_not_repeat_causes_already_in_the_message() {
+        let cause =
+            "failed to lookup address information: nodename nor servname provided, or not known";
+        let error = mysql_async::Error::from(std::io::Error::other(cause));
+        assert_eq!(
+            AppError::from(error).to_string(),
+            format!("database error: Input/output error: Input/output error: {cause}")
+        );
+
+        #[derive(Debug, thiserror::Error)]
+        #[error("error connecting to server")]
+        struct ConnectError(#[source] std::io::Error);
+
+        let error = ConnectError(std::io::Error::other("connection refused"));
+        assert_eq!(
+            AppError::database(&error).to_string(),
+            "database error: error connecting to server: connection refused"
+        );
+    }
 
     #[test]
     fn identifies_lost_database_connections() {
