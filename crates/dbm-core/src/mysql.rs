@@ -400,22 +400,70 @@ async fn connect_pool(profile: &ConnectionProfile, password: Option<&str>) -> Ap
     let pool = Pool::new(base_opts(profile, password, ssl_opts.clone()));
     match probe_pool(&pool).await {
         Ok(()) => Ok(pool),
-        Err(_error) if matches!(profile.tls_mode, TlsMode::Preferred) => {
+        Err(tls_error)
+            if matches!(profile.tls_mode, TlsMode::Preferred)
+                && plaintext_fallback_may_help(&tls_error) =>
+        {
             let _ = pool.disconnect().await;
             let fallback = Pool::new(base_opts(profile, password, None));
-            probe_pool(&fallback).await?;
-            Ok(fallback)
+            match probe_pool(&fallback).await {
+                Ok(()) => Ok(fallback),
+                Err(plain_error) => {
+                    let _ = fallback.disconnect().await;
+                    // A server answer (bad password, unknown database)
+                    // explains the failure on its own.
+                    Err(if matches!(plain_error, mysql_async::Error::Server(_)) {
+                        plain_error.into()
+                    } else {
+                        AppError::Database(format!(
+                            "{}; plaintext fallback also failed: {}",
+                            database_message(tls_error),
+                            database_message(plain_error)
+                        ))
+                    })
+                }
+            }
         }
         Err(error) => {
             let _ = pool.disconnect().await;
-            Err(error)
+            Err(error.into())
         }
     }
 }
 
-async fn probe_pool(pool: &Pool) -> AppResult<()> {
+async fn probe_pool(pool: &Pool) -> Result<(), mysql_async::Error> {
     let _conn = pool.get_conn().await?;
     Ok(())
+}
+
+fn database_message(error: mysql_async::Error) -> String {
+    match AppError::from(error) {
+        AppError::Database(message) => message,
+        other => other.to_string(),
+    }
+}
+
+/// Whether a failed TLS attempt for a Preferred profile is worth retrying
+/// without TLS. Server answers such as authentication failures would only fail
+/// again, and an unreachable or refusing host would double the wait. TLS
+/// failures, a server without TLS support, and servers that drop the
+/// connection during TLS negotiation may still accept plaintext.
+fn plaintext_fallback_may_help(error: &mysql_async::Error) -> bool {
+    match error {
+        mysql_async::Error::Io(mysql_async::IoError::Tls(_)) => true,
+        mysql_async::Error::Io(mysql_async::IoError::Io(error)) => matches!(
+            error.kind(),
+            std::io::ErrorKind::UnexpectedEof
+                | std::io::ErrorKind::ConnectionReset
+                | std::io::ErrorKind::ConnectionAborted
+                | std::io::ErrorKind::BrokenPipe
+        ),
+        mysql_async::Error::Driver(
+            mysql_async::DriverError::NoClientSslFlagFromServer
+            | mysql_async::DriverError::ConnectionClosed,
+        ) => true,
+        _ => false,
+    }
 }
 
 fn base_opts(
@@ -946,6 +994,29 @@ mod tests {
         .expect("predicate");
         assert_eq!(predicate, " WHERE `path` IN (?, ?)");
         assert_eq!(params, vec![Value::from("C:\\temp\\"), Value::from("it's")]);
+    }
+
+    #[test]
+    fn preferred_tls_falls_back_only_when_plaintext_may_help() {
+        use mysql_async::{DriverError, Error, IoError, ServerError};
+        use std::io::{Error as StdIoError, ErrorKind};
+        assert!(plaintext_fallback_may_help(&Error::Driver(
+            DriverError::NoClientSslFlagFromServer
+        )));
+        assert!(plaintext_fallback_may_help(&Error::Io(IoError::Io(
+            StdIoError::from(ErrorKind::ConnectionReset)
+        ))));
+        assert!(!plaintext_fallback_may_help(&Error::Io(IoError::Io(
+            StdIoError::from(ErrorKind::ConnectionRefused)
+        ))));
+        assert!(!plaintext_fallback_may_help(&Error::Io(IoError::Io(
+            StdIoError::from(ErrorKind::TimedOut)
+        ))));
+        assert!(!plaintext_fallback_may_help(&Error::Server(ServerError {
+            code: 1045,
+            message: "Access denied for user 'root'@'localhost'".into(),
+            state: "28000".into(),
+        })));
     }
 
     #[test]
