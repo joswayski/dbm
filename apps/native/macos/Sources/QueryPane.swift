@@ -312,6 +312,14 @@ final class HistoryRow: NSView {
         return formatter
     }()
 
+    // Shared: formatters are costly to create, and rows redraw often.
+    private static let executedAtFractional: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+    private static let executedAtPlain = ISO8601DateFormatter()
+
     override func draw(_ dirtyRect: NSRect) {
         if hovering { Graphite.hoverWash.setFill(); NSBezierPath(roundedRect: bounds, xRadius: 6, yRadius: 6).fill() }
         let success = bool(entry["success"])
@@ -323,10 +331,8 @@ final class HistoryRow: NSView {
         (sql as NSString).draw(with: NSRect(x: 34, y: 9, width: bounds.width - 44, height: 16),
                                options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine],
                                attributes: [.font: Graphite.mono(12), .foregroundColor: hovering ? Graphite.text : Graphite.secondary, .paragraphStyle: paragraph])
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         let raw = string(entry["executedAt"])
-        let date = formatter.date(from: raw) ?? ISO8601DateFormatter().date(from: raw)
+        let date = HistoryRow.executedAtFractional.date(from: raw) ?? HistoryRow.executedAtPlain.date(from: raw)
         let time = date.map { HistoryRow.timeFormat.string(from: $0) } ?? ""
         (time as NSString).draw(at: NSPoint(x: 34, y: 29), withAttributes: [.font: Graphite.ui(11), .foregroundColor: Graphite.faint])
     }
