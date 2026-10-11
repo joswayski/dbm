@@ -971,16 +971,25 @@ final class SnapshotDriver {
     }
 
     private func checkQueryCopy() {
+        func fail(_ message: String) -> Never {
+            FileHandle.standardError.write(Data("Query copy check failed: \(message)\n".utf8))
+            preconditionFailure(message)
+        }
+        func check(_ condition: Bool, _ message: String) {
+            if !condition { fail(message) }
+        }
         let columns = ["customer,name", "note", "active"]
         let rows: [[Any]] = [["José", "a\"b\nnext", true], ["Z", NSNull(), false]]
-        precondition(Helpers.csv(columns: columns, rows: rows) == "\"customer,name\",note,active\nJosé,\"a\"\"b\nnext\",true\nZ,NULL,false")
-        precondition(Helpers.csv(columns: ["value"], rows: [["line\nnext"], ["line\rnext"], ["line\r\nnext"]])
-                     == "value\n\"line\nnext\"\n\"line\rnext\"\n\"line\r\nnext\"")
+        check(Helpers.csv(columns: columns, rows: rows) == "\"customer,name\",note,active\nJosé,\"a\"\"b\nnext\",true\nZ,NULL,false",
+              "CSV must preserve headers, Unicode, quotes, newlines, booleans, and NULL")
+        check(Helpers.csv(columns: ["value"], rows: [["line\nnext"], ["line\rnext"], ["line\r\nnext"]])
+                  == "value\n\"line\nnext\"\n\"line\rnext\"\n\"line\r\nnext\"",
+              "CSV must quote LF, CR, and CRLF fields")
         let largeRows: [[Any]] = Array(repeating: [String(repeating: "x", count: 200)], count: 10_000)
-        precondition(Helpers.csv(columns: ["value"], rows: largeRows).utf8.count == 2_010_005,
-                     "CSV copy must not silently lose results larger than the bridge request limit")
-        guard let pane = app.activeQueryPane, let result = app.activeTab?.result else {
-            preconditionFailure("Query copy fixture needs a result")
+        check(Helpers.csv(columns: ["value"], rows: largeRows).utf8.count == 2_010_005,
+              "CSV copy must not silently lose results larger than the bridge request limit")
+        guard let pane = app.activeQueryPane, app.activeTab?.result != nil else {
+            fail("Query copy fixture needs a result")
         }
         func buttons(_ view: NSView) -> [GButton] {
             (view as? GButton).map { [$0] } ?? view.subviews.flatMap(buttons)
@@ -988,13 +997,30 @@ final class SnapshotDriver {
         let actions = buttons(pane)
         guard let copy = actions.first(where: { $0.title == "Copy results" }),
               let export = actions.first(where: { $0.title == "Save CSV" }) else {
-            preconditionFailure("Manual query results must offer copy and export")
+            fail("Manual query results must offer copy and export")
         }
-        precondition(copy.isEnabled && export.isEnabled)
+        check(copy.isEnabled && export.isEnabled, "Loaded query results must enable copy and export")
+        FileHandle.standardError.write(Data("Query copy check: clicking Copy results\n".utf8))
         copy.performClick(nil)
-        let names = array(result["columns"]).map { string($0["name"]) }
-        let expected = try! Bridge.helper(["command": "csv", "columns": names, "rows": result["rows"] ?? []]).get()
-        precondition(NSPasteboard.general.string(forType: .string) == string(expected))
+        // Specify the demo's loaded result independently. Re-serializing its
+        // numbers through Foundation and the bridge is not part of copying.
+        let expected = """
+        full_name,plan,seats,invoices,paid_total,last_paid
+        Maya Okafor,pro,7,14,18420.5,2026-09-24
+        Liam Brennan,team,4,13,17169.85,2026-09-23
+        Priya Raman,pro,9,12,15919.2,2026-09-22
+        Tomás Vidal,free,1,11,14930.75,2026-09-21
+        Ada Nguyen,pro,11,10,13680.1,2026-09-20
+        Jonah Holloway,team,3,9,12429.45,2026-09-19
+        Sofia Marchetti,pro,13,8,11441,2026-09-18
+        Elena Vasquez,enterprise,48,7,10190.35,2026-09-17
+        Rahim Chowdhury,pro,7,6,8939.7,2026-09-16
+        Hana Kim,free,1,5,7951.25,2026-09-15
+        Marco Bellini,team,4,4,6700.6,2026-09-14
+        Grace Liu,pro,10,3,5449.95,2026-09-13
+        """
+        check(NSPasteboard.general.string(forType: .string) == expected,
+              "Clipboard must contain all 12 demo result rows and headers with unchanged values")
         print("Query result copy checks passed, including CSV larger than 1 MiB")
     }
 
@@ -1136,8 +1162,10 @@ final class SnapshotDriver {
     private func next(_ index: Int) {
         guard index < steps.count else { exit(0) }
         let (name, action) = steps[index]
+        FileHandle.standardError.write(Data("Snapshot \(name): preparing\n".utf8))
         action()
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [self] in
+            FileHandle.standardError.write(Data("Snapshot \(name): capturing\n".utf8))
             capture(name)
             next(index + 1)
         }
