@@ -36,7 +36,7 @@ pub fn parse_cell_input(text: &str, column: &TableColumn, original: &Value) -> V
     }
     let trimmed = text.trim();
     let normalized = trimmed.to_lowercase();
-    let data_type = column.data_type.to_lowercase();
+    let data_type = column.data_type.trim().to_ascii_lowercase();
     if data_type.starts_with("bool") {
         if TRUE_TEXT.contains(&normalized.as_str()) {
             return Value::Bool(true);
@@ -46,13 +46,13 @@ pub fn parse_cell_input(text: &str, column: &TableColumn, original: &Value) -> V
         }
         return Value::String(text.into());
     }
-    let numeric = [
-        "int", "serial", "numeric", "decimal", "real", "double", "float", "number",
-    ]
-    .iter()
-    .any(|name| data_type.contains(name));
+    // Arrays such as `integer[]` and `money` (whose text carries currency
+    // formatting) keep their text like any other non-numeric column.
+    let numeric =
+        numeric_column(&data_type) && !data_type.contains('[') && !data_type.starts_with("money");
     if numeric {
-        if normalized == "true" || normalized == "false" {
+        // MySQL reports BOOLEAN columns as tinyint(1), so they accept true/false.
+        if data_type == "tinyint(1)" && (normalized == "true" || normalized == "false") {
             return Value::Bool(normalized == "true");
         }
         if let Ok(integer) = trimmed.parse::<i64>() {
@@ -163,6 +163,56 @@ mod tests {
             parse_cell_input("007", &column("text", false), &json!("7")),
             json!("007")
         );
+    }
+
+    #[test]
+    fn only_numeric_column_types_parse_numbers() {
+        for data_type in [
+            "interval",
+            "point",
+            "int4range",
+            "enum('printer','scanner')",
+            "set('print','scan')",
+            "integer[]",
+            "character varying(5)",
+        ] {
+            assert_eq!(
+                parse_cell_input("5", &column(data_type, false), &json!("1")),
+                json!("5"),
+                "{data_type}"
+            );
+        }
+        for data_type in [
+            "int(11) unsigned",
+            "bigint",
+            "int8",
+            "smallint",
+            "mediumint",
+        ] {
+            assert_eq!(
+                parse_cell_input("5", &column(data_type, false), &json!(1)),
+                json!(5),
+                "{data_type}"
+            );
+        }
+    }
+
+    #[test]
+    fn only_boolean_columns_parse_booleans() {
+        for data_type in ["integer", "bigint", "numeric(10,2)", "text"] {
+            assert_eq!(
+                parse_cell_input("true", &column(data_type, false), &json!(1)),
+                json!("true"),
+                "{data_type}"
+            );
+        }
+        // MySQL reports BOOLEAN columns as tinyint(1).
+        let mysql_bool = column("tinyint(1)", false);
+        assert_eq!(
+            parse_cell_input("true", &mysql_bool, &json!(0)),
+            json!(true)
+        );
+        assert_eq!(parse_cell_input("1", &mysql_bool, &json!(0)), json!(1));
     }
 
     #[test]
