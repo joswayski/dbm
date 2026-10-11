@@ -1,4 +1,5 @@
 use std::cmp::Ordering;
+use std::collections::BTreeSet;
 use std::time::Instant;
 
 use redis_rs::aio::MultiplexedConnection;
@@ -17,6 +18,10 @@ use crate::models::{
 const MAX_PAGE_SIZE: u32 = 1_000;
 const DEFAULT_QUERY_ROWS: u32 = 10_000;
 const TREE_KEYS_PER_TYPE: usize = 250;
+/// SCAN COUNT hint: fewer round trips than the server default of 10.
+const SCAN_COUNT: usize = 1_000;
+/// Keys per TYPE/TTL pipeline, so huge keyspaces are not sent in one request.
+const PIPELINE_KEYS: usize = 1_000;
 const MAX_VALUE_BYTES: usize = 256 * 1024;
 const KEY_TYPES: [&str; 6] = ["string", "hash", "list", "set", "zset", "stream"];
 
@@ -81,9 +86,8 @@ impl RedisSession {
                 children: Vec::new(),
             }],
         }];
-        for key_type in KEY_TYPES {
-            let mut keys = scan_keys(&mut conn, "*", Some(key_type), TREE_KEYS_PER_TYPE).await?;
-            keys.sort();
+        let folders = tree_keys(&mut conn).await?;
+        for (key_type, keys) in KEY_TYPES.into_iter().zip(folders) {
             if keys.is_empty() {
                 continue;
             }
@@ -264,68 +268,108 @@ async fn database_count(conn: &mut MultiplexedConnection) -> AppResult<i64> {
         .unwrap_or(16))
 }
 
+/// One SCAN pass that fills every sidebar folder with up to
+/// `TREE_KEYS_PER_TYPE` keys, sorted. It stops once every folder is full or
+/// the keyspace is exhausted, instead of scanning once per type.
+async fn tree_keys(
+    conn: &mut MultiplexedConnection,
+) -> AppResult<[BTreeSet<String>; KEY_TYPES.len()]> {
+    let mut folders: [BTreeSet<String>; KEY_TYPES.len()] = Default::default();
+    let mut cursor = 0;
+    loop {
+        let (next, keys) = scan_batch(conn, cursor, "*", None).await?;
+        cursor = next;
+        let types = key_types(conn, &keys).await?;
+        for (key, key_type) in keys.into_iter().zip(types) {
+            if let Some(folder) = KEY_TYPES
+                .iter()
+                .position(|known| *known == key_type)
+                .map(|index| &mut folders[index])
+                && folder.len() < TREE_KEYS_PER_TYPE
+            {
+                folder.insert(key);
+            }
+        }
+        if cursor == 0
+            || folders
+                .iter()
+                .all(|folder| folder.len() >= TREE_KEYS_PER_TYPE)
+        {
+            return Ok(folders);
+        }
+    }
+}
+
+/// Scans every key matching `pattern`. `key_type` is pushed down as
+/// `SCAN … TYPE` when the server supports it (Redis 6+); older servers return
+/// keys of every type, so callers must still filter rows by type.
 async fn scan_keys(
     conn: &mut MultiplexedConnection,
     pattern: &str,
-    type_filter: Option<&str>,
-    limit: usize,
+    mut key_type: Option<&str>,
 ) -> AppResult<Vec<String>> {
-    let mut cursor: u64 = 0;
+    let mut cursor = 0;
     let mut keys = Vec::new();
-    let mut use_type = type_filter.is_some();
     loop {
-        let mut cmd = redis_rs::cmd("SCAN");
-        cmd.arg(cursor)
-            .arg("MATCH")
-            .arg(pattern)
-            .arg("COUNT")
-            .arg(200);
-        if use_type && let Some(key_type) = type_filter {
-            cmd.arg("TYPE").arg(key_type);
-        }
-        match cmd.query_async::<(u64, Vec<Vec<u8>>)>(conn).await {
+        match scan_batch(conn, cursor, pattern, key_type).await {
             Ok((next, batch)) => {
                 cursor = next;
-                keys.extend(utf8_key_names(batch));
-                if keys.len() >= limit || cursor == 0 {
-                    keys.truncate(limit);
-                    break;
+                keys.extend(batch);
+                if cursor == 0 {
+                    return Ok(keys);
                 }
             }
-            Err(_) if use_type => {
-                use_type = false;
+            Err(error) if key_type.is_some() && is_scan_type_unsupported(&error) => {
+                key_type = None;
                 cursor = 0;
                 keys.clear();
             }
             Err(error) => return Err(error.into()),
         }
     }
-    if let Some(key_type) = type_filter.filter(|_| !use_type) {
-        keys = filter_keys_by_type(conn, keys, key_type).await?;
-        keys.truncate(limit);
-    }
-    Ok(keys)
 }
 
-async fn filter_keys_by_type(
+async fn scan_batch(
     conn: &mut MultiplexedConnection,
-    keys: Vec<String>,
-    key_type: &str,
-) -> AppResult<Vec<String>> {
-    if keys.is_empty() {
-        return Ok(keys);
+    cursor: u64,
+    pattern: &str,
+    key_type: Option<&str>,
+) -> redis_rs::RedisResult<(u64, Vec<String>)> {
+    let mut cmd = redis_rs::cmd("SCAN");
+    cmd.arg(cursor)
+        .arg("MATCH")
+        .arg(pattern)
+        .arg("COUNT")
+        .arg(SCAN_COUNT);
+    if let Some(key_type) = key_type {
+        cmd.arg("TYPE").arg(key_type);
     }
-    let mut pipe = redis_rs::pipe();
-    for key in &keys {
-        pipe.cmd("TYPE").arg(key);
+    let (next, keys) = cmd.query_async::<(u64, Vec<Vec<u8>>)>(conn).await?;
+    Ok((next, utf8_key_names(keys).collect()))
+}
+
+/// Redis before 6.0 rejects `SCAN … TYPE` as `ERR syntax error`; some newer
+/// servers reject unknown type names. Other failures, such as lost
+/// connections or ACL denials, are real errors.
+fn is_scan_type_unsupported(error: &redis_rs::RedisError) -> bool {
+    error.code() == Some("ERR")
+        && error.detail().is_some_and(|detail| {
+            let detail = detail.to_ascii_lowercase();
+            detail.contains("syntax") || detail.contains("type")
+        })
+}
+
+async fn key_types(conn: &mut MultiplexedConnection, keys: &[String]) -> AppResult<Vec<String>> {
+    let mut types = Vec::with_capacity(keys.len());
+    for chunk in keys.chunks(PIPELINE_KEYS) {
+        let mut pipe = redis_rs::pipe();
+        for key in chunk {
+            pipe.cmd("TYPE").arg(key);
+        }
+        let values: Vec<Value> = pipe.query_async(conn).await?;
+        types.extend(values.into_iter().map(value_as_string));
     }
-    let types: Vec<String> = pipe.query_async(conn).await?;
-    Ok(keys
-        .into_iter()
-        .zip(types)
-        .filter(|(_, found)| found == key_type)
-        .map(|(key, _)| key)
-        .collect())
+    Ok(types)
 }
 
 async fn keys_table_page(
@@ -338,7 +382,7 @@ async fn keys_table_page(
     let type_filter = type_filter(&request.filters);
     // Offset pagination needs the complete keyspace in a deterministic order.
     // SCAN can repeat keys, so deduplicate before counting or slicing.
-    let mut keys = scan_keys(conn, &pattern, type_filter.as_deref(), usize::MAX).await?;
+    let mut keys = scan_keys(conn, &pattern, type_filter.as_deref()).await?;
     keys.sort_unstable();
     keys.dedup();
     let offset = usize::try_from(request.offset).unwrap_or(0);
@@ -357,10 +401,10 @@ async fn keys_table_page(
         {
             keys.reverse();
         }
-        let keys = keys.into_iter().skip(offset).take(take).collect();
-        (key_index_rows(conn, keys).await?, total)
+        let keys: Vec<_> = keys.into_iter().skip(offset).take(take).collect();
+        (key_index_rows(conn, &keys).await?, total)
     } else {
-        let mut rows = key_index_rows(conn, keys).await?;
+        let mut rows = key_index_rows(conn, &keys).await?;
         rows.retain(|row| row_matches(&metadata, row, &request.filters));
         sort_rows(&metadata, &mut rows, request.order_by.as_ref())?;
         let total = rows.len();
@@ -384,37 +428,36 @@ async fn keys_table_page(
 
 async fn key_index_rows(
     conn: &mut MultiplexedConnection,
-    keys: Vec<String>,
+    keys: &[String],
 ) -> AppResult<Vec<Vec<JsonValue>>> {
-    if keys.is_empty() {
-        return Ok(Vec::new());
-    }
-    let mut pipe = redis_rs::pipe();
-    for key in &keys {
-        pipe.cmd("TYPE").arg(key);
-        pipe.cmd("TTL").arg(key);
-    }
-    let values: Vec<Value> = pipe.query_async(conn).await?;
     let mut rows = Vec::with_capacity(keys.len());
-    for (index, key) in keys.into_iter().enumerate() {
-        let key_type = values
-            .get(index * 2)
-            .cloned()
-            .map(value_as_string)
-            .unwrap_or_else(|| "none".into());
-        let ttl = values
-            .get(index * 2 + 1)
-            .cloned()
-            .and_then(value_as_i64)
-            .unwrap_or(-2);
-        if key_type == "none" {
-            continue;
+    for chunk in keys.chunks(PIPELINE_KEYS) {
+        let mut pipe = redis_rs::pipe();
+        for key in chunk {
+            pipe.cmd("TYPE").arg(key);
+            pipe.cmd("TTL").arg(key);
         }
-        rows.push(vec![
-            JsonValue::String(key),
-            JsonValue::String(key_type),
-            JsonValue::Number(ttl.into()),
-        ]);
+        let values: Vec<Value> = pipe.query_async(conn).await?;
+        for (index, key) in chunk.iter().enumerate() {
+            let key_type = values
+                .get(index * 2)
+                .cloned()
+                .map(value_as_string)
+                .unwrap_or_else(|| "none".into());
+            let ttl = values
+                .get(index * 2 + 1)
+                .cloned()
+                .and_then(value_as_i64)
+                .unwrap_or(-2);
+            if key_type == "none" {
+                continue;
+            }
+            rows.push(vec![
+                JsonValue::String(key.clone()),
+                JsonValue::String(key_type),
+                JsonValue::Number(ttl.into()),
+            ]);
+        }
     }
     Ok(rows)
 }
@@ -2557,6 +2600,104 @@ mod tests {
                 .await
                 .contains(&vec![JsonValue::from("\\xff"), JsonValue::from(1.0)])
         );
+    }
+
+    #[tokio::test]
+    async fn schema_tree_fills_every_folder_from_one_scan_pass() {
+        let Some((_server, session)) = start_test_redis().await else {
+            eprintln!("skipping live Redis test because redis-server is unavailable");
+            return;
+        };
+        {
+            let mut conn = session.conn().await;
+            let mut pipe = redis_rs::pipe();
+            for index in 0..600 {
+                pipe.cmd("SET").arg(format!("s:{index:03}")).arg(1).ignore();
+            }
+            for index in 0..300 {
+                pipe.cmd("RPUSH")
+                    .arg(format!("l:{index:03}"))
+                    .arg(1)
+                    .ignore();
+            }
+            for index in 0..3 {
+                pipe.cmd("HSET")
+                    .arg(format!("h:{index}"))
+                    .arg("f")
+                    .arg(1)
+                    .ignore();
+            }
+            pipe.cmd("CONFIG").arg("RESETSTAT").ignore();
+            pipe.query_async::<()>(&mut *conn).await.unwrap();
+        }
+        let tree = session.schema_tree().await.unwrap();
+        let folder = |schema: &str| {
+            tree.iter()
+                .find(|node| node.schema.as_deref() == Some(schema))
+                .map(|node| node.children.len())
+        };
+        assert_eq!(folder("string"), Some(TREE_KEYS_PER_TYPE));
+        assert_eq!(folder("list"), Some(TREE_KEYS_PER_TYPE));
+        assert_eq!(folder("hash"), Some(3));
+        assert_eq!(folder("set"), None);
+        let hashes = tree
+            .iter()
+            .find(|node| node.schema.as_deref() == Some("hash"))
+            .unwrap();
+        let names: Vec<_> = hashes
+            .children
+            .iter()
+            .map(|child| child.name.as_str())
+            .collect();
+        assert_eq!(names, ["h:0", "h:1", "h:2"]);
+
+        let stats = session.run_query("INFO commandstats", None).await.unwrap();
+        let stats = stats.rows[0][0].as_str().unwrap().to_owned();
+        let calls = |command: &str| {
+            stats
+                .lines()
+                .find_map(|line| line.strip_prefix(&format!("cmdstat_{command}:calls=")))
+                .and_then(|rest| rest.split(',').next()?.parse::<u32>().ok())
+                .unwrap_or(0)
+        };
+        // 903 keys fit in about one SCAN COUNT 1000 page; one scan per type
+        // used to need at least six.
+        assert!(calls("scan") <= 3, "{stats}");
+        assert!(calls("type") <= 1_000, "{stats}");
+    }
+
+    #[tokio::test]
+    async fn only_unsupported_scan_type_errors_fall_back() {
+        let Some((_server, session)) = start_test_redis().await else {
+            eprintln!("skipping live Redis test because redis-server is unavailable");
+            return;
+        };
+        let mut conn = session.conn().await;
+        // Redis 5 answers SCAN … TYPE with the same reply as this bad option.
+        let syntax = redis_rs::cmd("SCAN")
+            .arg(0)
+            .arg("BOGUS")
+            .arg(1)
+            .query_async::<Value>(&mut *conn)
+            .await
+            .unwrap_err();
+        assert!(is_scan_type_unsupported(&syntax), "{syntax:?}");
+        let wrong_type = redis_rs::cmd("SET")
+            .arg("list")
+            .arg(1)
+            .query_async::<Value>(&mut *conn)
+            .await
+            .and(
+                redis_rs::cmd("LPUSH")
+                    .arg("list")
+                    .arg(1)
+                    .query_async::<Value>(&mut *conn)
+                    .await,
+            )
+            .unwrap_err();
+        assert!(!is_scan_type_unsupported(&wrong_type), "{wrong_type:?}");
+        let io = redis_rs::RedisError::from(std::io::Error::other("connection reset"));
+        assert!(!is_scan_type_unsupported(&io));
     }
 
     #[tokio::test]
