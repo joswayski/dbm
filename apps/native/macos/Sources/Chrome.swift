@@ -264,7 +264,12 @@ final class SidebarView: PanelView {
                 trailing.append(GButton("", icon: expanded ? .chevronUp : .chevronDown, style: .icon,
                                         tooltip: expanded ? "Collapse connection" : "Expand connection") { [weak app] in app?.toggleExpanded(id) })
             }
-            if profile.readOnly { trailing.insert(Chip("Read-only", color: Graphite.muted), at: 0) }
+            if profile.readOnly {
+                let chip = Chip("Read-only", color: Graphite.muted)
+                trailing.insert(chip, at: 0)
+                // Keep the name and subtitle clear of the chip.
+                row.trailingInset += chip.intrinsicContentSize.width + 2
+            }
             trailing.append(more)
             let actions = hstack(trailing, spacing: 2)
             row.addSubview(actions)
@@ -438,7 +443,8 @@ final class ResizeHandle: NSView {
     override func draw(_ dirtyRect: NSRect) {
         guard hovering || dragging else { return }
         Graphite.accent.setFill()
-        NSRect(x: bounds.midX - 1, y: 0, width: 2, height: bounds.height).fill()
+        // Whole points, so the 5 pt grip's line isn't blurred across pixels.
+        NSRect(x: floor(bounds.midX) - 1, y: 0, width: 2, height: bounds.height).fill()
     }
 }
 
