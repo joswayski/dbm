@@ -367,7 +367,8 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
             perPage.stringValue = ""
             [previousButton, pageLabel, nextButton].forEach { $0.isHidden = true }
         }
-        limitField.stringValue = String(state.limit)
+        // Export progress reloads several times a second; keep typed text.
+        if limitField.currentEditor() == nil { limitField.stringValue = String(state.limit) }
     }
 
     private var editable: Bool {
