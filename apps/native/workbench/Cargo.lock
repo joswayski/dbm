@@ -950,6 +950,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
+ "tokio-native-tls",
  "tokio-postgres",
  "tracing",
  "url",
