@@ -484,18 +484,29 @@ impl PgSession {
     /// Grid writes share the SQL workbench connection, where the user may have
     /// an open transaction. BEGIN/COMMIT there would commit (or roll back) the
     /// user's own work, so inside a transaction the batch runs in a savepoint
-    /// and becomes permanent when the user's transaction commits. SAVEPOINT
-    /// fails with 25P01 outside a transaction block, which is how an open
-    /// transaction is detected without a second connection.
+    /// and becomes permanent when the user's transaction commits. A statement
+    /// outside a transaction block starts its own, so its timestamp equals the
+    /// transaction's; probing this way leaves no errors in the server log.
     async fn begin_grid_write(&self) -> AppResult<GridWriteScope> {
-        match self.client.batch_execute("SAVEPOINT dbm_grid_write").await {
-            Ok(()) => Ok(GridWriteScope::Savepoint),
-            Err(error) if error.code() == Some(&SqlState::NO_ACTIVE_SQL_TRANSACTION) => {
-                self.client.batch_execute("BEGIN").await?;
-                Ok(GridWriteScope::Transaction)
-            }
-            // For example 25P02: the user's transaction already failed.
-            Err(error) => Err(error.into()),
+        // A single simple-protocol message, so outside a block the statement
+        // and its implicit transaction start together. (Extended-protocol
+        // messages each restart the statement clock.) Fails with 25P02 if the
+        // user's transaction already failed.
+        let probe = self
+            .client
+            .simple_query("SELECT transaction_timestamp() <> statement_timestamp()")
+            .await?;
+        let in_transaction = probe.iter().any(|message| {
+            matches!(message, tokio_postgres::SimpleQueryMessage::Row(row) if row.get(0) == Some("t"))
+        });
+        if in_transaction {
+            self.client
+                .batch_execute("SAVEPOINT dbm_grid_write")
+                .await?;
+            Ok(GridWriteScope::Savepoint)
+        } else {
+            self.client.batch_execute("BEGIN").await?;
+            Ok(GridWriteScope::Transaction)
         }
     }
 }
