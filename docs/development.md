@@ -205,6 +205,10 @@ mkdir -p target/native/snapshots
 target/native/Anybase.app/Contents/MacOS/dbm --demo --snapshot-dir target/native/snapshots
 ```
 
+This macOS-only run also checks header copying, query pane resizing, and
+replacing query results with fewer rows, different columns, or an empty result.
+The result checks use synthetic data in an isolated grid, not a live database.
+
 The website serves 1600-pixel WebP copies. After replacing a README screenshot,
 regenerate them with ImageMagick:
 
