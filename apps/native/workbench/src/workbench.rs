@@ -330,6 +330,9 @@ struct Completion {
 /// The save dialog's answer for a tab's export: `None` when canceled.
 type ExportDestination = (u64, Option<std::path::PathBuf>);
 
+/// A tab's finished query-result save.
+type SavedResult = (u64, crate::backend::ResultExport);
+
 /// Bottom-right toast, as the desktop app uses for schema refresh summaries.
 struct Toast {
     message: Message,
@@ -374,8 +377,8 @@ pub struct Workbench {
     /// Query results being saved as CSV, by tab, and their outcomes.
     saving_results: HashSet<u64>,
     saved_results: (
-        std::sync::mpsc::Sender<(u64, crate::backend::ResultExport)>,
-        std::sync::mpsc::Receiver<(u64, crate::backend::ResultExport)>,
+        std::sync::mpsc::Sender<SavedResult>,
+        std::sync::mpsc::Receiver<SavedResult>,
     ),
     /// Self-updates from the native preview channel.
     updates: crate::updates::Updates,
