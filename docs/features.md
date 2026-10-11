@@ -5,7 +5,11 @@ What the app does today, what is deliberately not built yet, and what it stores 
 ## Released desktop apps
 
 - PostgreSQL, MySQL, and Redis direct connections with disabled, preferred, or
-  required TLS. Connection attempts give up after 20 seconds.
+  required TLS. Required verifies the server certificate (against the
+  profile's CA when one is set) and never continues in plaintext. Preferred
+  encrypts without verifying the certificate unless a CA is set, and PostgreSQL
+  and MySQL fall back to plaintext only when TLS itself fails, not after
+  errors such as a rejected password. Connection attempts give up after 20 seconds.
 - Local connection profiles and query history in an application SQLite database.
 - Each connection remembers the database last successfully selected in the
   sidebar, including Redis database indices. That selection becomes the saved
@@ -74,13 +78,20 @@ What the app does today, what is deliberately not built yet, and what it stores 
   sets in place, and can delete keys from the key index. Read-only profile
   mode blocks GUI writes on every engine; PostgreSQL and MySQL sessions for
   read-only profiles are also marked read-only on the server, so writes the
-  app cannot recognize are rejected too.
+  app cannot recognize are rejected too. Statements that would switch such a
+  session back to read-write (`BEGIN READ WRITE`, `SET ... READ WRITE`,
+  `SET transaction_read_only`, `RESET ALL`, `DISCARD ALL`) are refused.
+- PostgreSQL table edits share the SQL workbench connection. When a workbench
+  transaction is open, a save runs inside a savepoint and becomes permanent
+  only when that transaction commits; otherwise it commits on its own.
 - Table writes carry their target database and are rejected if the connection
   switched databases while the write was queued. Redis list batches apply
   higher indices first so staged deletes do not shift later edits onto other
   elements; this does not protect against concurrent edits by other clients.
 - PostgreSQL values of any type display, including `numeric`, `uuid`, enums,
   and arrays. Integers beyond ±2^53 are shown and edited as exact text.
+- MySQL binary values (`BINARY`, `VARBINARY`, `BLOB`) that are not plain text
+  are shown as `\x` hex, and hex entered that way is saved and filtered as bytes.
 - SQL tabs with syntax highlighting and keyword completion, query result
   grids, a 10,000-row safety cap, and per-profile history. Connecting a profile opens a query tab so you can run
   SQL immediately. Redis connections open a command workbench (`PING` by
