@@ -117,6 +117,12 @@ platform or egui fallback fonts.
 | NULL | `NULL` in `--faint` italic |
 | Primary key | key glyph in `--modified` in the header; read-only in the inspector |
 
+Expanded table and query-result cells reserve space at the right edge for a
+14 px overlapping-rectangles copy icon in a transparent 28 × 28 px button.
+Show it only while that cell is hovered; hide it when the pointer leaves,
+while editing, or when the column is collapsed. It uses `--secondary` and a
+button hover wash, with a "Copy value" tooltip and accessible name.
+
 ## Components
 
 - **Buttons:** primary (`--accent-strong`, white, 700), secondary (`--control`

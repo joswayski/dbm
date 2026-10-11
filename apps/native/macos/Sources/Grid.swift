@@ -297,21 +297,69 @@ final class GridRowView: NSTableRowView {
 }
 
 /// One grid cell, drawn directly for speed: value text, NULL styling,
-/// numeric alignment, staged-edit fill and dot, staged-delete strikethrough.
+/// numeric alignment, staged-edit fill and dot, staged-delete strikethrough,
+/// and a copy button for the full value.
 final class GridCellView: NSView {
     var value: Any = NSNull() { didSet { needsDisplay = true } }
     var rightAligned = false
     var modified = false
     var deleted = false
     /// A collapsed column shows a faint "…" instead of the value.
-    var collapsed = false { didSet { needsDisplay = true } }
+    var collapsed = false { didSet { copyButton.isHidden = collapsed || !hovering; needsDisplay = true } }
+    private var hovering = false
     /// While a header's collapse/expand control is hovered, other columns
     /// dim and the target column is washed, as `.column-action-*` does.
-    var columnAction = ColumnAction.none { didSet { if columnAction != oldValue { needsDisplay = true } } }
+    var columnAction = ColumnAction.none {
+        didSet {
+            if columnAction != oldValue {
+                copyButton.alphaValue = columnAction == .dimmed ? 0.38 : 1
+                needsDisplay = true
+            }
+        }
+    }
+
+    private lazy var copyButton = GButton(icon: .copy, style: .icon, tooltip: "Copy value") { [weak self] in
+        guard let self else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(displayValue(self.value), forType: .string)
+    }
 
     enum ColumnAction { case none, target, dimmed }
 
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        addSubview(copyButton)
+        copyButton.isHidden = true
+        NSLayoutConstraint.activate([
+            copyButton.widthAnchor.constraint(equalToConstant: 28),
+            copyButton.heightAnchor.constraint(equalToConstant: 28),
+            copyButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
+            copyButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
     override var isFlipped: Bool { true }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.filter { $0.owner === self }.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
+                                       owner: self, userInfo: nil))
+        hovering = window.map { visibleRect.contains(convert($0.mouseLocationOutsideOfEventStream, from: nil)) } ?? false
+        copyButton.isHidden = collapsed || !hovering
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        hovering = true
+        copyButton.isHidden = collapsed
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        hovering = false
+        copyButton.isHidden = true
+    }
 
     override func draw(_ dirtyRect: NSRect) {
         if columnAction == .target {
@@ -351,12 +399,13 @@ final class GridCellView: NSView {
         attributes[.paragraphStyle] = paragraph
         let string = NSAttributedString(string: text, attributes: attributes)
         let height = string.size().height
-        string.draw(with: NSRect(x: 10, y: (bounds.height - height) / 2, width: bounds.width - 20, height: height),
+        string.draw(with: NSRect(x: 10, y: (bounds.height - height) / 2, width: bounds.width - 46, height: height),
                     options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
     }
 
     override func accessibilityRole() -> NSAccessibility.Role? { .cell }
     override func accessibilityValue() -> Any? { displayValue(value) }
+    override func accessibilityChildren() -> [Any]? { copyButton.isHidden ? [] : [copyButton] }
     override func isAccessibilityElement() -> Bool { true }
 }
 
