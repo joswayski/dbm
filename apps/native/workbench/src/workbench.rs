@@ -13,7 +13,7 @@ use dbm_core::models::{
     WorkspaceInfo,
 };
 use dbm_core::sql_text::{
-    ExecutionKind, TokenKind, completions, describe_schema_refresh, execution_target,
+    ExecutionKind, TokenKind, completions, csv_document, describe_schema_refresh, execution_target,
     filter_schema_nodes, highlight, requires_confirmation, resolve_full_table_select,
     safe_file_name,
 };
@@ -336,7 +336,7 @@ pub struct Workbench {
     toast: Option<Toast>,
     /// App-level error strip under the top bar.
     banner: Option<Message>,
-    /// Inline errors under each query tab's editor.
+    /// Inline errors and result-action notices under each query tab's editor.
     query_errors: HashMap<u64, Message>,
     profile_form: Option<ProfileForm>,
     confirm_delete: Option<Uuid>,
@@ -534,6 +534,13 @@ impl Workbench {
                     self.table_error(tab, error);
                     return;
                 }
+                if meta.kind == RequestKind::Export
+                    && let Some(tab) = meta.tab
+                {
+                    self.query_errors
+                        .insert(tab, Message::error(error, self.now));
+                    return;
+                }
             }
             RequestKind::Query => {
                 self.queue_history(meta.tab);
@@ -712,12 +719,22 @@ impl Workbench {
             }
             Payload::Exported(Some((path, rows))) => {
                 if let Some(tab) = target {
-                    self.table_notice(tab, Message::exported(path, rows, self.now));
+                    let message = Message::exported(path, rows, self.now);
+                    if self.tables.contains_key(&tab) {
+                        self.table_notice(tab, message);
+                    } else {
+                        self.query_errors.insert(tab, message);
+                    }
                 }
             }
             Payload::Exported(None) => {
                 if let Some(tab) = target {
-                    self.table_notice(tab, Message::notice("Export canceled.", self.now));
+                    let message = Message::notice("Export canceled.", self.now);
+                    if self.tables.contains_key(&tab) {
+                        self.table_notice(tab, message);
+                    } else {
+                        self.query_errors.insert(tab, message);
+                    }
                 }
             }
         }
@@ -1112,7 +1129,10 @@ impl Workbench {
         };
         let profile = tab.profile_id;
         let sql = sql.trim().to_owned();
-        if sql.is_empty() || self.busy(RequestKind::Query, Some(tab_id)) {
+        if sql.is_empty()
+            || self.busy(RequestKind::Query, Some(tab_id))
+            || self.busy(RequestKind::Export, Some(tab_id))
+        {
             return;
         }
         if self.tab_dirty(tab_id) {
@@ -2339,6 +2359,7 @@ impl Workbench {
         let engine = self.engine(tab.profile_id);
         let redis = engine == DatabaseEngine::Redis;
         let running = self.busy(RequestKind::Query, Some(tab_id));
+        let exporting = self.busy(RequestKind::Export, Some(tab_id));
         let target = execution_target(engine, &tab.sql, tab.selection.0, tab.selection.1);
         let run_label = match target.as_ref().map(|t| t.kind) {
             Some(ExecutionKind::Selection) => "Run selection",
@@ -2370,7 +2391,7 @@ impl Workbench {
                                 run_label
                             };
                         let run_button = ui.add_enabled(
-                            !running && target.is_some(),
+                            !running && !exporting && target.is_some(),
                             primary_button(label)
                                 .icon(Icon::Play)
                                 .shortcut("Ctrl+Enter"),
@@ -2398,7 +2419,10 @@ impl Workbench {
                         };
                         let refresh = ui
                             .add_enabled(
-                                !running && tab.last_executed.is_some() && !embedded_dirty,
+                                !running
+                                    && !exporting
+                                    && tab.last_executed.is_some()
+                                    && !embedded_dirty,
                                 theme::secondary_button(refresh_label).icon(Icon::Refresh),
                             )
                             .on_hover_text(tip)
@@ -2406,37 +2430,45 @@ impl Workbench {
                         if refresh.clicked() {
                             run = tab.last_executed.clone().map(|sql| (sql, true));
                         }
-                        if let Some(result) = self.query_results.get(&tab_id) {
-                            if tab.embedded.is_none() && !result.columns.is_empty() {
-                                chip(ui, "Read-only result", theme::MUTED).on_hover_text(
-                                    "This query does not resolve to one complete table, so Anybase cannot safely map edits back to rows.",
-                                );
-                            }
-                            if result.truncated {
-                                chip(ui, "truncated", theme::MODIFIED);
-                            }
-                        }
                         ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                            ui.add(egui::Label::new(
-                                RichText::new(&tab.title)
-                                    .font(theme::semibold(15.0))
-                                    .color(theme::TEXT_STRONG),
-                            ).truncate());
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(&tab.title)
+                                        .font(theme::semibold(15.0))
+                                        .color(theme::TEXT_STRONG),
+                                )
+                                .truncate(),
+                            );
                             if let Some(result) = self.query_results.get(&tab_id)
-                                && !running && !self.query_errors.contains_key(&tab_id)
+                                && !running
+                                && !self
+                                    .query_errors
+                                    .get(&tab_id)
+                                    .is_some_and(|m| m.kind == messages::Kind::Error)
                             {
-                                let mut status = format!("Query completed in {} ms", result.duration_ms);
+                                let mut status =
+                                    format!("Query completed in {} ms", result.duration_ms);
                                 if tab.embedded.is_none() {
-                                    status.push_str(&format!(" · {} rows", theme::count(result.row_count as u64)));
+                                    status.push_str(&format!(
+                                        " · {} rows",
+                                        theme::count(result.row_count as u64)
+                                    ));
                                     if let Some(affected) = result.affected_rows {
-                                        status.push_str(&format!(" · {} affected", theme::count(affected)));
+                                        status.push_str(&format!(
+                                            " · {} affected",
+                                            theme::count(affected)
+                                        ));
                                     }
                                 }
-                                ui.add(egui::Label::new(
-                                    RichText::new(&status)
-                                        .font(ui_font(11.5))
-                                        .color(theme::MUTED),
-                                ).truncate()).on_hover_text(status);
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(&status)
+                                            .font(ui_font(11.5))
+                                            .color(theme::MUTED),
+                                    )
+                                    .truncate(),
+                                )
+                                .on_hover_text(status);
                             }
                         });
                     });
@@ -2511,9 +2543,9 @@ impl Workbench {
                                 ui.horizontal(|ui| {
                                     ui.label(
                                         RichText::new(if redis {
-                                            "The outlined command or selection will run · Command/Ctrl+Enter · results capped at 10,000 rows"
+                                            "The outlined command or selection will run · Command/Ctrl+Enter · Preview limit: 10,000 rows"
                                         } else {
-                                            "The outlined statement or selected SQL will run · Command/Ctrl+Enter · results capped at 10,000 rows"
+                                            "The outlined statement or selected SQL will run · Command/Ctrl+Enter · Preview limit: 10,000 rows"
                                         })
                                         .font(ui_font(11.5))
                                         .color(theme::FAINT),
@@ -2555,7 +2587,7 @@ impl Workbench {
                                         .corner_radius(6)
                                         .show(ui, |ui| {
                                             ui.add_enabled(
-                                                !running,
+                                                !running && !exporting,
                                                 primary_button("Run selection").icon(Icon::Play),
                                             )
                                             .on_hover_text(tip)
@@ -2598,11 +2630,21 @@ impl Workbench {
                             bottom: 8,
                         }))
                         .show_separator_line(false)
-                        .show_inside(ui, |ui| {
-                            if messages::inline(ui, &error, opacity) == messages::Response::Dismiss
-                            {
+                        .show_inside(ui, |ui| match messages::inline(ui, &error, opacity) {
+                            messages::Response::Dismiss => {
                                 self.query_errors.remove(&tab_id);
                             }
+                            messages::Response::Open => {
+                                if let Some((path, _)) = &error.export {
+                                    open_path(path, false);
+                                }
+                            }
+                            messages::Response::Reveal => {
+                                if let Some((path, _)) = &error.export {
+                                    open_path(path, true);
+                                }
+                            }
+                            messages::Response::None => {}
                         });
                 }
             }
@@ -3052,6 +3094,50 @@ impl Workbench {
                 });
         }
         if !result.columns.is_empty() {
+            let enabled = !self.busy(RequestKind::Query, Some(tab_id))
+                && !self.busy(RequestKind::Export, Some(tab_id));
+            let columns: Vec<_> = result.columns.iter().map(|c| c.name.clone()).collect();
+            let mut copy = false;
+            let mut export = false;
+            Frame::new()
+                .inner_margin(Margin::symmetric(14, 6))
+                .show(ui, |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.add_enabled_ui(enabled, |ui| {
+                            copy = icons::button(ui, Icon::Copy,
+                                Some(&format!("Copy results ({})", theme::count(result.rows.len() as u64))),
+                                "Copy the displayed query results to the clipboard as CSV, including column headers").clicked();
+                            export = icons::button(ui, Icon::Download,
+                                Some(if self.busy(RequestKind::Export, Some(tab_id)) { "Saving…" } else { "Save CSV" }),
+                                "Save the displayed query results to a CSV file").clicked();
+                        });
+                        if result.truncated {
+                            ui.label(RichText::new(format!("Showing first {} rows.", theme::count(result.rows.len() as u64)))
+                                .font(ui_font(11.5)).color(theme::MODIFIED));
+                        }
+                    });
+                });
+            if copy {
+                self.context.copy_text(csv_document(&columns, &result.rows));
+                self.query_errors.insert(
+                    tab_id,
+                    Message::notice(
+                        format!(
+                            "Copied {} result rows as CSV.",
+                            theme::count(result.rows.len() as u64)
+                        ),
+                        self.now,
+                    ),
+                );
+            }
+            let export_command = export.then(|| Command::ExportResultCsv {
+                columns,
+                rows: result.rows.clone(),
+                file_name: format!(
+                    "{}.csv",
+                    safe_file_name(&self.tabs.iter().find(|t| t.id == tab_id).unwrap().title)
+                ),
+            });
             Frame::new()
                 .stroke(Stroke::new(1.0, theme::BORDER))
                 .corner_radius(CornerRadius::same(10))
@@ -3065,6 +3151,16 @@ impl Workbench {
                     ui.set_min_size(ui.available_size());
                     result_grid(ui, tab_id, &result.columns, &result.rows);
                 });
+            if let Some(command) = export_command {
+                self.query_errors.remove(&tab_id);
+                self.dispatch(
+                    command,
+                    "Exporting CSV",
+                    Some(tab_id),
+                    Some(profile),
+                    RequestKind::Export,
+                );
+            }
         } else {
             // `.query-empty`: a statement with no result set.
             ui.centered_and_justified(|ui| {
@@ -3872,6 +3968,95 @@ mod tests {
         let mut app = Workbench::with_context(egui::Context::default(), true);
         app.pending_requests.clear();
         app
+    }
+
+    #[test]
+    fn manual_query_results_offer_export_and_copy_returned_rows_with_headers() {
+        let mut app = app();
+        let profile = Uuid::from_u128(1);
+        app.open_query(profile, true);
+        let tab = app.active_tab.unwrap();
+        app.query_results.insert(
+            tab,
+            QueryResponse {
+                columns: ["customer,name", "note"]
+                    .into_iter()
+                    .map(|name| dbm_core::models::QueryColumn {
+                        name: name.into(),
+                        data_type: "text".into(),
+                    })
+                    .collect(),
+                rows: vec![
+                    vec![json!("José"), json!("a\"b\nnext")],
+                    vec![json!("Z"), json!(null)],
+                ],
+                row_count: 2,
+                affected_rows: None,
+                duration_ms: 5,
+                truncated: true,
+                notices: vec![],
+            },
+        );
+        let ctx = app.context.clone();
+        let mut frame = |events| {
+            ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(900.0, 600.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default()
+                        .show(ctx, |ui| app.query_result_ui(ui, tab, profile));
+                },
+            )
+        };
+        // Warm the layout, then click the actual rendered action.
+        frame(vec![]);
+        let output = frame(vec![]);
+        let texts: Vec<_> = output
+            .shapes
+            .iter()
+            .filter_map(|shape| {
+                if let egui::Shape::Text(text) = &shape.shape {
+                    Some(text)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert!(texts.iter().any(|text| text.galley.text() == "Save CSV"));
+        assert!(
+            texts
+                .iter()
+                .any(|text| text.galley.text() == "Showing first 2 rows.")
+        );
+        let copy = texts
+            .iter()
+            .find(|text| text.galley.text() == "Copy results (2)")
+            .unwrap();
+        let position = copy.pos + copy.galley.size() / 2.0;
+        frame(vec![
+            egui::Event::PointerMoved(position),
+            egui::Event::PointerButton {
+                pos: position,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ]);
+        let copied = frame(vec![egui::Event::PointerButton {
+            pos: position,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        assert!(copied.platform_output.commands.iter().any(|command| matches!(command,
+            egui::OutputCommand::CopyText(text) if text == "\"customer,name\",note\nJosé,\"a\"\"b\nnext\"\nZ,NULL"
+        )));
     }
 
     #[test]

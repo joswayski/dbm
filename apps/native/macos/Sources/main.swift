@@ -594,7 +594,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, NS
 
     func runQuery(_ tab: WorkTab, sql: String, refresh: Bool) {
         let sql = sql.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !sql.isEmpty, running[tab.id] == nil else { return }
+        guard !sql.isEmpty, running[tab.id] == nil, !exporting.contains(tab.id) else { return }
         if tab.dirty {
             tab.queryError = .error("Save or discard the pending table changes before running another query.")
             reloadPane(tab)
@@ -721,6 +721,47 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, NS
             alert.beginSheetModal(for: window) { response in if response == .alertFirstButtonReturn { proceed() } }
         } else {
             proceed()
+        }
+    }
+
+    func exportQueryResult(_ tab: WorkTab) {
+        guard let result = tab.result, tab.embedded == nil,
+              running[tab.id] == nil, !exporting.contains(tab.id) else { return }
+        let columns = array(result["columns"]).map { string($0["name"]) }
+        guard !columns.isEmpty else { return }
+        let rows = result["rows"] as? [[Any]] ?? []
+        let panel = NSSavePanel()
+        let safe = String(tab.title.map { "\\/:*?\"<>|".contains($0) ? "_" : $0 })
+        panel.nameFieldStringValue = "\(safe).csv"
+        panel.allowedContentTypes = [.commaSeparatedText]
+        panel.message = bool(result["truncated"])
+            ? "Save the first \(rows.count.formatted()) rows shown in the result preview."
+            : "Save the displayed query results as CSV."
+        panel.beginSheetModal(for: window) { [weak self] response in
+            guard let self else { return }
+            guard response == .OK, let url = panel.url else {
+                tab.queryError = .notice("Export canceled.")
+                self.reloadPane(tab)
+                return
+            }
+            self.exporting.insert(tab.id)
+            tab.queryError = nil
+            self.reloadPane(tab)
+            DispatchQueue.global(qos: .userInitiated).async {
+                let message: InlineMessage
+                do {
+                    let data = Data(("\u{feff}" + Helpers.csv(columns: columns, rows: rows)).utf8)
+                    try data.write(to: url, options: .atomic)
+                    message = .exported(url, rows: rows.count)
+                } catch {
+                    message = .error(error.localizedDescription)
+                }
+                DispatchQueue.main.async {
+                    self.exporting.remove(tab.id)
+                    tab.queryError = message
+                    self.reloadPane(tab)
+                }
+            }
         }
     }
 
@@ -878,6 +919,7 @@ final class SnapshotDriver {
             ("01-welcome", {}),
             ("02-query", { [app] in app.selectProfile(postgres) }),
             ("03-results", { [app] in app.activeQueryPane?.editor.setSelectedRange(NSRange(location: 0, length: 0)); if let tab = app.activeTab { app.runQuery(tab, sql: "SELECT now();", refresh: false) } }),
+            ("03a-results-copied", { [self] in checkQueryCopy() }),
             ("03b-results-resized", { [self] in checkQueryResizing() }),
             ("04-table", { [app] in app.openTable(postgres, schema: "public", table: "users") }),
             ("05-pending", { [app] in
@@ -926,6 +968,34 @@ final class SnapshotDriver {
             }),
         ]
         next(0)
+    }
+
+    private func checkQueryCopy() {
+        let columns = ["customer,name", "note", "active"]
+        let rows: [[Any]] = [["José", "a\"b\nnext", true], ["Z", NSNull(), false]]
+        precondition(Helpers.csv(columns: columns, rows: rows) == "\"customer,name\",note,active\nJosé,\"a\"\"b\nnext\",true\nZ,NULL,false")
+        precondition(Helpers.csv(columns: ["value"], rows: [["line\nnext"], ["line\rnext"], ["line\r\nnext"]])
+                     == "value\n\"line\nnext\"\n\"line\rnext\"\n\"line\r\nnext\"")
+        let largeRows: [[Any]] = Array(repeating: [String(repeating: "x", count: 200)], count: 10_000)
+        precondition(Helpers.csv(columns: ["value"], rows: largeRows).utf8.count == 2_010_005,
+                     "CSV copy must not silently lose results larger than the bridge request limit")
+        guard let pane = app.activeQueryPane, let result = app.activeTab?.result else {
+            preconditionFailure("Query copy fixture needs a result")
+        }
+        func buttons(_ view: NSView) -> [GButton] {
+            (view as? GButton).map { [$0] } ?? view.subviews.flatMap(buttons)
+        }
+        let actions = buttons(pane)
+        guard let copy = actions.first(where: { $0.title == "Copy results" }),
+              let export = actions.first(where: { $0.title == "Save CSV" }) else {
+            preconditionFailure("Manual query results must offer copy and export")
+        }
+        precondition(copy.isEnabled && export.isEnabled)
+        copy.performClick(nil)
+        let names = array(result["columns"]).map { string($0["name"]) }
+        let expected = try! Bridge.helper(["command": "csv", "columns": names, "rows": result["rows"] ?? []]).get()
+        precondition(NSPasteboard.general.string(forType: .string) == string(expected))
+        print("Query result copy checks passed, including CSV larger than 1 MiB")
     }
 
     /// Replacing a populated result with fewer rows must retire AppKit's

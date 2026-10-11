@@ -410,9 +410,17 @@ enum Helpers {
         return string(text)
     }
 
+    /// Match the core CSV format locally: a loaded query result can exceed
+    /// the bridge's 1 MiB request limit even with the 10,000-row safety cap.
     static func csv(columns: [String], rows: [[Any]]) -> String {
-        guard case .success(let text) = Bridge.helper(["command": "csv", "columns": columns, "rows": rows]) else { return "" }
-        return string(text)
+        func record(_ values: [Any]) -> String {
+            values.map { value in
+                let text = displayValue(value)
+                return text.contains("\"") || text.contains(",") || text.contains("\r") || text.contains("\n")
+                    ? "\"\(text.replacingOccurrences(of: "\"", with: "\"\""))\"" : text
+            }.joined(separator: ",")
+        }
+        return ([record(columns.map { $0 as Any })] + rows.map { record(Array($0.prefix(columns.count))) }).joined(separator: "\n")
     }
 
     static func parseConnectionURL(_ url: String) -> Result<[String: Any], Error> {

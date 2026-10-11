@@ -35,6 +35,12 @@ pub enum Command {
     Mutate(MutationBatch),
     /// Asks for a destination, then writes every filtered row as CSV.
     ExportCsv(ExportRequest),
+    /// Saves the returned rows, without replaying the SQL or Redis command.
+    ExportResultCsv {
+        columns: Vec<String>,
+        rows: Vec<Vec<serde_json::Value>>,
+        file_name: String,
+    },
 }
 
 pub struct ExportRequest {
@@ -126,6 +132,22 @@ enum Backend {
 
 impl Backend {
     async fn execute(&mut self, command: Command) -> Result<Payload, String> {
+        if let Command::ExportResultCsv {
+            columns,
+            rows,
+            file_name,
+        } = command
+        {
+            let Some(path) = rfd::FileDialog::new()
+                .set_file_name(file_name)
+                .add_filter("CSV", &["csv"])
+                .save_file()
+            else {
+                return Ok(Payload::Exported(None));
+            };
+            let written = dbm_core::export::export_result_csv(&path, &columns, &rows)?;
+            return Ok(Payload::Exported(Some((path, written))));
+        }
         match self {
             Self::Live(state) => execute_live(state, command).await,
             Self::Demo(backend) => backend.execute(command).await,
@@ -250,6 +272,7 @@ async fn execute_live(state: &AppState, command: Command) -> Result<Payload, Str
         Command::ExportCsv(request) => {
             Payload::Exported(export_csv(request, |page| live_table_page(state, page)).await?)
         }
+        Command::ExportResultCsv { .. } => unreachable!("result exports need no database"),
     };
     Ok(result)
 }
@@ -352,6 +375,7 @@ impl DemoBackend {
             Command::ExportCsv(request) => Payload::Exported(
                 export_csv(request, |page| async move { Ok(demo::table_page(&page)) }).await?,
             ),
+            Command::ExportResultCsv { .. } => unreachable!("result exports need no database"),
         })
     }
 }
