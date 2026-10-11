@@ -140,8 +140,19 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, NS
         ])
         window.contentView = root
         window.center()
-        window.makeKeyAndOrderFront(nil)
+        showMainWindow()
         refresh()
+    }
+
+    private func showMainWindow() {
+        window.deminiaturize(nil)
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        showMainWindow()
+        return true
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
