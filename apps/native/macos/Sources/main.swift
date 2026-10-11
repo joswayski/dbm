@@ -866,6 +866,7 @@ final class SnapshotDriver {
             ("01-welcome", {}),
             ("02-query", { [app] in app.selectProfile(postgres) }),
             ("03-results", { [app] in app.activeQueryPane?.editor.setSelectedRange(NSRange(location: 0, length: 0)); if let tab = app.activeTab { app.runQuery(tab, sql: "SELECT now();", refresh: false) } }),
+            ("03b-results-resized", { [self] in checkQueryResizing() }),
             ("04-table", { [app] in app.openTable(postgres, schema: "public", table: "users") }),
             ("05-pending", { [app] in
                 guard let tab = app.activeTab, let state = tab.tableState else { return }
@@ -893,6 +894,7 @@ final class SnapshotDriver {
                     app.runQuery(tab, sql: tab.sql, refresh: false)
                 }
             }),
+            ("06b-embedded-resized", { [self] in checkQueryResizing() }),
             ("07-profile", { [app] in app.newProfile() }),
             ("08-redis", { [app] in
                 if let sheet = app.profileSheetWindow { app.window.endSheet(sheet) }
@@ -912,6 +914,32 @@ final class SnapshotDriver {
             }),
         ]
         next(0)
+    }
+
+    /// Check the real hit target and pane layout for both result presentations.
+    private func checkQueryResizing() {
+        guard let pane = app.activeQueryPane,
+              let split = pane.subviews.first(where: { $0 is NSSplitView }) as? NSSplitView else {
+            preconditionFailure("Query fixture must have an editor/results split")
+        }
+        pane.layoutSubtreeIfNeeded()
+        let editor = split.arrangedSubviews[0]
+        let results = split.arrangedSubviews[1]
+        let originalEditorHeight = editor.frame.height
+        let originalResultsHeight = results.frame.height
+        let gripY = editor.frame.maxY + split.dividerThickness / 2 - 5
+        for x in [CGFloat(20), split.bounds.midX, split.bounds.maxX - 20] {
+            let point = pane.convert(NSPoint(x: x, y: gripY), from: split)
+            precondition(split.hitTest(point) === split, "The resize strip must receive mouse events across its width")
+        }
+        split.setPosition(originalEditorHeight - 80, ofDividerAt: 0)
+        pane.layoutSubtreeIfNeeded()
+        precondition(abs(editor.frame.height - (originalEditorHeight - 80)) < 1)
+        precondition(abs(results.frame.height - (originalResultsHeight + 80)) < 1)
+        app.refresh()
+        pane.layoutSubtreeIfNeeded()
+        precondition(abs(editor.frame.height - (originalEditorHeight - 80)) < 1, "Reload must preserve the resized panes")
+        print("Query result resize checks passed (embedded: \(pane.embeddedPane != nil))")
     }
 
     /// Exercise AppKit's real NSCell copy path, including destruction in both

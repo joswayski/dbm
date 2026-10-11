@@ -2344,7 +2344,7 @@ impl Workbench {
         let mut run: Option<(String, bool)> = None;
 
         egui::TopBottomPanel::top(egui::Id::new(("query-toolbar", tab_id)))
-            .exact_height(theme::TOOLBAR_HEIGHT + 16.0)
+            .exact_height(theme::TOOLBAR_HEIGHT)
             .show_separator_line(false)
             .frame(
                 Frame::new()
@@ -2353,19 +2353,6 @@ impl Workbench {
             )
             .show_inside(ui, |ui| {
                 ui.horizontal_centered(|ui| {
-                    ui.vertical(|ui| {
-                        ui.add_space(2.0);
-                        ui.label(eyebrow(if redis {
-                            "REDIS WORKBENCH"
-                        } else {
-                            "SQL WORKBENCH"
-                        }));
-                        ui.label(
-                            RichText::new(&tab.title)
-                                .font(theme::semibold(15.0))
-                                .color(theme::TEXT_STRONG),
-                        );
-                    });
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let label =
                             if running && self.pending_label(tab_id) == Some("Running query") {
@@ -2410,11 +2397,47 @@ impl Workbench {
                         if refresh.clicked() {
                             run = tab.last_executed.clone().map(|sql| (sql, true));
                         }
+                        if let Some(result) = self.query_results.get(&tab_id) {
+                            if tab.embedded.is_none() && !result.columns.is_empty() {
+                                chip(ui, "Read-only result", theme::MUTED).on_hover_text(
+                                    "This query does not resolve to one complete table, so Anybase cannot safely map edits back to rows.",
+                                );
+                            }
+                            if result.truncated {
+                                chip(ui, "truncated", theme::MODIFIED);
+                            }
+                        }
+                        ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                            ui.add(egui::Label::new(
+                                RichText::new(&tab.title)
+                                    .font(theme::semibold(15.0))
+                                    .color(theme::TEXT_STRONG),
+                            ).truncate());
+                            if let Some(result) = self.query_results.get(&tab_id)
+                                && !running && !self.query_errors.contains_key(&tab_id)
+                            {
+                                let mut status = format!("Query completed in {} ms", result.duration_ms);
+                                if tab.embedded.is_none() {
+                                    status.push_str(&format!(" · {} rows", theme::count(result.row_count as u64)));
+                                    if let Some(affected) = result.affected_rows {
+                                        status.push_str(&format!(" · {} affected", theme::count(affected)));
+                                    }
+                                }
+                                ui.add(egui::Label::new(
+                                    RichText::new(&status)
+                                        .font(ui_font(11.5))
+                                        .color(theme::MUTED),
+                                ).truncate()).on_hover_text(status);
+                            }
+                        });
                     });
                 });
             });
 
-        egui::TopBottomPanel::top(egui::Id::new(("query-editor", tab_id)))
+        // A full-width 12-point grab area at the editor/results boundary.
+        let resize_radius = ui.style().interaction.resize_grab_radius_side;
+        ui.style_mut().interaction.resize_grab_radius_side = 6.0;
+        let editor_panel = egui::TopBottomPanel::top(egui::Id::new(("query-editor", tab_id)))
             .resizable(true)
             .default_height(260.0)
             .height_range(140.0..=(ui.available_height() - 120.0).max(160.0))
@@ -2424,7 +2447,7 @@ impl Workbench {
                 top: 0,
                 bottom: 12,
             }))
-            .show_separator_line(false)
+            .show_separator_line(true)
             .show_inside(ui, |ui| {
                 let card = |fill| {
                     Frame::new()
@@ -2538,6 +2561,15 @@ impl Workbench {
                         }
                     });
             });
+        ui.style_mut().interaction.resize_grab_radius_side = resize_radius;
+        let grip = egui::Rect::from_center_size(
+            egui::pos2(
+                editor_panel.response.rect.center().x,
+                editor_panel.response.rect.bottom(),
+            ),
+            Vec2::new(36.0, 3.0),
+        );
+        ui.painter().rect_filled(grip, 1.5, theme::FAINT);
 
         if let Some((sql, refresh)) = run {
             self.run_query(tab_id, sql, refresh, false);
@@ -2993,53 +3025,23 @@ impl Workbench {
             .iter()
             .find(|t| t.id == tab_id)
             .and_then(|t| t.embedded.clone());
-        let duration = result.duration_ms;
         if embedded.is_some() {
-            Frame::new()
-                .inner_margin(Margin::symmetric(14, 6))
-                .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            RichText::new(format!(
-                                "Table viewer · query completed in {duration} ms"
-                            ))
-                            .color(theme::MUTED),
-                        );
-                        chip(ui, "Editable table", theme::SUCCESS);
-                    });
-                });
             self.table_ui(ui, tab_id, profile, true);
             return;
         }
-        Frame::new()
-            .inner_margin(Margin::symmetric(14, 6))
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    let affected = result
-                        .affected_rows
-                        .map_or_else(String::new, |n| format!(" · {} affected", theme::count(n)));
-                    ui.label(
-                        RichText::new(format!(
-                            "{} rows{affected} · {duration} ms",
-                            theme::count(result.row_count as u64)
-                        ))
-                            .color(theme::MUTED),
-                    );
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if !result.columns.is_empty() {
-                            chip(ui, "Read-only result", theme::MUTED).on_hover_text(
-                                "This query does not resolve to one complete table, so Anybase cannot safely map edits back to rows.",
-                            );
-                        }
-                        if result.truncated {
-                            chip(ui, "truncated", theme::MODIFIED);
-                        }
-                    });
+        if !result.notices.is_empty() {
+            Frame::new()
+                .inner_margin(Margin::symmetric(14, 6))
+                .show(ui, |ui| {
+                    for notice in &result.notices {
+                        ui.label(
+                            RichText::new(notice)
+                                .font(ui_font(11.5))
+                                .color(theme::MUTED),
+                        );
+                    }
                 });
-                for notice in &result.notices {
-                    ui.label(RichText::new(notice).font(ui_font(11.5)).color(theme::MUTED));
-                }
-            });
+        }
         if !result.columns.is_empty() {
             Frame::new()
                 .stroke(Stroke::new(1.0, theme::BORDER))
@@ -3861,6 +3863,73 @@ mod tests {
         let mut app = Workbench::with_context(egui::Context::default(), true);
         app.pending_requests.clear();
         app
+    }
+
+    #[test]
+    fn query_results_resize_from_the_wide_grip_and_keep_their_height() {
+        for embedded in [false, true] {
+            let mut app = app();
+            let profile = Uuid::from_u128(1);
+            app.open_query(profile, true);
+            let tab_id = app.active_tab.unwrap();
+            app.query_results.insert(
+                tab_id,
+                DemoStore::new().run_query(&QueryRequest {
+                    profile_id: profile,
+                    sql: "SELECT now();".into(),
+                    max_rows: None,
+                }),
+            );
+            if embedded {
+                app.tabs[0].embedded = Some(("public".into(), "customers".into()));
+                app.tables.entry(tab_id).or_default().page = Some(page().into());
+            }
+            let ctx = app.context.clone();
+            let panel_id = egui::Id::new(("query-editor", tab_id));
+            let mut frame = |events| {
+                let tab = app.tabs[0].clone();
+                let _ = ctx.run(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(1280.0, 800.0),
+                        )),
+                        events,
+                        ..Default::default()
+                    },
+                    |ctx| {
+                        egui::CentralPanel::default().show(ctx, |ui| app.query_ui(ui, &tab));
+                    },
+                );
+                egui::containers::panel::PanelState::load(&ctx, panel_id)
+                    .unwrap()
+                    .rect
+            };
+            frame(vec![]);
+            let initial = frame(vec![]);
+            // Grab from the bottom padding, away from the hairline. This is
+            // beyond the old target even with egui's nearby-widget hit slop.
+            let start = egui::pos2(initial.center().x, initial.bottom() - 10.0);
+            frame(vec![
+                egui::Event::PointerMoved(start),
+                egui::Event::PointerButton {
+                    pos: start,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ]);
+            let end = start - egui::vec2(0.0, 80.0);
+            frame(vec![egui::Event::PointerMoved(end)]);
+            let resized = frame(vec![egui::Event::PointerButton {
+                pos: end,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            }]);
+            assert!((resized.height() - (initial.height() - 90.0)).abs() < 1.0);
+            assert_eq!(frame(vec![]), resized, "a redraw must not reset the split");
+        }
     }
 
     #[test]

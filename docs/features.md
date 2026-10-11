@@ -78,6 +78,10 @@ What the app does today, what is deliberately not built yet, and what it stores 
   default) instead of SQL. Scripts with several statements show the last
   result set. The MySQL workbench keeps one connection, so `USE`, session
   variables, and explicit transactions carry over between runs.
+  Drag the horizontal grip between the editor/history and results to resize
+  their heights, including when results open in the editable table viewer.
+  Query completion time appears beside the query title; results do not have
+  a separate completion or table-viewer status bar.
   PostgreSQL and MySQL retain only capped query results in memory while
   consuming the remaining rows, so later statements and errors still run
   through the normal result handling. The cap does not limit server execution

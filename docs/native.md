@@ -184,8 +184,10 @@ table viewer. `crates/dbm-update` tests cover manifest parsing and signature
 verification. macOS CI builds the universal Swift host and captures the
 isolated AppKit fixture. That fixture also checks header-cell copy ownership
 with long JSON-decoded column types, nested copies, and both destruction orders,
-then refreshes a schema while a table has staged edits. These checks run in the
-optimized app and fail the snapshot process on a regression.
+then refreshes a schema while a table has staged edits. For query results and
+the embedded table viewer, it checks resize-strip hit testing and pane heights
+after moving the divider and reloading, and captures the enlarged results.
+These checks run in the optimized app and fail the snapshot process on a regression.
 
 Run the AppKit checks on a Mac (not supported on Linux):
 
