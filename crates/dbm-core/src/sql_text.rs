@@ -52,7 +52,7 @@ pub fn execution_target(
         )
     } else {
         (
-            range_at_cursor(text, from, &statement_ranges(text), b';'),
+            range_at_cursor(text, from, &statement_ranges(engine, text), b';'),
             ExecutionKind::Statement,
         )
     };
@@ -97,77 +97,225 @@ fn range_at_cursor(text: &str, cursor: usize, ranges: &[Range], separator: u8) -
         })
 }
 
-fn statement_ranges(text: &str) -> Vec<Range> {
+fn statement_ranges(engine: DatabaseEngine, text: &str) -> Vec<Range> {
     let bytes = text.as_bytes();
     let mut ranges = Vec::new();
     let mut start = 0;
-    let mut index = 0;
-    let mut single_quoted = false;
-    let mut double_quoted = false;
-    let mut line_comment = false;
-    let mut block_depth = 0usize;
-    let mut dollar_quote: Option<&str> = None;
-    while index < bytes.len() {
-        let character = bytes[index];
-        let next = bytes.get(index + 1).copied();
-        if line_comment {
-            if character == b'\n' {
-                line_comment = false;
-            }
-        } else if block_depth > 0 {
-            if character == b'/' && next == Some(b'*') {
-                block_depth += 1;
-                index += 1;
-            } else if character == b'*' && next == Some(b'/') {
-                block_depth -= 1;
-                index += 1;
-            }
-        } else if let Some(delimiter) = dollar_quote {
-            if bytes[index..].starts_with(delimiter.as_bytes()) {
-                index += delimiter.len() - 1;
-                dollar_quote = None;
-            }
-        } else if single_quoted {
-            if character == b'\\' || (character == b'\'' && next == Some(b'\'')) {
-                index += 1;
-            } else if character == b'\'' {
-                single_quoted = false;
-            }
-        } else if double_quoted {
-            if character == b'"' && next == Some(b'"') {
-                index += 1;
-            } else if character == b'"' {
-                double_quoted = false;
-            }
-        } else if character == b'-' && next == Some(b'-') {
-            line_comment = true;
-            index += 1;
-        } else if character == b'/' && next == Some(b'*') {
-            block_depth = 1;
-            index += 1;
-        } else if character == b'\'' {
-            single_quoted = true;
-        } else if character == b'"' {
-            double_quoted = true;
-        } else if character == b'$' {
-            if let Some(delimiter) = dollar_quote_delimiter(text, index) {
-                index += delimiter.len() - 1;
-                dollar_quote = Some(delimiter);
-            }
-        } else if character == b';' {
+    for (kind, range) in sql_segments(engine, text) {
+        if kind != Segment::Code {
+            continue;
+        }
+        let semicolons = bytes[range.from..range.to]
+            .iter()
+            .enumerate()
+            .filter(|(_, byte)| **byte == b';');
+        for (offset, _) in semicolons {
+            let end = range.from + offset + 1;
             ranges.push(Range {
                 from: start,
-                to: index + 1,
+                to: end,
             });
-            start = index + 1;
+            start = end;
         }
-        index += 1;
     }
     ranges.push(Range {
         from: start,
         to: text.len(),
     });
     ranges
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Segment {
+    Code,
+    Comment,
+    /// A string literal, including PostgreSQL dollar-quoted bodies.
+    Literal,
+    QuotedIdentifier,
+}
+
+/// Splits SQL into code, comments, string literals, and quoted identifiers
+/// using the engine's lexical rules:
+///
+/// - PostgreSQL: `'...'` strings only treat a doubled quote as an escape;
+///   backslash escapes apply only in `E'...'` strings. `"..."` is an
+///   identifier, `$tag$...$tag$` is a dollar-quoted string unless the `$`
+///   continues an identifier (`a$tag$`), and block comments nest.
+/// - MySQL: `'...'` and `"..."` strings accept backslash escapes (the default
+///   `sql_mode`), backticks quote identifiers, `#` and `-- ` start line
+///   comments, block comments do not nest, and the body of a `/*!...*/`
+///   executable comment is code because the server runs it.
+///
+/// Unterminated quotes and comments run to the end of the text.
+fn sql_segments(engine: DatabaseEngine, text: &str) -> Vec<(Segment, Range)> {
+    sql_segments_with(engine, text, BackslashRule::ServerDefault)
+}
+
+/// How backslashes behave inside ordinary quoted strings.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BackslashRule {
+    /// PostgreSQL `standard_conforming_strings = on`; MySQL's default `sql_mode`.
+    ServerDefault,
+    /// The opposite: PostgreSQL `standard_conforming_strings = off`, or MySQL
+    /// `NO_BACKSLASH_ESCAPES` (which also covers `ANSI_QUOTES` identifiers).
+    NonDefault,
+}
+
+fn sql_segments_with(
+    engine: DatabaseEngine,
+    text: &str,
+    rule: BackslashRule,
+) -> Vec<(Segment, Range)> {
+    let mysql = engine == DatabaseEngine::Mysql;
+    // Whether backslash escapes apply in plain '...' strings (and MySQL "...").
+    let backslash = mysql == (rule == BackslashRule::ServerDefault);
+    let bytes = text.as_bytes();
+    let mut segments = Vec::new();
+    let mut code_start = 0;
+    let mut index = 0;
+    let mut executable_comment = false;
+    while index < bytes.len() {
+        let character = bytes[index];
+        let next = bytes.get(index + 1).copied();
+        let segment = if executable_comment && character == b'*' && next == Some(b'/') {
+            executable_comment = false;
+            Some((Segment::Comment, index + 2))
+        } else if (character == b'-'
+            && next == Some(b'-')
+            && (!mysql
+                || bytes
+                    .get(index + 2)
+                    .is_none_or(|b| b.is_ascii_whitespace() || b.is_ascii_control())))
+            || (mysql && character == b'#')
+        {
+            let end = bytes[index..]
+                .iter()
+                .position(|&b| b == b'\n')
+                .map_or(bytes.len(), |offset| index + offset);
+            Some((Segment::Comment, end))
+        } else if character == b'/' && next == Some(b'*') {
+            if mysql && bytes.get(index + 2) == Some(&b'!') {
+                executable_comment = true;
+                let digits = bytes[index + 3..]
+                    .iter()
+                    .take_while(|b| b.is_ascii_digit())
+                    .count();
+                Some((Segment::Comment, index + 3 + digits))
+            } else {
+                Some((Segment::Comment, block_comment_end(bytes, index, !mysql)))
+            }
+        } else if character == b'\'' {
+            let escapes = backslash || (!mysql && postgres_escape_string(bytes, index));
+            Some((Segment::Literal, quoted_end(bytes, index, escapes)))
+        } else if character == b'"' {
+            let kind = if mysql {
+                Segment::Literal
+            } else {
+                Segment::QuotedIdentifier
+            };
+            Some((kind, quoted_end(bytes, index, mysql && backslash)))
+        } else if mysql && character == b'`' {
+            Some((Segment::QuotedIdentifier, quoted_end(bytes, index, false)))
+        } else if !mysql && character == b'$' && (index == 0 || !identifier_byte(bytes[index - 1]))
+        {
+            dollar_quote_delimiter(text, index).map(|delimiter| {
+                let body = index + delimiter.len();
+                let end = text[body..]
+                    .find(delimiter)
+                    .map_or(text.len(), |offset| body + offset + delimiter.len());
+                (Segment::Literal, end)
+            })
+        } else {
+            None
+        };
+        match segment {
+            Some((kind, end)) => {
+                if code_start < index {
+                    segments.push((
+                        Segment::Code,
+                        Range {
+                            from: code_start,
+                            to: index,
+                        },
+                    ));
+                }
+                segments.push((
+                    kind,
+                    Range {
+                        from: index,
+                        to: end,
+                    },
+                ));
+                index = end;
+                code_start = end;
+            }
+            None => index += 1,
+        }
+    }
+    if code_start < bytes.len() {
+        segments.push((
+            Segment::Code,
+            Range {
+                from: code_start,
+                to: bytes.len(),
+            },
+        ));
+    }
+    segments
+}
+
+/// Bytes that can continue an unquoted identifier (PostgreSQL also allows `$`).
+fn identifier_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'$' || byte >= 0x80
+}
+
+/// Whether the quote at `quote` opens a PostgreSQL `E'...'` escape string.
+fn postgres_escape_string(bytes: &[u8], quote: usize) -> bool {
+    quote > 0
+        && matches!(bytes[quote - 1], b'e' | b'E')
+        && (quote == 1 || !identifier_byte(bytes[quote - 2]))
+}
+
+/// The end (exclusive) of the quoted text opening at `start`. A doubled quote
+/// continues it; with `escapes`, so does a backslash-escaped character.
+fn quoted_end(bytes: &[u8], start: usize, escapes: bool) -> usize {
+    let quote = bytes[start];
+    let mut index = start + 1;
+    while index < bytes.len() {
+        if escapes && bytes[index] == b'\\' {
+            index += 2;
+        } else if bytes[index] == quote {
+            if bytes.get(index + 1) == Some(&quote) {
+                index += 2;
+            } else {
+                return index + 1;
+            }
+        } else {
+            index += 1;
+        }
+    }
+    bytes.len()
+}
+
+fn block_comment_end(bytes: &[u8], start: usize, nested: bool) -> usize {
+    let mut depth = 1usize;
+    let mut index = start + 2;
+    while index < bytes.len() {
+        let next = bytes.get(index + 1).copied();
+        if nested && bytes[index] == b'/' && next == Some(b'*') {
+            depth += 1;
+            index += 2;
+        } else if bytes[index] == b'*' && next == Some(b'/') {
+            depth -= 1;
+            index += 2;
+            if depth == 0 {
+                return index;
+            }
+        } else {
+            index += 1;
+        }
+    }
+    bytes.len()
 }
 
 fn line_ranges(text: &str) -> Vec<Range> {
@@ -192,9 +340,13 @@ fn line_ranges(text: &str) -> Vec<Range> {
 fn dollar_quote_delimiter(text: &str, start: usize) -> Option<&str> {
     let end = start + 1 + text[start + 1..].find('$')?;
     let tag = &text[start + 1..end];
+    // PostgreSQL tags are identifier-like: letters, `_`, or any non-ASCII
+    // character, then also digits.
     let valid = tag.is_empty()
-        || (tag.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
-            && tag.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'));
+        || (tag.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_' || !c.is_ascii())
+            && tag
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || !c.is_ascii()));
     valid.then_some(&text[start..=end])
 }
 
@@ -208,69 +360,74 @@ fn trim_range(text: &str, range: Range) -> Option<Range> {
 /// Whether running `text` should ask first: it drops or truncates something,
 /// or deletes or updates rows without a WHERE clause. Comments, string
 /// literals, and quoted identifiers are ignored so `SELECT 'drop'` or a column
-/// named "update" do not trigger the prompt. Redis asks before FLUSHALL/FLUSHDB.
+/// named "update" do not trigger the prompt, using the engine's quoting and
+/// comment rules. A DELETE or UPDATE counts as filtered only when its own WHERE
+/// follows at the same parenthesis level, so a WHERE inside a subquery does not
+/// count. The text is checked under both backslash rules because the server's
+/// setting (`standard_conforming_strings`, `NO_BACKSLASH_ESCAPES`) is unknown
+/// here; a backslash must not be able to hide a statement either way. Redis
+/// asks before FLUSHALL/FLUSHDB.
 pub fn requires_confirmation(engine: DatabaseEngine, text: &str) -> bool {
     if engine == DatabaseEngine::Redis {
         let lower = text.trim_start().to_ascii_lowercase();
         return starts_with_word(&lower, "flushall") || starts_with_word(&lower, "flushdb");
     }
-    normalize_sql(text).split(';').any(|statement| {
+    let asks = |rule| normalized_requires_confirmation(&normalize_sql(engine, text, rule));
+    asks(BackslashRule::ServerDefault) || (text.contains('\\') && asks(BackslashRule::NonDefault))
+}
+
+fn normalized_requires_confirmation(normalized: &str) -> bool {
+    normalized.split(';').any(|statement| {
         let lower = statement.to_ascii_lowercase();
         if has_word(&lower, "drop") || has_word(&lower, "truncate") {
             return true;
         }
-        let deletes = starts_with_word(lower.trim_start(), "delete") || delete_from(&lower);
-        (deletes || unfiltered_update(&lower)) && !has_word(&lower, "where")
+        let leading_delete = starts_with_word(lower.trim_start(), "delete")
+            .then(|| lower.len() - lower.trim_start().len());
+        leading_delete
+            .into_iter()
+            .chain(delete_from_positions(&lower))
+            .chain(update_set_positions(&lower))
+            .any(|write| !has_own_where(&lower, write))
     })
 }
 
-/// Replaces comments with spaces and quoted text with placeholders.
-fn normalize_sql(text: &str) -> String {
+/// Replaces comments with spaces and quoted text with space-padded
+/// placeholders, so `DELETE FROM"users"` still reads as `delete from x`.
+fn normalize_sql(engine: DatabaseEngine, text: &str, rule: BackslashRule) -> String {
     let mut out = String::with_capacity(text.len());
-    let mut chars = text.chars().peekable();
-    while let Some(character) = chars.next() {
-        match character {
-            '-' if chars.peek() == Some(&'-') => {
-                for next in chars.by_ref() {
-                    if next == '\n' {
-                        out.push('\n');
-                        break;
-                    }
-                }
-                out.push(' ');
-            }
-            '/' if chars.peek() == Some(&'*') => {
-                chars.next();
-                let mut previous = '\0';
-                for next in chars.by_ref() {
-                    if previous == '*' && next == '/' {
-                        break;
-                    }
-                    previous = next;
-                }
-                out.push(' ');
-            }
-            '\'' | '"' | '`' => {
-                // A doubled quote continues the literal, as in 'it''s'.
-                loop {
-                    match chars.next() {
-                        Some(next) if next == character => {
-                            if chars.peek() == Some(&character) {
-                                chars.next();
-                            } else {
-                                break;
-                            }
-                        }
-                        Some(_) => {}
-                        None => break,
-                    }
-                }
-                out.push_str(if character == '\'' { "''" } else { "x" });
-            }
-            _ => out.push(character),
-        }
+    for (kind, range) in sql_segments_with(engine, text, rule) {
+        out.push_str(match kind {
+            Segment::Code => &text[range.from..range.to],
+            Segment::Comment => " ",
+            Segment::Literal => " '' ",
+            Segment::QuotedIdentifier => " x ",
+        });
     }
     out
+}
+
+/// Whether a WHERE follows the write starting at `write` at the same
+/// parenthesis depth, before the group containing the write closes.
+fn has_own_where(lower: &str, write: usize) -> bool {
+    let bytes = lower.as_bytes();
+    let mut depth = 0usize;
+    for index in write..bytes.len() {
+        match bytes[index] {
+            b'(' => depth += 1,
+            b')' if depth == 0 => return false,
+            b')' => depth -= 1,
+            b'w' if depth == 0
+                && bytes[index..].starts_with(b"where")
+                && !identifier_byte(bytes[index - 1])
+                && bytes.get(index + 5).is_none_or(|&b| !identifier_byte(b)) =>
+            {
+                return true;
+            }
+            _ => {}
+        }
+    }
+    false
 }
 
 fn is_word(c: char) -> bool {
@@ -297,41 +454,44 @@ fn has_word(text: &str, word: &str) -> bool {
     word_positions(text, word).next().is_some()
 }
 
-fn delete_from(lower: &str) -> bool {
-    word_positions(lower, "delete").any(|index| {
+fn delete_from_positions(lower: &str) -> impl Iterator<Item = usize> + '_ {
+    word_positions(lower, "delete").filter(|&index| {
         let rest = &lower[index + "delete".len()..];
         let trimmed = rest.trim_start();
         trimmed.len() < rest.len() && starts_with_word(trimmed, "from")
     })
 }
 
-/// `(^|[\s(])update\s+(only\s+)?T(\s+(as\s+)?A)?\s+set\b` where T and A
-/// contain no whitespace or parentheses.
-fn unfiltered_update(lower: &str) -> bool {
-    lower.match_indices("update").any(|(index, _)| {
-        let before = lower[..index].chars().next_back();
-        if before.is_some_and(|c| !c.is_whitespace() && c != '(') {
-            return false;
-        }
-        let rest = &lower[index + "update".len()..];
-        if !rest.starts_with(char::is_whitespace) {
-            return false;
-        }
-        let words: Vec<&str> = rest.split_whitespace().take(5).collect();
-        let name = |i: usize| words.get(i).is_some_and(|w| !w.contains('('));
-        let set = |i: usize| words.get(i).is_some_and(|w| starts_with_word(w, "set"));
-        let skips: &[usize] = if words.first() == Some(&"only") {
-            &[0, 1]
-        } else {
-            &[0]
-        };
-        skips.iter().any(|&t| {
-            name(t)
-                && (set(t + 1)
-                    || (name(t + 1) && set(t + 2))
-                    || (words.get(t + 1) == Some(&"as") && name(t + 2) && set(t + 3)))
+/// Starts of `(^|[\s(])update\s+(only\s+)?T(\s+(as\s+)?A)?\s+set\b` where T
+/// and A contain no whitespace or parentheses.
+fn update_set_positions(lower: &str) -> impl Iterator<Item = usize> + '_ {
+    lower
+        .match_indices("update")
+        .map(|(index, _)| index)
+        .filter(|&index| {
+            let before = lower[..index].chars().next_back();
+            if before.is_some_and(|c| !c.is_whitespace() && c != '(') {
+                return false;
+            }
+            let rest = &lower[index + "update".len()..];
+            if !rest.starts_with(char::is_whitespace) {
+                return false;
+            }
+            let words: Vec<&str> = rest.split_whitespace().take(5).collect();
+            let name = |i: usize| words.get(i).is_some_and(|w| !w.contains('('));
+            let set = |i: usize| words.get(i).is_some_and(|w| starts_with_word(w, "set"));
+            let skips: &[usize] = if words.first() == Some(&"only") {
+                &[0, 1]
+            } else {
+                &[0]
+            };
+            skips.iter().any(|&t| {
+                name(t)
+                    && (set(t + 1)
+                        || (name(t + 1) && set(t + 2))
+                        || (words.get(t + 1) == Some(&"as") && name(t + 2) && set(t + 3)))
+            })
         })
-    })
 }
 
 /// Resolves `SELECT * FROM [schema.]table` to exactly one table or Redis key in
@@ -1165,6 +1325,103 @@ mod tests {
         }
         assert!(!requires_confirmation(DatabaseEngine::Redis, "GET drop"));
         assert!(!requires_confirmation(DatabaseEngine::Redis, "FLUSHALLX"));
+    }
+
+    const MYSQL: DatabaseEngine = DatabaseEngine::Mysql;
+
+    #[test]
+    fn engine_specific_quoting_cannot_hide_destructive_statements() {
+        for (engine, sql) in [
+            (
+                MYSQL,
+                "INSERT INTO notes VALUES ('it\\'s'); DELETE FROM notes;",
+            ),
+            (MYSQL, "SELECT \"say \\\"hi\"; DELETE FROM notes"),
+            (MYSQL, "DELETE FROM users # WHERE id = 5"),
+            (MYSQL, "DELETE FROM users -- WHERE id = 5"),
+            (MYSQL, "/*!50000 DROP TABLE users */"),
+            (MYSQL, "SELECT `a``;'`; DELETE FROM notes"),
+            (PG, "SELECT E'it\\'s'; TRUNCATE t;"),
+            (PG, "SELECT e'\\\\'; DELETE FROM t"),
+            (PG, "SELECT $$'$$; DELETE FROM users; SELECT $$'$$"),
+            (PG, "SELECT $é$'$é$; DELETE FROM users; SELECT $é$'$é$"),
+            (PG, "SELECT $tag$ $$ ' $tag$; DELETE FROM users"),
+            (PG, "DELETE FROM\"users\""),
+            // Servers with non-default backslash handling read these the
+            // other way, so either reading must not hide the DELETE.
+            (PG, "SELECT '\\' ; SELECT ' ; DELETE FROM users; --'"),
+            (MYSQL, "SELECT 'a\\' ; DELETE FROM users; -- '"),
+            (PG, "UPDATE\"users\"SET active = false"),
+            (PG, "UPDATE t SET a = (SELECT max(b) FROM u WHERE u.id = 1)"),
+            (PG, "DELETE FROM t USING (SELECT 1 FROM u WHERE true) s"),
+            (
+                PG,
+                "WITH x AS (DELETE FROM a WHERE id = 1 RETURNING id) DELETE FROM b",
+            ),
+            (
+                PG,
+                "WITH gone AS (DELETE FROM users RETURNING id) SELECT * FROM gone WHERE id > 0",
+            ),
+        ] {
+            assert!(requires_confirmation(engine, sql), "{engine:?}: {sql}");
+        }
+    }
+
+    #[test]
+    fn engine_specific_quoting_keeps_filtered_writes_quiet() {
+        for (engine, sql) in [
+            (MYSQL, "DELETE FROM users WHERE note = 'it\\'s; fine'"),
+            (MYSQL, "DELETE FROM users WHERE note = 'drop it\\\\'"),
+            (MYSQL, "DELETE FROM `drop` WHERE id = 1"),
+            (MYSQL, "SELECT 1 # drop table users"),
+            (MYSQL, "SELECT 1--1"),
+            (PG, "SELECT 'C:\\'; DELETE FROM files WHERE id = 7"),
+            (PG, "SELECT $$ drop table x; $$"),
+            (PG, "SELECT $body$ DELETE FROM users $body$"),
+            (
+                PG,
+                "UPDATE t SET a = (SELECT max(b) FROM u WHERE u.id = t.id) WHERE t.id = 1",
+            ),
+            (
+                PG,
+                "DELETE FROM t WHERE id IN (SELECT id FROM u WHERE u.gone)",
+            ),
+            (PG, "SELECT a$b FROM t WHERE x = 'drop'"),
+        ] {
+            assert!(!requires_confirmation(engine, sql), "{engine:?}: {sql}");
+        }
+    }
+
+    fn at_cursor_in(engine: DatabaseEngine, text: &str, cursor: usize) -> String {
+        execution_target(engine, text, cursor, cursor).map_or_else(String::new, |t| t.sql)
+    }
+
+    #[test]
+    fn statement_under_cursor_follows_engine_quoting() {
+        let sql = "SELECT * FROM files WHERE path LIKE 'C:\\';\nDELETE FROM files WHERE id = 7;";
+        assert_eq!(
+            at_cursor_in(PG, sql, 3),
+            "SELECT * FROM files WHERE path LIKE 'C:\\';"
+        );
+        let sql = "SELECT E'it\\'s;';\nSELECT 2;";
+        assert_eq!(at_cursor_in(PG, sql, 3), "SELECT E'it\\'s;';");
+        let sql = "SELECT 'it\\'s;';\nSELECT 2;";
+        assert_eq!(at_cursor_in(MYSQL, sql, 3), "SELECT 'it\\'s;';");
+        let sql = "SELECT 1 # note; still a comment\n, 2;\nSELECT 3;";
+        assert_eq!(
+            at_cursor_in(MYSQL, sql, 3),
+            "SELECT 1 # note; still a comment\n, 2;"
+        );
+        let sql = "SELECT `semi;colon` FROM t;\nSELECT 2;";
+        assert_eq!(at_cursor_in(MYSQL, sql, 3), "SELECT `semi;colon` FROM t;");
+        // `$` continues a PostgreSQL identifier, so `a$tag$` is not a dollar quote.
+        let sql = "SELECT a$tag$ FROM t;\nSELECT 2;";
+        assert_eq!(at_cursor_in(PG, sql, sql.len()), "SELECT 2;");
+        // MySQL has no dollar quoting, and `#` is not a PostgreSQL comment.
+        let sql = "SELECT $$;\nSELECT 2;";
+        assert_eq!(at_cursor_in(MYSQL, sql, sql.len()), "SELECT 2;");
+        let sql = "SELECT 1 # 2;\nSELECT 3;";
+        assert_eq!(at_cursor_in(PG, sql, 3), "SELECT 1 # 2;");
     }
 
     fn tree() -> Vec<SchemaNode> {
