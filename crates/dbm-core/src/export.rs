@@ -7,10 +7,28 @@ use std::io::Write;
 use std::path::Path;
 
 use crate::models::{TablePage, TablePageRequest};
-use crate::sql_text::csv_line;
+use crate::sql_text::{csv_document, csv_line};
 
 /// Rows fetched per request while exporting, as in the desktop app.
 pub const EXPORT_PAGE_SIZE: u32 = 1_000;
+
+/// Saves an already-loaded result without executing its query again. Like a
+/// table export, this replaces the destination only after writing succeeds.
+pub fn export_result_csv(
+    path: &Path,
+    columns: &[String],
+    rows: &[Vec<serde_json::Value>],
+) -> Result<u64, String> {
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let mut file = tempfile::NamedTempFile::new_in(parent).map_err(|e| e.to_string())?;
+    write!(file, "\u{feff}{}", csv_document(columns, rows)).map_err(|e| e.to_string())?;
+    file.as_file().sync_all().map_err(|e| e.to_string())?;
+    file.persist(path).map_err(|e| e.to_string())?;
+    Ok(rows.len() as u64)
+}
 
 /// Streams every page of `request` (its offset and limit are ignored) to
 /// `path` as CSV and returns the number of rows written. The destination is
@@ -124,6 +142,29 @@ mod tests {
             .build()
             .unwrap()
             .block_on(future)
+    }
+
+    #[test]
+    fn result_export_preserves_columns_values_and_empty_result_headers() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("query.csv");
+        let columns = vec!["customer,name".into(), "note".into(), "active".into()];
+        let rows = vec![
+            vec![json!("José"), json!("a\"b\nnext"), json!(true)],
+            vec![json!("Z"), json!(null), json!(false)],
+        ];
+        std::fs::write(&path, "old export").unwrap();
+        assert_eq!(export_result_csv(&path, &columns, &rows).unwrap(), 2);
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "\u{feff}\"customer,name\",note,active\nJosé,\"a\"\"b\nnext\",true\nZ,NULL,false"
+        );
+        assert_eq!(export_result_csv(&path, &columns, &[]).unwrap(), 0);
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "\u{feff}\"customer,name\",note,active"
+        );
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
     }
 
     #[test]

@@ -2,6 +2,7 @@ import AppKit
 
 protocol QueryHost: TableHost {
     func runQuery(_ tab: WorkTab, sql: String, refresh: Bool)
+    func exportQueryResult(_ tab: WorkTab)
     func engine(of tab: WorkTab) -> Engine
     func history(for tab: WorkTab) -> [[String: Any]]
     func isRunning(_ tab: WorkTab) -> String?
@@ -368,6 +369,15 @@ final class QueryPane: NSView, NSTextViewDelegate, NSSplitViewDelegate {
     private let truncatedChip = Chip("truncated", color: Graphite.modified)
     private let resultGrid = ResultGrid()
     private let resultCard = PanelView(fill: Graphite.bg)
+    private lazy var copyButton = GButton("Copy visible", icon: .copy, style: .toolbar,
+        tooltip: "Copy the returned result as CSV, including column headers") { [weak self] in self?.copyVisible() }
+    private lazy var exportButton = GButton("Export all", icon: .download, style: .toolbar,
+        tooltip: "Save every returned row as CSV without re-running the query") { [weak self] in
+        guard let self else { return }
+        self.host?.exportQueryResult(self.tab)
+    }
+    private let exportHint = label("Copy/export includes returned rows only; result was truncated.", font: Graphite.ui(11.5), color: Graphite.modified)
+    private lazy var resultActions = hstack([copyButton, exportButton, exportHint, spacer()], spacing: 8)
     private let errorView = MessageView()
     // Optional: the editor's selection delegate reloads before `build()` ends.
     private var bodyBelowTop: NSLayoutConstraint?
@@ -506,7 +516,13 @@ final class QueryPane: NSView, NSTextViewDelegate, NSSplitViewDelegate {
 
         resultCard.radius = 10
         resultCard.outline = Graphite.border
-        resultCard.pin(resultGrid.scroll, insets: NSEdgeInsets(top: 1, left: 1, bottom: 1, right: 1))
+        let resultColumn = vstack([resultActions, resultGrid.scroll], spacing: 0)
+        resultColumn.distribution = .fill
+        resultActions.widthAnchor.constraint(equalTo: resultColumn.widthAnchor).isActive = true
+        resultGrid.scroll.widthAnchor.constraint(equalTo: resultColumn.widthAnchor).isActive = true
+        resultGrid.scroll.setContentHuggingPriority(.init(1), for: .vertical)
+        resultCard.pin(resultColumn, insets: NSEdgeInsets(top: 1, left: 1, bottom: 1, right: 1))
+        exportHint.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         results.translatesAutoresizingMaskIntoConstraints = false
         resultBody.translatesAutoresizingMaskIntoConstraints = false
         results.addSubview(resultBody)
@@ -519,6 +535,8 @@ final class QueryPane: NSView, NSTextViewDelegate, NSSplitViewDelegate {
             self?.tab.queryError = nil
             self?.layoutError()
         }
+        errorView.onOpen = { [weak self] url in self?.host?.revealExport(url, open: true) }
+        errorView.onReveal = { [weak self] url in self?.host?.revealExport(url, open: false) }
         NSLayoutConstraint.activate([
             errorView.topAnchor.constraint(equalTo: results.topAnchor, constant: 8),
             errorView.leadingAnchor.constraint(equalTo: results.leadingAnchor, constant: 14),
@@ -584,15 +602,19 @@ final class QueryPane: NSView, NSTextViewDelegate, NSSplitViewDelegate {
         let running = host?.isRunning(tab)
         let target = editor.updateActiveStatement()
         let engine = host?.engine(of: tab) ?? .postgres
+        let exporting = host?.isExporting(tab) ?? false
         runButton.title = running == "run" ? "Running…"
             : target?.selection == true ? "Run selection" : engine == .redis ? "Run command" : "Run statement"
-        runButton.isEnabled = running == nil && target != nil
+        runButton.isEnabled = running == nil && !exporting && target != nil
         selectionRunButton.isHidden = target?.selection != true
-        selectionRunButton.isEnabled = running == nil
+        selectionRunButton.isEnabled = running == nil && !exporting
         refreshButton.title = running == "refresh" ? "Refreshing…" : "Refresh"
-        refreshButton.isEnabled = running == nil && tab.lastExecuted != nil && !(embeddedPane?.tab.dirty ?? false)
+        refreshButton.isEnabled = running == nil && !exporting && tab.lastExecuted != nil && !(embeddedPane?.tab.dirty ?? false)
         refreshButton.toolTip = tab.lastExecuted != nil
             ? "Re-run the last executed statement for fresh results" : "Run a statement first to enable refresh"
+        copyButton.isEnabled = running == nil && !exporting
+        exportButton.isEnabled = running == nil && !exporting
+        exportButton.title = exporting ? "Exporting…" : "Export all"
         reloadHistory()
         reloadResult()
     }
@@ -632,7 +654,7 @@ final class QueryPane: NSView, NSTextViewDelegate, NSSplitViewDelegate {
             return
         }
         placeholder.isHidden = true
-        queryStatus.isHidden = tab.queryError != nil || host?.isRunning(tab) != nil
+        queryStatus.isHidden = tab.queryError?.kind == .error || host?.isRunning(tab) != nil
         let duration = int(result["durationMs"])
         queryStatus.stringValue = "Query completed in \(duration) ms"
         queryStatus.toolTip = queryStatus.stringValue
@@ -659,6 +681,7 @@ final class QueryPane: NSView, NSTextViewDelegate, NSSplitViewDelegate {
         queryStatus.stringValue += " · \(int(result["rowCount"])) rows\(affected)"
         queryStatus.toolTip = queryStatus.stringValue
         truncatedChip.isHidden = !bool(result["truncated"])
+        exportHint.isHidden = !bool(result["truncated"])
         readOnlyChip.isHidden = columns.isEmpty
         readOnlyChip.toolTip = "This query does not resolve to one complete table, so Anybase cannot safely map edits back to rows."
         resultCard.isHidden = columns.isEmpty
@@ -707,5 +730,15 @@ final class QueryPane: NSView, NSTextViewDelegate, NSSplitViewDelegate {
     private func refreshResult() {
         guard let sql = tab.lastExecuted else { return }
         host?.runQuery(tab, sql: sql, refresh: true)
+    }
+
+    private func copyVisible() {
+        guard let result = tab.result, tab.embedded == nil else { return }
+        let columns = array(result["columns"]).map { string($0["name"]) }
+        guard !columns.isEmpty else { return }
+        let rows = result["rows"] as? [[Any]] ?? []
+        host?.copyText(Helpers.csv(columns: columns, rows: rows))
+        tab.queryError = .notice("Copied \(rows.count) visible \(rows.count == 1 ? "row" : "rows") as CSV.")
+        reload()
     }
 }

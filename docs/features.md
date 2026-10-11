@@ -82,6 +82,11 @@ What the app does today, what is deliberately not built yet, and what it stores 
   their heights, including when results open in the editable table viewer.
   Query completion time appears beside the query title; results do not have
   a separate completion or table-viewer status bar.
+  **Copy visible** copies query result headers and returned rows as CSV;
+  **Export all** saves those rows directly to a CSV file without re-running
+  SQL or Redis commands. Truncated results clearly warn that copy/export
+  includes only the returned rows (at most 10,000), not the uncapped result.
+  Table viewers keep visible-page copy and full filtered export across pages.
   PostgreSQL and MySQL retain only capped query results in memory while
   consuming the remaining rows, so later statements and errors still run
   through the normal result handling. The cap does not limit server execution
