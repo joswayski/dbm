@@ -33,20 +33,16 @@ pub enum Command {
     History(Uuid, String),
     Table(TablePageRequest),
     Mutate(MutationBatch),
-    /// Asks for a destination, then writes every filtered row as CSV.
+    /// Writes every filtered row as CSV to the chosen destination.
     ExportCsv(ExportRequest),
-    /// Saves the returned rows, without replaying the SQL or Redis command.
-    ExportResultCsv {
-        columns: Vec<String>,
-        rows: Vec<Vec<serde_json::Value>>,
-        file_name: String,
-    },
 }
 
 pub struct ExportRequest {
     pub page: TablePageRequest,
     pub columns: Vec<String>,
-    pub file_name: String,
+    /// Chosen on the UI side before the request is sent, so the dialog never
+    /// holds up the serialized worker.
+    pub path: PathBuf,
     /// Rows written so far, for the "Exporting N / total…" label.
     pub progress: std::sync::Arc<std::sync::atomic::AtomicU64>,
 }
@@ -64,7 +60,7 @@ pub enum Payload {
     History(Uuid, String, Vec<QueryHistoryEntry>),
     Table(TablePage),
     Mutation(MutationResult),
-    Exported(Option<(PathBuf, u64)>),
+    Exported(PathBuf, u64),
 }
 
 pub struct Completion {
@@ -132,22 +128,6 @@ enum Backend {
 
 impl Backend {
     async fn execute(&mut self, command: Command) -> Result<Payload, String> {
-        if let Command::ExportResultCsv {
-            columns,
-            rows,
-            file_name,
-        } = command
-        {
-            let Some(path) = rfd::FileDialog::new()
-                .set_file_name(file_name)
-                .add_filter("CSV", &["csv"])
-                .save_file()
-            else {
-                return Ok(Payload::Exported(None));
-            };
-            let written = dbm_core::export::export_result_csv(&path, &columns, &rows)?;
-            return Ok(Payload::Exported(Some((path, written))));
-        }
         match self {
             Self::Live(state) => execute_live(state, command).await,
             Self::Demo(backend) => backend.execute(command).await,
@@ -270,9 +250,9 @@ async fn execute_live(state: &AppState, command: Command) -> Result<Payload, Str
             )
         }
         Command::ExportCsv(request) => {
-            Payload::Exported(export_csv(request, |page| live_table_page(state, page)).await?)
+            let (path, rows) = export_csv(request, |page| live_table_page(state, page)).await?;
+            Payload::Exported(path, rows)
         }
-        Command::ExportResultCsv { .. } => unreachable!("result exports need no database"),
     };
     Ok(result)
 }
@@ -287,23 +267,65 @@ async fn live_table_page(state: &AppState, request: TablePageRequest) -> Result<
         .map_err(string_error)
 }
 
-/// Asks for a destination, then streams every filtered row there with the
-/// shared exporter. `None` means the dialog was canceled.
-async fn export_csv<F, Fut>(
-    request: ExportRequest,
-    mut load: F,
-) -> Result<Option<(PathBuf, u64)>, String>
+/// Asks for a CSV destination on its own thread and reports the choice
+/// (`None` when canceled) through `done`.
+pub fn pick_export_path(
+    context: egui::Context,
+    file_name: String,
+    done: impl FnOnce(Option<PathBuf>) + Send + 'static,
+) -> std::io::Result<()> {
+    std::thread::Builder::new()
+        .name("dbm-export-dialog".into())
+        .spawn(move || {
+            let path = rfd::FileDialog::new()
+                .set_file_name(&file_name)
+                .add_filter("CSV", &["csv"])
+                .save_file();
+            done(path);
+            context.request_repaint();
+        })
+        .map(drop)
+}
+
+/// The outcome of saving a query result: the file and its row count, `None`
+/// when the dialog was canceled, or the error that stopped the write.
+pub type ResultExport = Result<Option<(PathBuf, u64)>, String>;
+
+/// Saves already-loaded query rows as CSV, without replaying the SQL or
+/// Redis command: asks for a destination and writes the file on its own
+/// thread, so neither the UI nor the database worker waits on the dialog.
+pub fn save_result_csv(
+    context: egui::Context,
+    file_name: String,
+    columns: Vec<String>,
+    rows: Vec<Vec<serde_json::Value>>,
+    done: impl FnOnce(ResultExport) + Send + 'static,
+) -> std::io::Result<()> {
+    std::thread::Builder::new()
+        .name("dbm-result-export".into())
+        .spawn(move || {
+            let result = rfd::FileDialog::new()
+                .set_file_name(&file_name)
+                .add_filter("CSV", &["csv"])
+                .save_file()
+                .map(|path| {
+                    let rows = dbm_core::export::export_result_csv(&path, &columns, &rows)?;
+                    Ok((path, rows))
+                })
+                .transpose();
+            done(result);
+            context.request_repaint();
+        })
+        .map(drop)
+}
+
+/// Streams every filtered row to the chosen file with the shared exporter.
+async fn export_csv<F, Fut>(request: ExportRequest, mut load: F) -> Result<(PathBuf, u64), String>
 where
     F: FnMut(TablePageRequest) -> Fut,
     Fut: Future<Output = Result<TablePage, String>>,
 {
-    let Some(path) = rfd::FileDialog::new()
-        .set_file_name(&request.file_name)
-        .add_filter("CSV", &["csv"])
-        .save_file()
-    else {
-        return Ok(None);
-    };
+    let path = request.path;
     let progress = request.progress;
     progress.store(0, std::sync::atomic::Ordering::Relaxed);
     // Each page request starts at the number of rows already written.
@@ -313,7 +335,7 @@ where
     };
     let rows =
         dbm_core::export::export_csv(&path, &request.columns, &request.page, tracked).await?;
-    Ok(Some((path, rows)))
+    Ok((path, rows))
 }
 
 fn string_error(error: impl std::fmt::Display) -> String {
@@ -372,10 +394,11 @@ impl DemoBackend {
             }
             Command::Table(request) => Payload::Table(demo::table_page(&request)),
             Command::Mutate(_) => return Err(store.apply_mutations().unwrap_err()),
-            Command::ExportCsv(request) => Payload::Exported(
-                export_csv(request, |page| async move { Ok(demo::table_page(&page)) }).await?,
-            ),
-            Command::ExportResultCsv { .. } => unreachable!("result exports need no database"),
+            Command::ExportCsv(request) => {
+                let (path, rows) =
+                    export_csv(request, |page| async move { Ok(demo::table_page(&page)) }).await?;
+                Payload::Exported(path, rows)
+            }
         })
     }
 }

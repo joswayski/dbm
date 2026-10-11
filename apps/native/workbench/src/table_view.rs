@@ -123,6 +123,9 @@ pub struct TableState {
     pub loaded: Option<TablePageRequest>,
     /// The request in flight, recorded as `loaded` when its page arrives.
     pub requested: Option<TablePageRequest>,
+    /// Loads sent and not yet answered. Replies arrive in order, so only the
+    /// last one belongs to `requested`; earlier ones are dropped.
+    pub in_flight: u32,
     pub loading: bool,
     /// When the current load started, for the delayed "Refreshing…" overlay.
     loading_since: Option<f64>,
@@ -161,6 +164,7 @@ impl Default for TableState {
             page: None,
             loaded: None,
             requested: None,
+            in_flight: 0,
             loading: false,
             loading_since: None,
             message: None,
@@ -392,7 +396,13 @@ pub fn show(ui: &mut egui::Ui, cx: &TableContext<'_>, state: &mut TableState) ->
                     return;
                 }
                 ui.centered_and_justified(|ui| {
-                    if ui.button("Couldn't load rows · Retry").clicked() {
+                    if ui
+                        .add(
+                            theme::secondary_button("Couldn't load rows · Retry")
+                                .icon(Icon::Refresh),
+                        )
+                        .clicked()
+                    {
                         actions.push(TableAction::Reload);
                     }
                 });
@@ -467,37 +477,7 @@ fn toolbar(
 ) {
     ui.horizontal_centered(|ui| {
         ui.spacing_mut().item_spacing.x = 6.0;
-        icons::show(ui, Icon::Table, 15.0, theme::MUTED);
-        if !cx.embedded {
-            ui.label(
-                RichText::new(cx.schema)
-                    .font(ui_font(15.0))
-                    .color(theme::MUTED),
-            );
-            ui.add_space(-6.0);
-            ui.label(
-                RichText::new(format!(".{}", cx.table))
-                    .font(theme::semibold(15.0))
-                    .color(theme::TEXT_STRONG),
-            );
-        } else {
-            ui.label(
-                RichText::new(format!("{}.{}", cx.schema, cx.table))
-                    .font(theme::semibold(13.0))
-                    .color(theme::TEXT_STRONG),
-            );
-        }
-        if let Some(page) = &state.page {
-            let rows = page.total_rows.map_or_else(|| "—".to_owned(), theme::count);
-            ui.label(
-                RichText::new(format!(
-                    "{rows} rows · {} columns",
-                    page.metadata.columns.len()
-                ))
-                .font(ui_font(12.0))
-                .color(theme::FAINT),
-            );
-        }
+        // Buttons first; the title gets the remaining width.
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let tip = if state.inspector_open {
                 "Hide row inspector"
@@ -584,10 +564,57 @@ fn toolbar(
             ) {
                 actions.push(reload_or_block(state));
             }
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                icons::show(ui, Icon::Table, 15.0, theme::MUTED);
+                let mut title = egui::text::LayoutJob::default();
+                if cx.embedded {
+                    title.append(
+                        &format!("{}.{}", cx.schema, cx.table),
+                        0.0,
+                        egui::TextFormat::simple(theme::semibold(13.0), theme::TEXT_STRONG),
+                    );
+                } else {
+                    title.append(
+                        cx.schema,
+                        0.0,
+                        egui::TextFormat::simple(ui_font(15.0), theme::MUTED),
+                    );
+                    title.append(
+                        &format!(".{}", cx.table),
+                        0.0,
+                        egui::TextFormat::simple(theme::semibold(15.0), theme::TEXT_STRONG),
+                    );
+                }
+                // Long names truncate (full name on hover) and keep the counts
+                // and the buttons on the right visible.
+                let counts = state.page.as_ref().map(|page| {
+                    let rows = page.total_rows.map_or_else(|| "—".to_owned(), theme::count);
+                    RichText::new(format!(
+                        "{rows} rows · {} columns",
+                        page.metadata.columns.len()
+                    ))
+                    .font(ui_font(12.0))
+                    .color(theme::FAINT)
+                });
+                let reserve = counts.as_ref().map_or(0.0, |text| {
+                    let galley = ui.painter().layout_no_wrap(
+                        text.text().to_owned(),
+                        ui_font(12.0),
+                        theme::FAINT,
+                    );
+                    galley.size().x + 6.0
+                });
+                ui.scope(|ui| {
+                    ui.set_max_width((ui.available_width() - reserve).max(0.0));
+                    ui.add(egui::Label::new(title).truncate());
+                });
+                if let Some(counts) = counts {
+                    ui.add(egui::Label::new(counts).truncate());
+                }
+            });
         });
     });
 }
-
 /// "N selected" menu and the grid's context menu.
 /// The "N selected" menu, and (without "Clear selection") the row context
 /// menu, as in the desktop.
@@ -613,7 +640,9 @@ fn selection_menu(
     let Some(page) = state.page.as_ref() else {
         return;
     };
-    if editable(cx, page) {
+    // Staged rows are keyed by position, so stage nothing while the page is
+    // being replaced or saved.
+    if editable(cx, page) && !state.loading && !cx.saving {
         let all_deleted = selected
             .iter()
             .all(|r| state.pending.get(r).is_some_and(|p| p.deleted));
@@ -950,7 +979,7 @@ fn query_controls(
             .filters
             .iter()
             .any(|f| !filter_needs_value(f.operator) || !f.value.trim().is_empty());
-    if has_filters && ui.button("Clear").clicked() {
+    if has_filters && ui.add(theme::secondary_button("Clear")).clicked() {
         state.filters = columns
             .first()
             .map(|c| FilterDraft::new(c))
@@ -1080,7 +1109,7 @@ fn pending_bar(
                 actions.push(TableAction::Save);
             }
             if ui
-                .add_enabled(!cx.saving, egui::Button::new("Discard changes"))
+                .add_enabled(!cx.saving, theme::secondary_button("Discard changes"))
                 .clicked()
             {
                 state.pending.clear();
@@ -1098,9 +1127,7 @@ pub fn cell_text(value: &Value) -> RichText {
             .italics()
             .color(theme::FAINT)
     } else {
-        let text = display_value(value);
-        let short: String = text.chars().take(200).collect();
-        RichText::new(short.replace('\n', " "))
+        RichText::new(display_prefix(value, 200).replace('\n', " "))
             .font(mono(12.0))
             .color(theme::TEXT)
     }
@@ -1136,6 +1163,64 @@ fn value_cell(ui: &mut egui::Ui, value: &Value, text: RichText, right: bool, too
         ui.ctx().copy_text(display_value(value));
     }
     ui.advance_cursor_after_rect(rect);
+}
+
+/// Collects serialized JSON up to `limit` bytes, then stops the serializer.
+struct CappedWriter {
+    bytes: Vec<u8>,
+    limit: usize,
+}
+
+impl std::io::Write for CappedWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let room = self.limit.saturating_sub(self.bytes.len());
+        if room == 0 {
+            return Err(std::io::ErrorKind::WriteZero.into());
+        }
+        let take = room.min(buf.len());
+        self.bytes.extend_from_slice(&buf[..take]);
+        Ok(take)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// The first `chars` characters of `display_value(value)`, without copying a
+/// long string or serializing a large JSON document every frame.
+fn display_prefix(value: &Value, chars: usize) -> String {
+    match value {
+        Value::String(text) => text.chars().take(chars).collect(),
+        Value::Array(_) | Value::Object(_) => {
+            // Four bytes per character always covers `chars` characters.
+            let mut writer = CappedWriter {
+                bytes: Vec::new(),
+                limit: chars * 4,
+            };
+            // A full writer stops serialization with an error; keep the prefix.
+            let _ = serde_json::to_writer(&mut writer, value);
+            String::from_utf8_lossy(&writer.bytes)
+                .chars()
+                .take(chars)
+                .collect()
+        }
+        other => display_value(other),
+    }
+}
+
+/// Counts serialized bytes without keeping them.
+struct CountingWriter(usize);
+
+impl std::io::Write for CountingWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0 += buf.len();
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
 fn hairline(ui: &egui::Ui) {
@@ -1707,10 +1792,7 @@ fn change_preview_card(
                             } else {
                                 "Discard edit"
                             };
-                            let button =
-                                egui::Button::new(RichText::new(label).font(ui_font(12.0)))
-                                    .min_size(Vec2::new(0.0, 26.0));
-                            if ui.add(button).clicked() {
+                            if ui.add(theme::secondary_button(label).small()).clicked() {
                                 discard = true;
                             }
                         });
@@ -1840,6 +1922,38 @@ fn diff_box(
     });
 }
 
+/// A result-grid header: result grids don't sort, so the header has no hover
+/// state or sort affordance, only the full name when it is cut off.
+fn static_header_cell(ui: &mut egui::Ui, name: &str, numeric: bool) {
+    let rect = ui.max_rect();
+    // `.data-grid th { border-right: 1px solid #242427 }`
+    ui.painter().vline(
+        rect.right() - 0.5,
+        rect.y_range(),
+        Stroke::new(1.0, Color32::from_rgb(0x24, 0x24, 0x27)),
+    );
+    let mut job =
+        egui::text::LayoutJob::simple_singleline(name.to_owned(), ui_font(12.0), theme::TEXT);
+    job.wrap = egui::text::TextWrapping::truncate_at_width((rect.width() - 20.0).max(0.0));
+    let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
+    // `th.numeric-cell { text-align: right }`
+    let x = if numeric {
+        rect.right() - 10.0 - galley.size().x
+    } else {
+        rect.left() + 10.0
+    };
+    let elided = galley.elided;
+    ui.painter().galley(
+        egui::pos2(x, rect.center().y - galley.size().y / 2.0),
+        galley,
+        theme::TEXT,
+    );
+    if elided {
+        ui.interact(rect, ui.id().with(("header", name)), Sense::hover())
+            .on_hover_text(name);
+    }
+}
+
 /// Read-only query results.
 pub fn result_grid(ui: &mut egui::Ui, tab_id: u64, columns: &[QueryColumn], rows: &[Vec<Value>]) {
     if columns.is_empty() {
@@ -1868,26 +1982,7 @@ pub fn result_grid(ui: &mut egui::Ui, tab_id: u64, columns: &[QueryColumn], rows
                 )
                 .header(theme::HEADER_HEIGHT, |mut header| {
                     for (index, column) in columns.iter().enumerate() {
-                        header.col(|ui| {
-                            if numeric[index] {
-                                // `th.numeric-cell { text-align: right }`
-                                let rect = ui.max_rect();
-                                ui.painter().vline(
-                                    rect.right() - 0.5,
-                                    rect.y_range(),
-                                    Stroke::new(1.0, Color32::from_rgb(0x24, 0x24, 0x27)),
-                                );
-                                ui.painter().text(
-                                    rect.right_center() - Vec2::new(10.0, 0.0),
-                                    egui::Align2::RIGHT_CENTER,
-                                    &column.name,
-                                    ui_font(12.0),
-                                    theme::TEXT,
-                                );
-                            } else {
-                                header_cell(ui, &column.name, "", false, None, None);
-                            }
-                        });
+                        header.col(|ui| static_header_cell(ui, &column.name, numeric[index]));
                     }
                 })
                 .body(|body| {
@@ -2135,9 +2230,9 @@ fn grid(
                                 edit_cell = Some((index, column));
                             }
                         }
-                        let preview = state.pending.get(&index).cloned();
+                        let staged = state.pending.contains_key(&index);
                         let response = row.response();
-                        if preview.is_some() && response.hovered() {
+                        if staged && response.hovered() {
                             hovered_preview = Some((index, response.rect));
                         }
                         if response.clicked() {
@@ -2230,6 +2325,7 @@ fn grid(
     let free =
         ui.memory(|m| m.focused().is_none()) && theme::focused_last_frame(ui.ctx()).is_none();
     if free
+        && ui.is_enabled()
         && !state.selected.is_empty()
         && editable(cx, page)
         && ui.input(|i| i.key_pressed(egui::Key::Delete))
@@ -2441,7 +2537,10 @@ fn inspector_field(
         let note = if is_key {
             Some(("Primary key".to_owned(), theme::FAINT))
         } else if changed {
-            Some((format!("was {}", display_value(original)), theme::MODIFIED))
+            Some((
+                format!("was {}", display_prefix(original, 200)),
+                theme::MODIFIED,
+            ))
         } else {
             None
         };
@@ -2457,7 +2556,7 @@ fn inspector_field(
     // Laying out a multi-megabyte value in a text field costs seconds and
     // hundreds of megabytes, so large values get a read-only preview.
     if let Some(size) = large_value_size(current) {
-        let preview: String = editable_text(current).chars().take(160).collect();
+        let preview = display_prefix(current, 160);
         ui.add(
             egui::Label::new(
                 RichText::new(format!("{preview}…"))
@@ -2540,7 +2639,11 @@ fn large_value_size(value: &Value) -> Option<String> {
     let len = match value {
         Value::String(text) => text.len(),
         Value::Null | Value::Bool(_) | Value::Number(_) => return None,
-        other => other.to_string().len(),
+        other => {
+            let mut counter = CountingWriter(0);
+            let _ = serde_json::to_writer(&mut counter, other);
+            counter.0
+        }
     };
     (len > LARGE_VALUE_BYTES).then(|| {
         if len >= 1024 * 1024 {

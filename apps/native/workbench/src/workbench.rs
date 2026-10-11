@@ -34,6 +34,7 @@ use crate::theme::{self, chip, eyebrow, mono, primary_button, section_label, ui_
 const MAX_QUERY_ROWS: u32 = 10_000;
 const SIDEBAR_COLLAPSED_KEY: &str = "dbm.sidebarCollapsed";
 const LARGE_EXPORT_WARNING_ROWS: u64 = 100_000;
+const PASSWORD_LOAD: &str = "Loading saved password";
 fn engine_label(engine: DatabaseEngine) -> &'static str {
     match engine {
         DatabaseEngine::Postgres => "PostgreSQL",
@@ -86,6 +87,24 @@ struct Tab {
     embedded: Option<(String, String)>,
     /// Shrunk to a narrow pill in the tab strip until selected again.
     collapsed: bool,
+}
+
+impl Tab {
+    /// A per-frame copy for drawing chrome, leaving out the editor text,
+    /// which can be megabytes.
+    fn without_sql(&self) -> Self {
+        Self {
+            id: self.id,
+            profile_id: self.profile_id,
+            title: self.title.clone(),
+            kind: self.kind.clone(),
+            sql: String::new(),
+            selection: self.selection,
+            last_executed: self.last_executed.clone(),
+            embedded: self.embedded.clone(),
+            collapsed: self.collapsed,
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -308,6 +327,9 @@ struct Completion {
     selected: usize,
 }
 
+/// The save dialog's answer for a tab's export: `None` when canceled.
+type ExportDestination = (u64, Option<std::path::PathBuf>);
+
 /// Bottom-right toast, as the desktop app uses for schema refresh summaries.
 struct Toast {
     message: Message,
@@ -342,11 +364,26 @@ pub struct Workbench {
     confirm_delete: Option<Uuid>,
     confirm_query: Option<ConfirmQuery>,
     confirm_export: Option<u64>,
+    /// Exports waiting for a destination, by tab: the rows to export and their
+    /// columns.
+    choosing_export: HashMap<u64, (TablePageRequest, Vec<String>)>,
+    export_paths: (
+        std::sync::mpsc::Sender<ExportDestination>,
+        std::sync::mpsc::Receiver<ExportDestination>,
+    ),
+    /// Query results being saved as CSV, by tab, and their outcomes.
+    saving_results: HashSet<u64>,
+    saved_results: (
+        std::sync::mpsc::Sender<(u64, crate::backend::ResultExport)>,
+        std::sync::mpsc::Receiver<(u64, crate::backend::ResultExport)>,
+    ),
     /// Self-updates from the native preview channel.
     updates: crate::updates::Updates,
     /// A downloaded-on-confirm update awaiting the user's go-ahead.
     confirm_update: Option<dbm_update::Available>,
     renaming: Option<(u64, String)>,
+    /// The active tab last scrolled into view in the tab strip.
+    tab_in_view: Option<u64>,
     sidebar_collapsed: bool,
     /// The sidebar's resize edge was clicked; arrow keys resize it.
     sidebar_handle_focused: bool,
@@ -396,9 +433,14 @@ impl Workbench {
             confirm_delete: None,
             confirm_query: None,
             confirm_export: None,
+            choosing_export: HashMap::new(),
+            export_paths: std::sync::mpsc::channel(),
+            saving_results: HashSet::new(),
+            saved_results: std::sync::mpsc::channel(),
             updates: crate::updates::Updates::new(),
             confirm_update: None,
             renaming: None,
+            tab_in_view: None,
             sidebar_collapsed: false,
             sidebar_handle_focused: false,
             completion: None,
@@ -513,7 +555,7 @@ impl Workbench {
             RequestKind::Form => {
                 if let Some(form) = &mut self.profile_form {
                     form.saving = false;
-                    if meta.label == "Loading saved password" {
+                    if meta.label == PASSWORD_LOAD {
                         if form.id == meta.profile && !form.password_edited {
                             form.password_load_failed = true;
                             form.feedback = Some((FeedbackKind::Error, error));
@@ -528,6 +570,12 @@ impl Workbench {
                 if let Some(tab) = meta.tab.filter(|tab| self.tables.contains_key(tab)) {
                     if meta.kind == RequestKind::Table {
                         if let Some(state) = self.tables.get_mut(&tab) {
+                            state.in_flight = state.in_flight.saturating_sub(1);
+                            if state.in_flight > 0 {
+                                // A newer load replaces this page anyway.
+                                return;
+                            }
+                            state.requested = None;
                             state.restore_loaded();
                         }
                     }
@@ -586,7 +634,7 @@ impl Workbench {
         match payload {
             Payload::ConnectionUrl(url) => {
                 if let Some(form) = &mut self.profile_form {
-                    if meta.label == "Loading saved password"
+                    if meta.label == PASSWORD_LOAD
                         && form.id == meta.profile
                         && !form.password_edited
                     {
@@ -674,7 +722,10 @@ impl Workbench {
                         .any(|item| item.id == tab && item.embedded.is_some())
                 });
                 if let Some(state) = target.and_then(|tab| self.tables.get_mut(&tab)) {
-                    if let Some(request) = state.requested.take() {
+                    state.in_flight = state.in_flight.saturating_sub(1);
+                    // Only the newest load's page matches the controls.
+                    let latest = state.in_flight == 0;
+                    if let Some(request) = state.requested.take_if(|_| latest) {
                         state.loaded(page, request);
                         // The paged table now owns the displayed rows. Retain
                         // query metadata for its completion label, but release
@@ -717,19 +768,9 @@ impl Workbench {
                     );
                 }
             }
-            Payload::Exported(Some((path, rows))) => {
+            Payload::Exported(path, rows) => {
                 if let Some(tab) = target {
                     let message = Message::exported(path, rows, self.now);
-                    if self.tables.contains_key(&tab) {
-                        self.table_notice(tab, message);
-                    } else {
-                        self.query_errors.insert(tab, message);
-                    }
-                }
-            }
-            Payload::Exported(None) => {
-                if let Some(tab) = target {
-                    let message = Message::notice("Export canceled.", self.now);
                     if self.tables.contains_key(&tab) {
                         self.table_notice(tab, message);
                     } else {
@@ -987,6 +1028,19 @@ impl Workbench {
         self.tables.remove(&tab_id);
         self.query_results.remove(&tab_id);
         self.query_errors.remove(&tab_id);
+        self.choosing_export.remove(&tab_id);
+        if self.renaming.as_ref().is_some_and(|(id, _)| *id == tab_id) {
+            self.renaming = None;
+        }
+        if self.completion.as_ref().is_some_and(|c| c.tab == tab_id) {
+            self.completion = None;
+        }
+        if self.confirm_export == Some(tab_id) {
+            self.confirm_export = None;
+        }
+        if self.confirm_query.as_ref().is_some_and(|c| c.tab == tab_id) {
+            self.confirm_query = None;
+        }
         for meta in self.pending_requests.values_mut() {
             if meta.tab == Some(tab_id) {
                 meta.stale = true;
@@ -1030,6 +1084,17 @@ impl Workbench {
             }
         }
         self.queued.retain(|q| q.meta.profile != Some(profile));
+        // Tables kept open (a save that didn't move the connection) would
+        // otherwise wait forever for their dropped loads.
+        for tab in self.tabs.iter().filter(|tab| tab.profile_id == profile) {
+            if let Some(state) = self.tables.get_mut(&tab.id) {
+                if state.in_flight > 0 {
+                    state.in_flight = 0;
+                    state.requested = None;
+                    state.restore_loaded();
+                }
+            }
+        }
     }
 
     fn close_profile(&mut self, id: Uuid) {
@@ -1114,6 +1179,7 @@ impl Workbench {
         }
         let request = state.request(profile, &schema, &table);
         state.requested = Some(request.clone());
+        state.in_flight += 1;
         self.dispatch(
             Command::Table(request),
             "Loading rows",
@@ -1129,10 +1195,7 @@ impl Workbench {
         };
         let profile = tab.profile_id;
         let sql = sql.trim().to_owned();
-        if sql.is_empty()
-            || self.busy(RequestKind::Query, Some(tab_id))
-            || self.busy(RequestKind::Export, Some(tab_id))
-        {
+        if sql.is_empty() || self.busy(RequestKind::Query, Some(tab_id)) || self.exporting(tab_id) {
             return;
         }
         if self.tab_dirty(tab_id) {
@@ -1221,7 +1284,12 @@ impl Workbench {
         }
     }
 
+    /// Asks for a destination without blocking the UI or the database
+    /// worker; `export_chosen` starts the export once a file is picked.
     fn start_export(&mut self, tab_id: u64) {
+        if self.choosing_export.contains_key(&tab_id) {
+            return;
+        }
         let Some((profile, schema, table)) = self.table_target(tab_id) else {
             return;
         };
@@ -1231,31 +1299,86 @@ impl Workbench {
         let (Some(page), Some(loaded)) = (&state.page, &state.loaded) else {
             return;
         };
-        let request = ExportRequest {
-            page: TablePageRequest {
-                profile_id: profile,
-                ..loaded.clone()
-            },
-            columns: page
-                .metadata
-                .columns
-                .iter()
-                .map(|c| c.name.clone())
-                .collect(),
-            file_name: format!("{}.{}.csv", safe_file_name(&schema), safe_file_name(&table)),
-            progress: std::sync::Arc::default(),
+        let request = TablePageRequest {
+            profile_id: profile,
+            ..loaded.clone()
         };
-        if let Some(state) = self.tables.get_mut(&tab_id) {
-            state.export_progress = Some(request.progress.clone());
-            state.message = None;
+        let columns = page
+            .metadata
+            .columns
+            .iter()
+            .map(|c| c.name.clone())
+            .collect();
+        let file_name = format!("{}.{}.csv", safe_file_name(&schema), safe_file_name(&table));
+        let done = self.export_paths.0.clone();
+        let picked =
+            crate::backend::pick_export_path(self.context.clone(), file_name, move |path| {
+                let _ = done.send((tab_id, path));
+            });
+        match picked {
+            Ok(()) => {
+                self.choosing_export.insert(tab_id, (request, columns));
+            }
+            Err(error) => {
+                self.table_error(tab_id, format!("Couldn't open the save dialog: {error}"))
+            }
         }
-        self.dispatch(
-            Command::ExportCsv(request),
-            "Exporting CSV",
-            Some(tab_id),
-            Some(profile),
-            RequestKind::Export,
-        );
+    }
+
+    /// Whether the tab is exporting: choosing a file, writing a table, or
+    /// saving a query result.
+    fn exporting(&self, tab_id: u64) -> bool {
+        self.busy(RequestKind::Export, Some(tab_id))
+            || self.choosing_export.contains_key(&tab_id)
+            || self.saving_results.contains(&tab_id)
+    }
+
+    fn results_saved(&mut self) {
+        while let Ok((tab_id, outcome)) = self.saved_results.1.try_recv() {
+            self.saving_results.remove(&tab_id);
+            if !self.tabs.iter().any(|t| t.id == tab_id) {
+                continue;
+            }
+            let message = match outcome {
+                Ok(Some((path, rows))) => Message::exported(path, rows, self.now),
+                Ok(None) => Message::notice("Export canceled.", self.now),
+                Err(error) => Message::error(error, self.now),
+            };
+            self.query_errors.insert(tab_id, message);
+        }
+    }
+
+    fn export_chosen(&mut self) {
+        while let Ok((tab_id, path)) = self.export_paths.1.try_recv() {
+            let Some((page, columns)) = self.choosing_export.remove(&tab_id) else {
+                continue;
+            };
+            let Some(path) = path else {
+                self.table_notice(tab_id, Message::notice("Export canceled.", self.now));
+                continue;
+            };
+            if !self.tables.contains_key(&tab_id) {
+                continue;
+            }
+            let profile = page.profile_id;
+            let request = ExportRequest {
+                page,
+                columns,
+                path,
+                progress: std::sync::Arc::default(),
+            };
+            if let Some(state) = self.tables.get_mut(&tab_id) {
+                state.export_progress = Some(request.progress.clone());
+                state.message = None;
+            }
+            self.dispatch(
+                Command::ExportCsv(request),
+                "Exporting CSV",
+                Some(tab_id),
+                Some(profile),
+                RequestKind::Export,
+            );
+        }
     }
 }
 
@@ -1279,6 +1402,8 @@ impl eframe::App for Workbench {
         }
         self.window_width = ctx.content_rect().width();
         self.drain();
+        self.export_chosen();
+        self.results_saved();
         if ctx.input(|input| input.viewport().close_requested()) {
             let dirty = self.tabs.iter().any(|tab| self.tab_dirty(tab.id));
             // Reads can be abandoned; a save or export stopped halfway can't.
@@ -1296,6 +1421,7 @@ impl eframe::App for Workbench {
         if !self.pending_requests.is_empty() {
             ctx.request_repaint_after(std::time::Duration::from_millis(250));
         }
+        self.shortcuts(ctx);
         self.sidebar(ctx);
         self.top_bar(ctx);
         self.banner_ui(ctx);
@@ -1312,6 +1438,44 @@ impl eframe::App for Workbench {
 // ---- chrome ---------------------------------------------------------------
 
 impl Workbench {
+    /// The macOS menu shortcuts: New Connection, New Query, and Close Tab.
+    /// Taken before any widget sees them, so Ctrl+W closes the tab even while
+    /// the editor has focus, as in browsers and code editors.
+    fn shortcuts(&mut self, ctx: &egui::Context) {
+        let modal = self.profile_form.is_some()
+            || self.confirm_delete.is_some()
+            || self.confirm_query.is_some()
+            || self.confirm_update.is_some()
+            || self.confirm_export.is_some();
+        if modal {
+            return;
+        }
+        let command = |key| egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, key);
+        let (new_connection, new_query, close_tab) = ctx.input_mut(|i| {
+            (
+                i.consume_shortcut(&command(egui::Key::N)),
+                i.consume_shortcut(&command(egui::Key::T)),
+                i.consume_shortcut(&command(egui::Key::W)),
+            )
+        });
+        if new_connection {
+            self.profile_form = Some(ProfileForm::fresh());
+        }
+        if new_query {
+            if let Some(profile) = self
+                .active_profile
+                .filter(|p| self.workspaces.contains_key(p))
+            {
+                self.open_query(profile, true);
+            }
+        }
+        if close_tab {
+            if let Some(tab) = self.active_tab {
+                self.close_tab(tab);
+            }
+        }
+    }
+
     fn sidebar(&mut self, ctx: &egui::Context) {
         if self.sidebar_collapsed {
             egui::SidePanel::left("sidebar-collapsed")
@@ -1465,7 +1629,10 @@ impl Workbench {
             .pending_requests
             .values()
             .chain(self.queued.iter().map(|request| &request.meta))
-            .any(|m| m.profile == Some(id) && m.label == "Connecting");
+            .any(|m| {
+                m.profile == Some(id)
+                    && (m.label == "Connecting" || m.label == "Switching database")
+            });
         let width = ui.available_width();
         let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 44.0), Sense::click());
         let response = if connected {
@@ -1551,7 +1718,7 @@ impl Workbench {
                         self.profile_form = Some(form);
                         self.dispatch(
                             Command::ConnectionUrl(input, true),
-                            "Loading saved password",
+                            PASSWORD_LOAD,
                             None,
                             Some(id),
                             RequestKind::Form,
@@ -1603,123 +1770,147 @@ impl Workbench {
             return;
         };
         let redis = profile.engine == DatabaseEngine::Redis;
-        ui.indent(("workspace", id), |ui| {
-            ui.label(section_label(if redis {
-                "Database index"
-            } else {
-                "Database"
-            }));
-            let mut database = workspace.profile.default_database.clone();
-            egui::ComboBox::from_id_salt(("db", id))
-                .selected_text(&database)
-                .width(ui.available_width() - 4.0)
-                .show_ui(ui, |ui| {
-                    for db in workspace.databases.iter().filter(|d| d.is_connectable) {
-                        ui.selectable_value(&mut database, db.name.clone(), &db.name);
-                    }
+        let switching = self
+            .pending_requests
+            .values()
+            .chain(self.queued.iter().map(|q| &q.meta))
+            .any(|m| m.profile == Some(id) && m.label == "Switching database");
+        // As on macOS: inset under the connection row, with room on the right
+        // for the overlay scrollbar and no indent guide.
+        let inset = Margin {
+            left: 10,
+            right: 8,
+            top: 2,
+            bottom: 0,
+        };
+        ui.push_id(("workspace", id), |ui| {
+            Frame::new().inner_margin(inset).show(ui, |ui| {
+                ui.label(section_label(if redis {
+                    "Database index"
+                } else {
+                    "Database"
+                }));
+                let mut database = workspace.profile.default_database.clone();
+                ui.add_enabled_ui(!switching, |ui| {
+                    egui::ComboBox::from_id_salt(("db", id))
+                        .selected_text(&database)
+                        .width(ui.available_width())
+                        .show_ui(ui, |ui| {
+                            for db in workspace.databases.iter().filter(|d| d.is_connectable) {
+                                ui.selectable_value(&mut database, db.name.clone(), &db.name);
+                            }
+                        });
                 });
-            if database != workspace.profile.default_database && self.profile_is_clean(id) {
-                self.send(
-                    Command::SwitchDatabase(id, database),
-                    "Switching database",
-                    Some(id),
-                );
-            }
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                ui.label(section_label(if redis { "Keyspace" } else { "Schema" }));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let refreshing = self.pending_requests.values().any(|m| {
-                        m.profile == Some(id)
-                            && (m.label == "Loading schema" || m.label == "Refreshing schema")
-                    });
-                    let label = if refreshing {
-                        "Refreshing…"
-                    } else {
-                        "Refresh"
-                    };
-                    let refresh = ui.add_enabled_ui(!refreshing, |ui| {
-                        icons::text_button(
-                            ui,
-                            Some(Icon::Refresh),
-                            label,
-                            11.5,
-                            "Reload the schema tree",
-                        )
-                    });
-                    if refresh.inner.clicked() {
-                        self.send(Command::Schema(id), "Refreshing schema", Some(id));
-                    }
-                });
-            });
-            let filter = self.schema_filters.entry(id).or_default();
-            // `.schema-filter`: 28 px, 12 px text after a search glyph.
-            let response = ui.add(
-                egui::TextEdit::singleline(filter)
-                    .hint_text(if redis {
-                        "Filter keys…"
-                    } else {
-                        "Filter tables…"
-                    })
-                    .font(ui_font(12.0))
-                    .margin(Margin {
-                        left: 27,
-                        right: 9,
-                        top: 6,
-                        bottom: 6,
-                    })
-                    .desired_width(f32::INFINITY),
-            );
-            icons::paint(
-                ui.painter(),
-                egui::Rect::from_center_size(
-                    response.rect.left_center() + Vec2::new(14.5, 0.0),
-                    Vec2::splat(13.0),
-                ),
-                Icon::Search,
-                theme::FAINT,
-            );
-            // Escape clears the filter and keeps it focused, as in the desktop.
-            let focused =
-                response.has_focus() || theme::focused_last_frame(ui.ctx()) == Some(response.id);
-            if focused && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                filter.clear();
-                response.request_focus();
-            }
-            let query = filter.clone();
-            let nodes =
-                filter_schema_nodes(self.schemas.get(&id).map_or(&[][..], Vec::as_slice), &query);
-            let selected = self
-                .active_tab
-                .and_then(|tab| self.table_target(tab))
-                .filter(|(profile, _, _)| *profile == id)
-                .map(|(_, schema, table)| (schema, table));
-            let mut open = None;
-            for node in &nodes {
-                schema_branch(
-                    ui,
-                    node,
-                    0,
-                    !query.trim().is_empty(),
-                    (selected.as_ref(), color),
-                    &mut open,
-                );
-            }
-            if !query.trim().is_empty() && nodes.is_empty() {
-                ui.label(
-                    RichText::new(format!("No matches for “{}”.", query.trim()))
-                        .color(theme::MUTED),
-                );
-            }
-            if !self.schemas.contains_key(&id) {
+                if database != workspace.profile.default_database && self.profile_is_clean(id) {
+                    self.send(
+                        Command::SwitchDatabase(id, database),
+                        "Switching database",
+                        Some(id),
+                    );
+                }
+                ui.add_space(12.0);
                 ui.horizontal(|ui| {
-                    ui.spinner();
-                    ui.label(RichText::new("Loading…").color(theme::MUTED));
+                    ui.label(section_label(if redis { "Keyspace" } else { "Schema" }));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let refreshing = self.pending_requests.values().any(|m| {
+                            m.profile == Some(id)
+                                && (m.label == "Loading schema" || m.label == "Refreshing schema")
+                        });
+                        let label = if refreshing {
+                            "Refreshing…"
+                        } else {
+                            "Refresh"
+                        };
+                        let refresh = ui.add_enabled_ui(!refreshing, |ui| {
+                            icons::text_button(
+                                ui,
+                                Some(Icon::Refresh),
+                                label,
+                                11.5,
+                                "Reload the schema tree",
+                            )
+                        });
+                        if refresh.inner.clicked() {
+                            self.send(Command::Schema(id), "Refreshing schema", Some(id));
+                        }
+                    });
                 });
-            }
-            if let Some((schema, table)) = open {
-                self.open_table(id, schema, table);
-            }
+                let filter = self.schema_filters.entry(id).or_default();
+                // `.schema-filter`: 28 px, 12 px text after a search glyph.
+                let response = ui.add(
+                    egui::TextEdit::singleline(filter)
+                        .hint_text(if redis {
+                            "Filter keys…"
+                        } else {
+                            "Filter tables…"
+                        })
+                        .font(ui_font(12.0))
+                        .margin(Margin {
+                            left: 27,
+                            right: 9,
+                            top: 6,
+                            bottom: 6,
+                        })
+                        .desired_width(f32::INFINITY),
+                );
+                icons::paint(
+                    ui.painter(),
+                    egui::Rect::from_center_size(
+                        response.rect.left_center() + Vec2::new(14.5, 0.0),
+                        Vec2::splat(13.0),
+                    ),
+                    Icon::Search,
+                    theme::FAINT,
+                );
+                // Escape clears the filter and keeps it focused, as in the desktop.
+                let focused = response.has_focus()
+                    || theme::focused_last_frame(ui.ctx()) == Some(response.id);
+                if focused && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    filter.clear();
+                    response.request_focus();
+                }
+                let query = filter.clone();
+                let all = self.schemas.get(&id).map_or(&[][..], Vec::as_slice);
+                // An empty filter shows the tree as is, without copying it.
+                let filtered;
+                let nodes = if query.trim().is_empty() {
+                    all
+                } else {
+                    filtered = filter_schema_nodes(all, &query);
+                    filtered.as_slice()
+                };
+                let selected = self
+                    .active_tab
+                    .and_then(|tab| self.table_target(tab))
+                    .filter(|(profile, _, _)| *profile == id)
+                    .map(|(_, schema, table)| (schema, table));
+                let mut open = None;
+                for node in nodes {
+                    schema_branch(
+                        ui,
+                        node,
+                        0,
+                        !query.trim().is_empty(),
+                        (selected.as_ref(), color),
+                        &mut open,
+                    );
+                }
+                if !query.trim().is_empty() && nodes.is_empty() {
+                    ui.label(
+                        RichText::new(format!("No matches for “{}”.", query.trim()))
+                            .color(theme::MUTED),
+                    );
+                }
+                if !self.schemas.contains_key(&id) {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label(RichText::new("Loading…").color(theme::MUTED));
+                    });
+                }
+                if let Some((schema, table)) = open {
+                    self.open_table(id, schema, table);
+                }
+            })
         });
         ui.add_space(6.0);
     }
@@ -1742,31 +1933,9 @@ impl Workbench {
             }))
             .show(ctx, |ui| {
                 ui.horizontal_centered(|ui| {
-                    if let Some(profile) = &profile {
-                        let color = self.profile_color(profile.id);
-                        ui.spacing_mut().item_spacing.x = 9.0;
-                        let (rect, _) = ui.allocate_exact_size(Vec2::splat(8.0), Sense::hover());
-                        ui.painter().circle_filled(rect.center(), 4.0, color);
-                        ui.label(
-                            RichText::new(&profile.name)
-                                .font(theme::semibold(13.0))
-                                .color(theme::TEXT_STRONG),
-                        );
-                        let target = if profile.username.is_empty() {
-                            format!("{}:{}/{}", profile.host, profile.port, profile.default_database)
-                        } else {
-                            format!(
-                                "{}@{}:{}/{}",
-                                profile.username, profile.host, profile.port, profile.default_database
-                            )
-                        };
-                        ui.label(RichText::new(target).font(mono(11.0)).color(theme::FAINT));
-                        if profile.read_only {
-                            chip(ui, "Read-only", theme::MUTED);
-                        }
-                    } else {
-                        ui.label(RichText::new("No active connection").color(theme::MUTED));
-                    }
+                    // Right-aligned controls first; the connection identity
+                    // gets the remaining width and truncates instead of
+                    // running underneath them.
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         // `.update-control`: only on channel builds.
                         if self.updates.enabled() && !self.demo {
@@ -1775,7 +1944,8 @@ impl Workbench {
                                 crate::updates::State::Checking | crate::updates::State::Installing
                             );
                             ui.menu_button("Help", |ui| {
-                                if ui.add_enabled(!busy, egui::Button::new("Check for updates…")).clicked() {
+                                theme::menu_scope(ui, 200.0);
+                                if ui.add_enabled_ui(!busy, |ui| theme::menu_item(ui, "Check for updates…", false)).inner.clicked() {
                                     self.updates.check(ctx, false);
                                     ui.close();
                                 }
@@ -1819,6 +1989,44 @@ impl Workbench {
                             ui.label(RichText::new(meta.label).color(theme::MUTED));
                             ui.spinner();
                         }
+                        ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                            if let Some(profile) = &profile {
+                                let color = self.profile_color(profile.id);
+                                ui.spacing_mut().item_spacing.x = 9.0;
+                                let (rect, _) = ui.allocate_exact_size(Vec2::splat(8.0), Sense::hover());
+                                ui.painter().circle_filled(rect.center(), 4.0, color);
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(&profile.name)
+                                            .font(theme::semibold(13.0))
+                                            .color(theme::TEXT_STRONG),
+                                    )
+                                    .truncate(),
+                                );
+                                let target = if profile.username.is_empty() {
+                                    format!("{}:{}/{}", profile.host, profile.port, profile.default_database)
+                                } else {
+                                    format!(
+                                        "{}@{}:{}/{}",
+                                        profile.username, profile.host, profile.port, profile.default_database
+                                    )
+                                };
+                                // Long hosts are cut off before the read-only chip.
+                                let chip_width = if profile.read_only { 80.0 } else { 0.0 };
+                                ui.scope(|ui| {
+                                    ui.set_max_width((ui.available_width() - chip_width).max(0.0));
+                                    ui.add(
+                                        egui::Label::new(RichText::new(target).font(mono(11.0)).color(theme::FAINT))
+                                            .truncate(),
+                                    );
+                                });
+                                if profile.read_only {
+                                    chip(ui, "Read-only", theme::MUTED);
+                                }
+                            } else {
+                                ui.label(RichText::new("No active connection").color(theme::MUTED));
+                            }
+                        });
                     });
                 });
             });
@@ -1833,14 +2041,38 @@ impl Workbench {
                 top: 4,
                 bottom: 0,
             }))
+            // Drawn below instead, with a gap under the active tab.
+            .show_separator_line(false)
             .show(ctx, |ui| {
+                let strip = ui.max_rect();
+                let y = strip.bottom() - 0.5;
+                let line = strip.x_range().expand(6.0);
+                let stroke = ui.visuals().widgets.noninteractive.bg_stroke;
+                let active = self
+                    .active_tab
+                    .filter(|id| self.tabs.iter().any(|t| t.id == *id && !t.collapsed))
+                    .and_then(|id| {
+                        ctx.data(|d| d.get_temp::<egui::Rect>(egui::Id::new(("tab-rect", id))))
+                    })
+                    .map(|r| r.x_range().intersection(strip.x_range()))
+                    .filter(|r| r.span() > 0.0);
+                match active {
+                    Some(gap) => {
+                        ui.painter().hline(line.min..=gap.min + 0.5, y, stroke);
+                        ui.painter().hline(gap.max - 0.5..=line.max, y, stroke);
+                    }
+                    None => {
+                        ui.painter().hline(line, y, stroke);
+                    }
+                }
                 egui::ScrollArea::horizontal()
                     .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing.x = 1.0;
-                            for tab in self.tabs.clone() {
-                                self.tab_button(ui, &tab);
+                            let tabs: Vec<Tab> = self.tabs.iter().map(Tab::without_sql).collect();
+                            for tab in &tabs {
+                                self.tab_button(ui, tab);
                             }
                             if let Some(profile) = self
                                 .active_profile
@@ -1943,11 +2175,6 @@ impl Workbench {
                 Color32::from_white_alpha(10)
             } else {
                 Color32::TRANSPARENT
-            })
-            .stroke(if active {
-                Stroke::new(1.0, theme::BORDER)
-            } else {
-                Stroke::NONE
             })
             .corner_radius(CornerRadius {
                 nw: 7,
@@ -2083,6 +2310,26 @@ impl Workbench {
         ui.ctx().data_mut(|d| d.insert_temp(rect_id, response.rect));
         if active {
             let rect = response.rect;
+            // Newly selected tabs scroll into view, once.
+            if self.tab_in_view != Some(tab.id) {
+                self.tab_in_view = Some(tab.id);
+                response.scroll_to_me(None);
+            }
+            // As on macOS: the active tab is outlined on the left, top, and
+            // right and open at the bottom, so it joins the canvas below.
+            let bottom = ui.clip_rect().bottom();
+            ui.painter().rect_filled(
+                egui::Rect::from_min_max(
+                    egui::pos2(rect.left(), rect.bottom()),
+                    egui::pos2(rect.right(), bottom),
+                ),
+                0,
+                theme::BG,
+            );
+            ui.painter().add(egui::Shape::line(
+                open_tab_outline(rect, bottom),
+                Stroke::new(1.0, theme::BORDER),
+            ));
             ui.painter().rect_filled(
                 egui::Rect::from_min_size(rect.min, Vec2::new(rect.width(), 2.0)),
                 CornerRadius {
@@ -2173,27 +2420,20 @@ fn schema_branch(
     (selected, color): (Option<&(String, String)>, Color32),
     open: &mut Option<(String, String)>,
 ) {
-    let leaf = match (&node.schema, &node.table) {
-        (Some(schema), Some(table)) => Some((schema.clone(), table.clone())),
-        _ => None,
-    };
+    let leaf = node.schema.as_ref().zip(node.table.as_ref());
     // `.schema-node-button`: 26 px rows padded `8 + depth * 14`, a 12 px caret
     // column, a 15 px icon, then 12.5 px text.
     let x0 = 8.0 + depth as f32 * 14.0;
-    let (rect, response) =
+    let (rect, mut response) =
         ui.allocate_exact_size(Vec2::new(ui.available_width(), 26.0), Sense::click());
-    let is_selected = leaf.as_ref().is_some_and(|t| selected == Some(t));
+    // Large schemas have thousands of rows; only lay out the visible ones.
+    let visible = ui.is_rect_visible(rect);
+    let is_selected = leaf
+        .is_some_and(|(schema, table)| selected.is_some_and(|(s, t)| s == schema && t == table));
     response.widget_info(|| {
         egui::WidgetInfo::selected(egui::WidgetType::Button, true, is_selected, &node.name)
     });
     let hovered = response.hovered();
-    if is_selected {
-        ui.painter()
-            .rect_filled(rect, 6, color.gamma_multiply(0.24));
-    } else if hovered {
-        ui.painter()
-            .rect_filled(rect, 6, Color32::from_white_alpha(15));
-    }
     let id = ui.make_persistent_id(("schema-node", depth, &node.kind, &node.name));
     let mut state = (leaf.is_none()).then(|| {
         let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(
@@ -2206,23 +2446,63 @@ fn schema_branch(
         }
         state
     });
-    if let Some(state) = &state {
-        let caret = if state.is_open() {
-            Icon::ChevronDown
-        } else {
-            Icon::ChevronRight
-        };
-        icons::paint(
-            ui.painter(),
-            egui::Rect::from_center_size(
-                egui::pos2(rect.left() + x0 + 6.0, rect.center().y),
-                Vec2::splat(11.0),
-            ),
-            caret,
-            theme::FAINT,
-        );
+    if visible {
+        if is_selected {
+            ui.painter()
+                .rect_filled(rect, 6, color.gamma_multiply(0.24));
+        } else if hovered {
+            ui.painter()
+                .rect_filled(rect, 6, Color32::from_white_alpha(15));
+        }
+        if let Some(state) = &state {
+            let caret = if state.is_open() {
+                Icon::ChevronDown
+            } else {
+                Icon::ChevronRight
+            };
+            icons::paint(
+                ui.painter(),
+                egui::Rect::from_center_size(
+                    egui::pos2(rect.left() + x0 + 6.0, rect.center().y),
+                    Vec2::splat(11.0),
+                ),
+                caret,
+                theme::FAINT,
+            );
+        }
+        let row = (is_selected, hovered, leaf.is_some());
+        response = paint_schema_row(ui, node, (rect, response), x0, row, color);
     }
-    let glyph = match (leaf.is_some(), node.kind.as_str()) {
+    if let Some((schema, table)) = leaf {
+        if response.clicked() {
+            *open = Some((schema.clone(), table.clone()));
+        }
+        return;
+    }
+    let Some(mut state) = state.take() else {
+        return;
+    };
+    if response.clicked() {
+        state.toggle(ui);
+    }
+    state.show_body_unindented(ui, |ui| {
+        for child in &node.children {
+            schema_branch(ui, child, depth + 1, force_open, (selected, color), open);
+        }
+    });
+}
+
+/// The icon and name of a visible schema tree row; adds the full name as a
+/// tooltip when it is cut off.
+fn paint_schema_row(
+    ui: &egui::Ui,
+    node: &SchemaNode,
+    (rect, response): (egui::Rect, egui::Response),
+    x0: f32,
+    (is_selected, hovered, is_leaf): (bool, bool, bool),
+    color: Color32,
+) -> egui::Response {
+    let glyph = match (is_leaf, node.kind.as_str()) {
         (false, _) => Icon::Folder,
         (true, "key") => Icon::Key,
         (true, "view") => Icon::View,
@@ -2260,28 +2540,41 @@ fn schema_branch(
     );
     job.wrap = egui::text::TextWrapping::truncate_at_width(rect.right() - text_left - 8.0);
     let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
+    let elided = galley.elided;
     ui.painter().galley(
         egui::pos2(text_left, rect.center().y - galley.size().y / 2.0),
         galley,
         theme::SECONDARY,
     );
-    if let Some(target) = leaf {
-        if response.clicked() {
-            *open = Some(target);
-        }
-        return;
+    if elided {
+        response.on_hover_text(&node.name)
+    } else {
+        response
     }
-    let Some(mut state) = state.take() else {
-        return;
+}
+
+/// The left, top, and right edges of an active tab, with its top corners
+/// rounded to 7 px, running down to `bottom`.
+fn open_tab_outline(rect: egui::Rect, bottom: f32) -> Vec<egui::Pos2> {
+    let (left, right, top) = (rect.left() + 0.5, rect.right() - 0.5, rect.top() + 0.5);
+    let radius = 7.0_f32.min((right - left) / 2.0);
+    let corner = |center: egui::Pos2, from: f32| {
+        (0..=6).map(move |step| {
+            let angle = from + std::f32::consts::FRAC_PI_2 * step as f32 / 6.0;
+            center + radius * egui::vec2(angle.cos(), angle.sin())
+        })
     };
-    if response.clicked() {
-        state.toggle(ui);
-    }
-    state.show_body_unindented(ui, |ui| {
-        for child in &node.children {
-            schema_branch(ui, child, depth + 1, force_open, (selected, color), open);
-        }
-    });
+    std::iter::once(egui::pos2(left, bottom))
+        .chain(corner(
+            egui::pos2(left + radius, top + radius),
+            std::f32::consts::PI,
+        ))
+        .chain(corner(
+            egui::pos2(right - radius, top + radius),
+            1.5 * std::f32::consts::PI,
+        ))
+        .chain(std::iter::once(egui::pos2(right, bottom)))
+        .collect()
 }
 
 // ---- content --------------------------------------------------------------
@@ -2292,7 +2585,7 @@ impl Workbench {
             self.welcome(ui);
             return;
         };
-        let Some(tab) = self.tabs.iter().find(|t| t.id == id).cloned() else {
+        let Some(tab) = self.tabs.iter().find(|t| t.id == id).map(Tab::without_sql) else {
             self.welcome(ui);
             return;
         };
@@ -2359,8 +2652,13 @@ impl Workbench {
         let engine = self.engine(tab.profile_id);
         let redis = engine == DatabaseEngine::Redis;
         let running = self.busy(RequestKind::Query, Some(tab_id));
-        let exporting = self.busy(RequestKind::Export, Some(tab_id));
-        let target = execution_target(engine, &tab.sql, tab.selection.0, tab.selection.1);
+        let exporting = self.exporting(tab_id);
+        // `tab` is a copy without its text; read the script in place.
+        let target = self
+            .tabs
+            .iter()
+            .find(|t| t.id == tab_id)
+            .and_then(|t| execution_target(engine, &t.sql, t.selection.0, t.selection.1));
         let run_label = match target.as_ref().map(|t| t.kind) {
             Some(ExecutionKind::Selection) => "Run selection",
             _ if redis => "Run command",
@@ -2692,25 +2990,31 @@ impl Workbench {
         if let Some(open) = &mut completion {
             ui.input_mut(|i| {
                 let none = egui::Modifiers::NONE;
+                // Escape wins over keys queued in the same frame.
+                if i.consume_key(none, egui::Key::Escape) {
+                    open.items.clear();
+                    return;
+                }
+                let count = open.items.len().max(1);
                 if i.consume_key(none, egui::Key::ArrowDown) {
-                    open.selected = (open.selected + 1) % open.items.len();
+                    open.selected = (open.selected + 1) % count;
                 }
                 if i.consume_key(none, egui::Key::ArrowUp) {
-                    open.selected = (open.selected + open.items.len() - 1) % open.items.len();
+                    open.selected = (open.selected + count - 1) % count;
                 }
                 if i.consume_key(none, egui::Key::Enter) || i.consume_key(none, egui::Key::Tab) {
                     accept = Some(open.selected);
                 }
-                if i.consume_key(none, egui::Key::Escape) {
-                    open.items.clear();
-                }
             });
         }
-        if let (Some(index), Some(open)) = (accept, &completion) {
-            let word = open.items[index].clone();
-            let end = tab.selection.1.min(tab.sql.len());
-            tab.sql.replace_range(open.start..end, &word);
-            let cursor = open.start + word.len();
+        let end = tab.selection.1.min(tab.sql.len());
+        let accepted = accept.zip(completion.as_ref()).and_then(|(index, open)| {
+            let replaceable = open.start <= end && tab.sql.is_char_boundary(open.start);
+            Some((open.start, open.items.get(index)?.clone())).filter(|_| replaceable)
+        });
+        if let Some((start, word)) = accepted {
+            tab.sql.replace_range(start..end, &word);
+            let cursor = start + word.len();
             tab.selection = (cursor, cursor);
             if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), editor_id) {
                 let ccursor = egui::text::CCursor::new(tab.sql[..cursor].chars().count());
@@ -2854,11 +3158,13 @@ impl Workbench {
                 .chars()
                 .last()
                 .is_some_and(|c| c.is_ascii_alphabetic());
-            let items = if prefix.len() >= 2 && typed_letter {
+            let mut items = if prefix.len() >= 2 && typed_letter {
                 completions(engine, prefix)
             } else {
                 Vec::new()
             };
+            // Only the first 12 are shown, so arrow keys stay among them.
+            items.truncate(12);
             completion = (!items.is_empty()).then_some(Completion {
                 tab: tab_id,
                 start,
@@ -3094,8 +3400,7 @@ impl Workbench {
                 });
         }
         if !result.columns.is_empty() {
-            let enabled = !self.busy(RequestKind::Query, Some(tab_id))
-                && !self.busy(RequestKind::Export, Some(tab_id));
+            let enabled = !self.busy(RequestKind::Query, Some(tab_id)) && !self.exporting(tab_id);
             let columns: Vec<_> = result.columns.iter().map(|c| c.name.clone()).collect();
             let mut copy = false;
             let mut export = false;
@@ -3108,7 +3413,7 @@ impl Workbench {
                                 Some(&format!("Copy results ({})", theme::count(result.rows.len() as u64))),
                                 "Copy the displayed query results to the clipboard as CSV, including column headers").clicked();
                             export = icons::button(ui, Icon::Download,
-                                Some(if self.busy(RequestKind::Export, Some(tab_id)) { "Saving…" } else { "Save CSV" }),
+                                Some(if self.exporting(tab_id) { "Saving…" } else { "Save CSV" }),
                                 "Save the displayed query results to a CSV file").clicked();
                         });
                         if result.truncated {
@@ -3130,13 +3435,17 @@ impl Workbench {
                     ),
                 );
             }
-            let export_command = export.then(|| Command::ExportResultCsv {
-                columns,
-                rows: result.rows.clone(),
-                file_name: format!(
-                    "{}.csv",
-                    safe_file_name(&self.tabs.iter().find(|t| t.id == tab_id).unwrap().title)
-                ),
+            let export_rows = export.then(|| {
+                let title = self
+                    .tabs
+                    .iter()
+                    .find(|t| t.id == tab_id)
+                    .map_or("query", |t| t.title.as_str());
+                (
+                    format!("{}.csv", safe_file_name(title)),
+                    columns,
+                    result.rows.clone(),
+                )
             });
             Frame::new()
                 .stroke(Stroke::new(1.0, theme::BORDER))
@@ -3151,15 +3460,28 @@ impl Workbench {
                     ui.set_min_size(ui.available_size());
                     result_grid(ui, tab_id, &result.columns, &result.rows);
                 });
-            if let Some(command) = export_command {
+            if let Some((file_name, columns, rows)) = export_rows {
                 self.query_errors.remove(&tab_id);
-                self.dispatch(
-                    command,
-                    "Exporting CSV",
-                    Some(tab_id),
-                    Some(profile),
-                    RequestKind::Export,
+                let done = self.saved_results.0.clone();
+                let saved = crate::backend::save_result_csv(
+                    self.context.clone(),
+                    file_name,
+                    columns,
+                    rows,
+                    move |outcome| {
+                        let _ = done.send((tab_id, outcome));
+                    },
                 );
+                match saved {
+                    Ok(()) => {
+                        self.saving_results.insert(tab_id);
+                    }
+                    Err(error) => {
+                        let message = format!("Couldn't open the save dialog: {error}");
+                        self.query_errors
+                            .insert(tab_id, Message::error(message, self.now));
+                    }
+                }
             }
         } else {
             // `.query-empty`: a statement with no result set.
@@ -3243,7 +3565,7 @@ impl Workbench {
             embedded,
             read_only: self.profile(profile_id).is_none_or(|p| p.read_only),
             saving: self.busy(RequestKind::Mutation, Some(tab_id)),
-            exporting: self.busy(RequestKind::Export, Some(tab_id)),
+            exporting: self.exporting(tab_id),
         };
         let Some(mut state) = self.tables.remove(&tab_id) else {
             return;
@@ -3356,17 +3678,21 @@ impl Workbench {
                 .find(|p| p.id == id)
                 .map(|p| p.name.clone())
                 .unwrap_or_default();
-            let busy = !self.pending_requests.is_empty();
+            let busy = self
+                .pending_requests
+                .values()
+                .chain(self.queued.iter().map(|q| &q.meta))
+                .any(|meta| meta.label == "Deleting connection");
             let choice = modal(ctx, "Delete connection", 420.0, |ui| {
                 dialog_title(ui, None, &format!("Delete connection “{name}”?"));
                 ui.label(RichText::new("Saved password and query history for this profile will be removed. The database itself is not changed.").color(theme::SECONDARY));
                 ui.add_space(14.0);
                 ui.horizontal(|ui| {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.add_enabled(!busy, egui::Button::new(RichText::new("Delete").color(Color32::WHITE)).fill(Color32::from_rgb(0xb4, 0x3c, 0x36))).clicked() {
+                        if ui.add_enabled(!busy, theme::danger_button("Delete")).clicked() {
                             return Some(true);
                         }
-                        if ui.button("Cancel").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                        if ui.add(theme::secondary_button("Cancel")).clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                             return Some(false);
                         }
                         None
@@ -3376,6 +3702,7 @@ impl Workbench {
                 .inner
             })
             .flatten();
+            let choice = choice.or(backdrop_clicked(ctx, "Delete connection").then_some(false));
             match choice {
                 Some(true) if self.profile_is_clean(id) => {
                     self.send(Command::DeleteProfile(id), "Deleting connection", None)
@@ -3402,16 +3729,10 @@ impl Workbench {
                     });
                 ui.add_space(14.0);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui
-                        .add(
-                            egui::Button::new(RichText::new("Run anyway").color(Color32::WHITE))
-                                .fill(Color32::from_rgb(0xb4, 0x3c, 0x36)),
-                        )
-                        .clicked()
-                    {
+                    if ui.add(theme::danger_button("Run anyway")).clicked() {
                         return Some(true);
                     }
-                    if ui.button("Cancel").clicked()
+                    if ui.add(theme::secondary_button("Cancel")).clicked()
                         || ui.input(|i| i.key_pressed(egui::Key::Escape))
                     {
                         return Some(false);
@@ -3420,7 +3741,8 @@ impl Workbench {
                 })
                 .inner
             })
-            .flatten();
+            .flatten()
+            .or(backdrop_clicked(ctx, "Run destructive query").then_some(false));
             if let Some(run) = choice {
                 if let Some(confirm) = self.confirm_query.take() {
                     if run {
@@ -3454,7 +3776,8 @@ impl Workbench {
                 })
                 .inner
             })
-            .flatten();
+            .flatten()
+            .or(backdrop_clicked(ctx, "Install update").then_some(false));
             if let Some(install) = choice {
                 self.confirm_update = None;
                 if install {
@@ -3483,7 +3806,7 @@ impl Workbench {
                     if ui.add(primary_button("Export")).clicked() {
                         return Some(true);
                     }
-                    if ui.button("Cancel").clicked()
+                    if ui.add(theme::secondary_button("Cancel")).clicked()
                         || ui.input(|i| i.key_pressed(egui::Key::Escape))
                     {
                         return Some(false);
@@ -3492,7 +3815,8 @@ impl Workbench {
                 })
                 .inner
             })
-            .flatten();
+            .flatten()
+            .or(backdrop_clicked(ctx, "Large export").then_some(false));
             if let Some(export) = choice {
                 self.confirm_export = None;
                 if export {
@@ -3506,7 +3830,13 @@ impl Workbench {
         let Some(mut form) = self.profile_form.take() else {
             return;
         };
-        let busy = self.busy(RequestKind::Form, None);
+        // Loading the saved password can wait behind other work; it neither
+        // locks the form nor keeps it open.
+        let busy = self
+            .pending_requests
+            .values()
+            .chain(self.queued.iter().map(|q| &q.meta))
+            .any(|meta| meta.kind == RequestKind::Form && meta.label != PASSWORD_LOAD);
         let mut close = false;
         let mut test = false;
         let mut save = false;
@@ -3949,6 +4279,12 @@ impl Workbench {
             }
         }
         if close && !busy {
+            for meta in self.pending_requests.values_mut() {
+                if meta.label == PASSWORD_LOAD {
+                    meta.stale = true;
+                }
+            }
+            self.queued.retain(|q| q.meta.label != PASSWORD_LOAD);
             return;
         }
         self.profile_form = Some(form);
@@ -4504,6 +4840,73 @@ mod tests {
     }
 
     #[test]
+    fn only_the_newest_table_load_is_shown_and_dropped_loads_never_stick() {
+        let mut app = app();
+        let id = Uuid::from_u128(1);
+        app.open_table(id, "public".into(), "accounts".into());
+        let tab = app.active_tab.unwrap();
+        // Change the page size while the first load is in flight.
+        app.tables.get_mut(&tab).unwrap().limit = 7;
+        app.load_table(tab);
+        assert_eq!(app.tables[&tab].in_flight, 2);
+        let first = page();
+        app.apply(
+            Payload::Table(first.clone()),
+            &meta(Some(tab), RequestKind::Table),
+        );
+        let state = &app.tables[&tab];
+        assert!(state.page.is_none(), "an older page is dropped");
+        assert!(state.loading);
+        app.apply(Payload::Table(first), &meta(Some(tab), RequestKind::Table));
+        let state = &app.tables[&tab];
+        assert!(state.page.is_some() && !state.loading);
+        assert_eq!(state.loaded.as_ref().map(|r| r.limit), Some(7));
+
+        // A load dropped by a profile save restores the controls.
+        app.load_table(tab);
+        app.mark_stale(id);
+        let state = &app.tables[&tab];
+        assert!(!state.loading && state.in_flight == 0 && state.requested.is_none());
+    }
+
+    #[test]
+    fn edit_dialog_closes_while_its_saved_password_waits_behind_other_work() {
+        let mut app = app();
+        let profile = DemoStore::new().profiles().remove(0);
+        app.pending_requests.insert(
+            RequestId(900),
+            RequestMeta {
+                label: "Running query",
+                ..meta(None, RequestKind::Query)
+            },
+        );
+        app.profile_form = Some(ProfileForm::from_profile(&profile));
+        app.dispatch(
+            Command::ConnectionUrl(app.profile_form.as_ref().unwrap().input(), true),
+            PASSWORD_LOAD,
+            None,
+            Some(profile.id),
+            RequestKind::Form,
+        );
+        assert_eq!(app.queued.len(), 1);
+        let ctx = app.context.clone();
+        ctx.begin_pass(egui::RawInput {
+            events: vec![egui::Event::Key {
+                key: egui::Key::Escape,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            ..Default::default()
+        });
+        app.profile_dialog(&ctx);
+        let _ = ctx.end_pass();
+        assert!(app.profile_form.is_none(), "Escape closes the dialog");
+        assert!(app.queued.is_empty(), "the password load is dropped");
+    }
+
+    #[test]
     fn closing_a_profile_ignores_its_late_replies_only() {
         let mut app = app();
         let a = Uuid::from_u128(1);
@@ -4694,7 +5097,7 @@ mod tests {
         let mut app = app();
         let profile = DemoStore::new().profiles().remove(0);
         let request = RequestMeta {
-            label: "Loading saved password",
+            label: PASSWORD_LOAD,
             tab: None,
             profile: Some(profile.id),
             kind: RequestKind::Form,
