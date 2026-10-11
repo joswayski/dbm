@@ -547,10 +547,13 @@ fn returns_rows(sql: &str) -> bool {
     ) || sql.to_ascii_lowercase().contains("returning")
 }
 
+/// Scripts with several statements cannot be prepared; the server reports
+/// SQLSTATE 42601 ("cannot insert multiple commands into a prepared
+/// statement", translated per server locale). Genuine syntax errors share the
+/// code, but the simple protocol parses the whole script before running any of
+/// it, so they are reported the same way without executing anything.
 fn is_multiple_commands_error(error: &tokio_postgres::Error) -> bool {
-    error
-        .as_db_error()
-        .is_some_and(|error| error.message().contains("multiple commands"))
+    error.code() == Some(&SqlState::SYNTAX_ERROR)
 }
 
 /// Types `value_from_row` decodes from the binary protocol. Everything else is
@@ -1503,6 +1506,18 @@ mod tests {
                 .await
                 .expect("connection remains usable");
             assert_eq!(response.rows, vec![vec![Value::from(7)]]);
+            // Syntax errors share SQLSTATE 42601 with unpreparable scripts; the
+            // simple-protocol retry still reports them without running anything.
+            let error = session
+                .run_query("SELECT 1 AS first; SELEC 2", Some(3))
+                .await
+                .expect_err("syntax error");
+            assert!(error.to_string().contains("SQLSTATE 42601"), "{error}");
+            let error = session
+                .run_query("SELECT FROM WHERE", Some(3))
+                .await
+                .expect_err("syntax error");
+            assert!(error.to_string().contains("SQLSTATE 42601"), "{error}");
         }
 
         #[tokio::test]
