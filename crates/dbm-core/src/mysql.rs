@@ -121,54 +121,13 @@ impl MysqlSession {
 
     pub async fn table_metadata(&self, schema: &str, table: &str) -> AppResult<TableMetadata> {
         let mut conn = self.conn().await?;
-        let rows: Vec<Row> = conn
-            .exec(
-                "SELECT ORDINAL_POSITION, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT
-                 FROM information_schema.COLUMNS
-                 WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
-                 ORDER BY ORDINAL_POSITION",
-                (schema, table),
-            )
-            .await?;
-        if rows.is_empty() {
-            return Err(AppError::InvalidInput(format!(
-                "table {schema}.{table} was not found"
-            )));
-        }
-        let columns = rows
-            .into_iter()
-            .map(|row| TableColumn {
-                ordinal: i32_cell(&row, 0).unwrap_or(0),
-                name: string_cell(&row, 1).unwrap_or_default(),
-                data_type: string_cell(&row, 2).unwrap_or_else(|| "text".into()),
-                nullable: string_cell(&row, 3)
-                    .is_some_and(|value| value.eq_ignore_ascii_case("YES")),
-                default_value: string_cell(&row, 4),
-            })
-            .collect::<Vec<_>>();
-        let primary_key = conn
-            .exec::<Row, _, _>(
-                "SELECT COLUMN_NAME
-                 FROM information_schema.STATISTICS
-                 WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND INDEX_NAME = 'PRIMARY'
-                 ORDER BY SEQ_IN_INDEX",
-                (schema, table),
-            )
-            .await?
-            .into_iter()
-            .filter_map(|row| string_cell(&row, 0))
-            .collect();
-        Ok(TableMetadata {
-            schema: schema.to_owned(),
-            table: table.to_owned(),
-            columns,
-            primary_key,
-            has_xmin: false,
-        })
+        load_table_metadata(&mut conn, schema, table).await
     }
 
     pub async fn table_page(&self, request: &TablePageRequest) -> AppResult<TablePage> {
-        let metadata = self.table_metadata(&request.schema, &request.table).await?;
+        // One pooled connection serves the metadata, the page, and the count.
+        let mut conn = self.conn().await?;
+        let metadata = load_table_metadata(&mut conn, &request.schema, &request.table).await?;
         let limit = request.limit.clamp(1, MAX_PAGE_SIZE);
         let offset = request.offset;
         let selected_columns = metadata
@@ -185,7 +144,6 @@ impl MysqlSession {
             limit + 1,
             offset
         );
-        let mut conn = self.conn().await?;
         let rows: Vec<Row> = conn.exec(sql, params.clone()).await?;
         let has_more = rows.len() > usize::try_from(limit).unwrap_or(usize::MAX);
         let rows = rows
@@ -291,14 +249,14 @@ impl MysqlSession {
         if self.profile.read_only {
             return Err(AppError::Unsupported("profile is read-only".into()));
         }
-        let metadata = self.table_metadata(&batch.schema, &batch.table).await?;
+        let mut conn = self.conn().await?;
+        let metadata = load_table_metadata(&mut conn, &batch.schema, &batch.table).await?;
         if metadata.primary_key.is_empty() {
             return Err(AppError::Unsupported(
                 "only tables with a primary key can be edited".into(),
             ));
         }
         let table_name = qualified_name(&batch.schema, &batch.table)?;
-        let mut conn = self.conn().await?;
         let mut tx = conn.start_transaction(TxOpts::default()).await?;
         let mut applied = 0;
         let mut conflicts = Vec::new();
@@ -502,6 +460,60 @@ fn ssl_opts(profile: &ConnectionProfile) -> AppResult<SslOpts> {
         opts = opts.with_danger_accept_invalid_certs(true);
     }
     Ok(opts)
+}
+
+/// Columns and primary key in one query. Primary key positions come from a
+/// join on the PRIMARY index, so a unique NOT NULL index is not mistaken for
+/// it (as `COLUMN_KEY = 'PRI'` would be).
+async fn load_table_metadata(
+    conn: &mut Conn,
+    schema: &str,
+    table: &str,
+) -> AppResult<TableMetadata> {
+    let rows: Vec<Row> = conn
+        .exec(
+            "SELECT c.ORDINAL_POSITION, c.COLUMN_NAME, c.COLUMN_TYPE, c.IS_NULLABLE,
+                    c.COLUMN_DEFAULT, s.SEQ_IN_INDEX
+             FROM information_schema.COLUMNS c
+             LEFT JOIN information_schema.STATISTICS s
+               ON s.TABLE_SCHEMA = ? AND s.TABLE_NAME = ? AND s.INDEX_NAME = 'PRIMARY'
+              AND s.COLUMN_NAME = c.COLUMN_NAME
+             WHERE c.TABLE_SCHEMA = ? AND c.TABLE_NAME = ?
+             ORDER BY c.ORDINAL_POSITION",
+            (schema, table, schema, table),
+        )
+        .await?;
+    if rows.is_empty() {
+        return Err(AppError::InvalidInput(format!(
+            "table {schema}.{table} was not found"
+        )));
+    }
+    let mut primary_key = Vec::new();
+    let columns = rows
+        .into_iter()
+        .map(|row| {
+            let column = TableColumn {
+                ordinal: i32_cell(&row, 0).unwrap_or(0),
+                name: string_cell(&row, 1).unwrap_or_default(),
+                data_type: string_cell(&row, 2).unwrap_or_else(|| "text".into()),
+                nullable: string_cell(&row, 3)
+                    .is_some_and(|value| value.eq_ignore_ascii_case("YES")),
+                default_value: string_cell(&row, 4),
+            };
+            if let Some(position) = i32_cell(&row, 5) {
+                primary_key.push((position, column.name.clone()));
+            }
+            column
+        })
+        .collect::<Vec<_>>();
+    primary_key.sort();
+    Ok(TableMetadata {
+        schema: schema.to_owned(),
+        table: table.to_owned(),
+        columns,
+        primary_key: primary_key.into_iter().map(|(_, name)| name).collect(),
+        has_xmin: false,
+    })
 }
 
 async fn current_database(conn: &mut Conn, fallback: &str) -> AppResult<String> {
