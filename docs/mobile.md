@@ -74,8 +74,9 @@ bypass or plaintext fallback is available in mobile profiles.
 ## Storage and lifecycle
 
 Each install has its own sandbox SQLite file containing connection metadata and
-SQL/command history, **never database passwords**. History itself may contain
-sensitive SQL. Passwords stay in Rust session memory; re-enter them when
+SQL/command history, **never database passwords**: password-setting SQL is
+saved with its literals redacted and credential-bearing Redis commands are not
+saved. History itself may contain other sensitive SQL. Passwords stay in Rust session memory; re-enter them when
 connecting after disconnect, backgrounding or relaunch. This first slice does
 not persist credentials in Keychain/Keystore. Desktop OS-keyring behavior is unchanged.
 

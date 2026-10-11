@@ -135,4 +135,8 @@ implementation is added and tested on all three OSes.
 
 The app stores non-secret profile metadata, settings, and up to 500 history
 entries in the platform application data directory. Passwords are never put in
-that SQLite file. There is no telemetry, account, or sync service.
+that SQLite file. There is no telemetry, account, or sync service. History keeps
+password-setting SQL (such as `ALTER ROLE ... PASSWORD` or
+`CREATE USER ... IDENTIFIED BY`) with its string literals replaced by `'***'`,
+and leaves out Redis commands that carry credentials (`AUTH`, `ACL SETUSER`
+passwords, `CONFIG SET requirepass`, `MIGRATE ... AUTH`).

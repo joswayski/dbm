@@ -494,6 +494,72 @@ fn update_set_positions(lower: &str) -> impl Iterator<Item = usize> + '_ {
         })
 }
 
+/// The text to save in query history, or `None` to keep the run out of history.
+///
+/// Passwords must never reach the app's SQLite file. SQL that mentions a
+/// password or `IDENTIFIED` (`ALTER ROLE ... PASSWORD '...'`,
+/// `CREATE USER ... IDENTIFIED BY '...'`, `SET PASSWORD`, replication or
+/// connection-string options) keeps its shape with every string literal
+/// replaced by `'***'`; when a backslash makes the literal boundaries depend on
+/// server settings, it is not saved at all. Redis commands that carry
+/// credentials (`AUTH`, `HELLO ... AUTH`, `ACL SETUSER` password rules,
+/// `CONFIG SET requirepass`/`masterauth`, `MIGRATE ... AUTH`, Sentinel
+/// passwords) are not saved.
+pub fn history_text(engine: DatabaseEngine, text: &str) -> Option<String> {
+    if engine == DatabaseEngine::Redis {
+        return (!redis_carries_credentials(text)).then(|| text.to_owned());
+    }
+    let lower = text.to_ascii_lowercase();
+    if !["password", "passwd", "identified"]
+        .iter()
+        .any(|word| lower.contains(word))
+    {
+        return Some(text.to_owned());
+    }
+    if text.contains('\\') {
+        return None;
+    }
+    let mut out = String::with_capacity(text.len());
+    for (kind, range) in sql_segments(engine, text) {
+        if kind == Segment::Literal {
+            out.push_str("'***'");
+        } else {
+            out.push_str(&text[range.from..range.to]);
+        }
+    }
+    Some(out)
+}
+
+/// Whether a Redis workbench command sends a password or password hash.
+/// Quotes and backslashes are dropped before matching because the workbench
+/// tokenizer strips them, so `"AU"TH secret` still runs AUTH.
+fn redis_carries_credentials(text: &str) -> bool {
+    let plain: String = text
+        .chars()
+        .filter(|c| !matches!(c, '"' | '\'' | '\\'))
+        .collect::<String>()
+        .to_ascii_lowercase();
+    let words: Vec<&str> = plain.split_whitespace().collect();
+    let Some((&command, args)) = words.split_first() else {
+        return false;
+    };
+    let sub = args.first().copied().unwrap_or("");
+    let secret_setting = |word: &&str| word.contains("pass") || word.contains("auth");
+    match command {
+        "auth" => true,
+        "hello" | "migrate" => args.iter().any(|word| word.starts_with("auth")),
+        "acl" => {
+            sub == "setuser"
+                && args
+                    .iter()
+                    .any(|word| word.starts_with(['>', '<', '#', '!']))
+        }
+        "config" => sub == "set" && args.iter().any(secret_setting),
+        "sentinel" => args.iter().any(secret_setting),
+        _ => false,
+    }
+}
+
 /// Resolves `SELECT * FROM [schema.]table` to exactly one table or Redis key in
 /// the loaded schema tree, so the result can open in the editable table viewer.
 pub fn resolve_full_table_select(text: &str, tree: &[SchemaNode]) -> Option<(String, String)> {
@@ -1389,6 +1455,85 @@ mod tests {
             (PG, "SELECT a$b FROM t WHERE x = 'drop'"),
         ] {
             assert!(!requires_confirmation(engine, sql), "{engine:?}: {sql}");
+        }
+    }
+
+    #[test]
+    fn history_redacts_sql_passwords() {
+        for (engine, sql, saved) in [
+            (
+                PG,
+                "ALTER ROLE app PASSWORD 'hunter2'",
+                "ALTER ROLE app PASSWORD '***'",
+            ),
+            (
+                PG,
+                "CREATE ROLE app LOGIN PASSWORD $pw$hunter2$pw$; SELECT 'x'",
+                "CREATE ROLE app LOGIN PASSWORD '***'; SELECT '***'",
+            ),
+            (
+                PG,
+                "SELECT dblink_connect('host=db password=hunter2')",
+                "SELECT dblink_connect('***')",
+            ),
+            (
+                MYSQL,
+                "CREATE USER 'app'@'%' IDENTIFIED BY \"hunter2\"",
+                "CREATE USER '***'@'***' IDENTIFIED BY '***'",
+            ),
+            (
+                MYSQL,
+                "SET PASSWORD FOR app = 'hunter2' # 'note'",
+                "SET PASSWORD FOR app = '***' # 'note'",
+            ),
+            (
+                MYSQL,
+                "CHANGE REPLICATION SOURCE TO SOURCE_PASSWORD='hunter2'",
+                "CHANGE REPLICATION SOURCE TO SOURCE_PASSWORD='***'",
+            ),
+        ] {
+            assert_eq!(history_text(engine, sql).as_deref(), Some(saved), "{sql}");
+        }
+        // A backslash makes literal boundaries depend on server settings.
+        assert_eq!(
+            history_text(MYSQL, "ALTER USER app IDENTIFIED BY 'a\\'b'"),
+            None
+        );
+        let plain = "SELECT 'hunter2' AS name FROM users WHERE id = 1";
+        assert_eq!(history_text(PG, plain).as_deref(), Some(plain));
+    }
+
+    #[test]
+    fn history_skips_redis_credentials() {
+        let redis = DatabaseEngine::Redis;
+        for command in [
+            "AUTH hunter2",
+            "auth default hunter2",
+            "\"AU\"TH hunter2",
+            "HELLO 3 AUTH default hunter2",
+            "ACL SETUSER app on >hunter2 ~* +@all",
+            "acl setuser app \"#0123abcd\"",
+            "CONFIG SET requirepass hunter2",
+            "config set maxmemory 1gb masterauth hunter2",
+            "MIGRATE db 6379 key 0 5000 AUTH hunter2",
+            "MIGRATE db 6379 \"\" 0 5000 AUTH2 app hunter2 KEYS a b",
+            "SENTINEL SET primary auth-pass hunter2",
+        ] {
+            assert_eq!(history_text(redis, command), None, "{command}");
+        }
+        for command in [
+            "GET auth",
+            "SET password hunter2",
+            "ACL SETUSER app on ~* +@all",
+            "CONFIG GET requirepass",
+            "CONFIG SET maxmemory 1gb",
+            "MIGRATE db 6379 key 0 5000",
+        ] {
+            assert_eq!(
+                history_text(redis, command).as_deref(),
+                Some(command),
+                "{command}"
+            );
         }
     }
 
