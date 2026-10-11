@@ -349,8 +349,8 @@ final class QuerySplitView: NSSplitView {
 final class QueryPane: NSView, NSTextViewDelegate, NSSplitViewDelegate {
     private weak var host: QueryHost?
     let tab: WorkTab
-    private let eyebrowLabel = eyebrow("SQL WORKBENCH")
     private let titleLabel = label("", font: Graphite.ui(15, .semibold), color: Graphite.textStrong)
+    private let queryStatus = label("", font: Graphite.ui(11.5), color: Graphite.muted)
     private lazy var refreshButton = GButton("Refresh", icon: .refresh, style: .secondary) { [weak self] in self?.refreshResult() }
     private lazy var runButton = GButton("Run statement", icon: .play, style: .primary, shortcut: "⌘↵") { [weak self] in self?.runFromEditor() }
     let editor = SQLTextView()
@@ -363,16 +363,15 @@ final class QueryPane: NSView, NSTextViewDelegate, NSSplitViewDelegate {
     private let historyEmpty = label("Run a query to start history.", font: Graphite.ui(13), color: Graphite.muted)
     private var historySignature = ""
     private let results = FlippedView()
-    private let resultMeta = label("", font: Graphite.ui(12.5), color: Graphite.muted)
-    private let editableChip = Chip("Editable table", color: Graphite.accentText)
+    private let resultBody = FlippedView()
     private let readOnlyChip = Chip("Read-only result", color: Graphite.muted)
     private let truncatedChip = Chip("truncated", color: Graphite.modified)
     private let resultGrid = ResultGrid()
     private let resultCard = PanelView(fill: Graphite.bg)
     private let errorView = MessageView()
     // Optional: the editor's selection delegate reloads before `build()` ends.
-    private var metaBelowTop: NSLayoutConstraint?
-    private var metaBelowError: NSLayoutConstraint?
+    private var bodyBelowTop: NSLayoutConstraint?
+    private var bodyBelowError: NSLayoutConstraint?
     // `.query-empty` / `.empty-state`: faint 12.5 pt, centred.
     private let placeholder = label("Results will appear here.", font: Graphite.ui(12.5), color: Graphite.faint)
     private(set) var embeddedPane: TablePane?
@@ -395,9 +394,10 @@ final class QueryPane: NSView, NSTextViewDelegate, NSSplitViewDelegate {
         let engine = host?.engine(of: tab) ?? .postgres
         let toolbar = FlippedView()
         toolbar.translatesAutoresizingMaskIntoConstraints = false
-        let title = vstack([eyebrowLabel, titleLabel], spacing: 2)
-        toolbar.pin(hstack([title, spacer(), refreshButton, runButton], spacing: 8),
-                    insets: NSEdgeInsets(top: 10, left: 14, bottom: 6, right: 14))
+        titleLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+        queryStatus.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        toolbar.pin(hstack([titleLabel, queryStatus, spacer(), truncatedChip, readOnlyChip, refreshButton, runButton], spacing: 8),
+                    insets: NSEdgeInsets(top: 7, left: 14, bottom: 7, right: 14))
         refreshButton.minHeight = 30
         runButton.minHeight = 30
 
@@ -447,7 +447,6 @@ final class QueryPane: NSView, NSTextViewDelegate, NSSplitViewDelegate {
         hint.stringValue = engine == .redis
             ? "The outlined command or selection will run · Command/Ctrl+Enter · results capped at 10,000 rows"
             : "The outlined statement or selected SQL will run · Command/Ctrl+Enter · results capped at 10,000 rows"
-        eyebrowLabel.stringValue = engine == .redis ? "REDIS WORKBENCH" : "SQL WORKBENCH"
         let editorCard = PanelView(fill: Graphite.bg)
         editorCard.radius = 10
         editorCard.outline = Graphite.border
@@ -509,13 +508,13 @@ final class QueryPane: NSView, NSTextViewDelegate, NSSplitViewDelegate {
         resultCard.outline = Graphite.border
         resultCard.pin(resultGrid.scroll, insets: NSEdgeInsets(top: 1, left: 1, bottom: 1, right: 1))
         results.translatesAutoresizingMaskIntoConstraints = false
-        let meta = hstack([resultMeta, editableChip, spacer(), truncatedChip, readOnlyChip], spacing: 8)
-        results.addSubview(meta)
-        results.addSubview(resultCard)
-        results.addSubview(placeholder)
+        resultBody.translatesAutoresizingMaskIntoConstraints = false
+        results.addSubview(resultBody)
+        resultBody.pin(resultCard, insets: NSEdgeInsets(top: 8, left: 14, bottom: 12, right: 14))
+        resultBody.addSubview(placeholder)
         results.addSubview(errorView)
-        metaBelowTop = meta.topAnchor.constraint(equalTo: results.topAnchor, constant: 8)
-        metaBelowError = meta.topAnchor.constraint(equalTo: errorView.bottomAnchor, constant: 8)
+        bodyBelowTop = resultBody.topAnchor.constraint(equalTo: results.topAnchor)
+        bodyBelowError = resultBody.topAnchor.constraint(equalTo: errorView.bottomAnchor, constant: 8)
         errorView.onDismiss = { [weak self] in
             self?.tab.queryError = nil
             self?.layoutError()
@@ -524,16 +523,12 @@ final class QueryPane: NSView, NSTextViewDelegate, NSSplitViewDelegate {
             errorView.topAnchor.constraint(equalTo: results.topAnchor, constant: 8),
             errorView.leadingAnchor.constraint(equalTo: results.leadingAnchor, constant: 14),
             errorView.trailingAnchor.constraint(equalTo: results.trailingAnchor, constant: -14),
-            metaBelowTop!,
-            meta.leadingAnchor.constraint(equalTo: results.leadingAnchor, constant: 14),
-            meta.trailingAnchor.constraint(equalTo: results.trailingAnchor, constant: -14),
-            meta.heightAnchor.constraint(equalToConstant: 22),
-            resultCard.topAnchor.constraint(equalTo: meta.bottomAnchor, constant: 8),
-            resultCard.leadingAnchor.constraint(equalTo: results.leadingAnchor, constant: 14),
-            resultCard.trailingAnchor.constraint(equalTo: results.trailingAnchor, constant: -14),
-            resultCard.bottomAnchor.constraint(equalTo: results.bottomAnchor, constant: -12),
-            placeholder.centerXAnchor.constraint(equalTo: results.centerXAnchor),
-            placeholder.centerYAnchor.constraint(equalTo: results.centerYAnchor),
+            bodyBelowTop!,
+            resultBody.leadingAnchor.constraint(equalTo: results.leadingAnchor),
+            resultBody.trailingAnchor.constraint(equalTo: results.trailingAnchor),
+            resultBody.bottomAnchor.constraint(equalTo: results.bottomAnchor),
+            placeholder.centerXAnchor.constraint(equalTo: resultBody.centerXAnchor),
+            placeholder.centerYAnchor.constraint(equalTo: resultBody.centerYAnchor),
         ])
 
         split.isVertical = false
@@ -551,7 +546,7 @@ final class QueryPane: NSView, NSTextViewDelegate, NSSplitViewDelegate {
             toolbar.topAnchor.constraint(equalTo: topAnchor),
             toolbar.leadingAnchor.constraint(equalTo: leadingAnchor),
             toolbar.trailingAnchor.constraint(equalTo: trailingAnchor),
-            toolbar.heightAnchor.constraint(equalToConstant: 58),
+            toolbar.heightAnchor.constraint(equalToConstant: Graphite.toolbarHeight),
             split.topAnchor.constraint(equalTo: toolbar.bottomAnchor),
             split.leadingAnchor.constraint(equalTo: leadingAnchor),
             split.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -619,8 +614,8 @@ final class QueryPane: NSView, NSTextViewDelegate, NSSplitViewDelegate {
 
     private func layoutError() {
         let visible = !errorView.isHidden
-        metaBelowTop?.isActive = !visible
-        metaBelowError?.isActive = visible
+        bodyBelowTop?.isActive = !visible
+        bodyBelowError?.isActive = visible
     }
 
     private func reloadResult() {
@@ -628,7 +623,7 @@ final class QueryPane: NSView, NSTextViewDelegate, NSSplitViewDelegate {
         defer { layoutError() }
         guard let result = tab.result else {
             resultGrid.show(columns: [], rows: [])
-            [resultMeta, editableChip, readOnlyChip, truncatedChip, resultCard].forEach { $0.isHidden = true }
+            [queryStatus, readOnlyChip, truncatedChip, resultCard].forEach { $0.isHidden = true }
             embeddedPane?.removeFromSuperview()
             embeddedPane = nil
             placeholder.stringValue = "Results will appear here."
@@ -637,27 +632,21 @@ final class QueryPane: NSView, NSTextViewDelegate, NSSplitViewDelegate {
             return
         }
         placeholder.isHidden = true
-        resultMeta.isHidden = false
+        queryStatus.isHidden = tab.queryError != nil || host?.isRunning(tab) != nil
         let duration = int(result["durationMs"])
+        queryStatus.stringValue = "Query completed in \(duration) ms"
+        queryStatus.toolTip = queryStatus.stringValue
         if let host, tab.embedded != nil {
             if shownResult != nil {
                 resultGrid.show(columns: [], rows: [])
                 shownResult = nil
             }
-            resultMeta.stringValue = "Table viewer · query completed in \(duration) ms"
-            editableChip.isHidden = false
             readOnlyChip.isHidden = true
             truncatedChip.isHidden = true
             resultCard.isHidden = true
             if embeddedPane == nil, tab.tableState != nil {
                 let pane = TablePane(tab: tab, host: host, embedded: true)
-                results.addSubview(pane)
-                NSLayoutConstraint.activate([
-                    pane.topAnchor.constraint(equalTo: resultMeta.bottomAnchor, constant: 8),
-                    pane.leadingAnchor.constraint(equalTo: results.leadingAnchor),
-                    pane.trailingAnchor.constraint(equalTo: results.trailingAnchor),
-                    pane.bottomAnchor.constraint(equalTo: results.bottomAnchor),
-                ])
+                resultBody.pin(pane)
                 embeddedPane = pane
             }
             embeddedPane?.reload()
@@ -665,10 +654,10 @@ final class QueryPane: NSView, NSTextViewDelegate, NSSplitViewDelegate {
         }
         embeddedPane?.removeFromSuperview()
         embeddedPane = nil
-        editableChip.isHidden = true
         let columns = array(result["columns"])
         let affected = optionalInt(result["affectedRows"]).map { " · \($0) affected" } ?? ""
-        resultMeta.stringValue = "\(int(result["rowCount"])) rows\(affected) · \(duration) ms"
+        queryStatus.stringValue += " · \(int(result["rowCount"])) rows\(affected)"
+        queryStatus.toolTip = queryStatus.stringValue
         truncatedChip.isHidden = !bool(result["truncated"])
         readOnlyChip.isHidden = columns.isEmpty
         readOnlyChip.toolTip = "This query does not resolve to one complete table, so Anybase cannot safely map edits back to rows."

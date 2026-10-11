@@ -2344,7 +2344,7 @@ impl Workbench {
         let mut run: Option<(String, bool)> = None;
 
         egui::TopBottomPanel::top(egui::Id::new(("query-toolbar", tab_id)))
-            .exact_height(theme::TOOLBAR_HEIGHT + 16.0)
+            .exact_height(theme::TOOLBAR_HEIGHT)
             .show_separator_line(false)
             .frame(
                 Frame::new()
@@ -2353,19 +2353,6 @@ impl Workbench {
             )
             .show_inside(ui, |ui| {
                 ui.horizontal_centered(|ui| {
-                    ui.vertical(|ui| {
-                        ui.add_space(2.0);
-                        ui.label(eyebrow(if redis {
-                            "REDIS WORKBENCH"
-                        } else {
-                            "SQL WORKBENCH"
-                        }));
-                        ui.label(
-                            RichText::new(&tab.title)
-                                .font(theme::semibold(15.0))
-                                .color(theme::TEXT_STRONG),
-                        );
-                    });
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let label =
                             if running && self.pending_label(tab_id) == Some("Running query") {
@@ -2410,6 +2397,39 @@ impl Workbench {
                         if refresh.clicked() {
                             run = tab.last_executed.clone().map(|sql| (sql, true));
                         }
+                        if let Some(result) = self.query_results.get(&tab_id) {
+                            if tab.embedded.is_none() && !result.columns.is_empty() {
+                                chip(ui, "Read-only result", theme::MUTED).on_hover_text(
+                                    "This query does not resolve to one complete table, so Anybase cannot safely map edits back to rows.",
+                                );
+                            }
+                            if result.truncated {
+                                chip(ui, "truncated", theme::MODIFIED);
+                            }
+                        }
+                        ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                            ui.add(egui::Label::new(
+                                RichText::new(&tab.title)
+                                    .font(theme::semibold(15.0))
+                                    .color(theme::TEXT_STRONG),
+                            ).truncate());
+                            if let Some(result) = self.query_results.get(&tab_id)
+                                && !running && !self.query_errors.contains_key(&tab_id)
+                            {
+                                let mut status = format!("Query completed in {} ms", result.duration_ms);
+                                if tab.embedded.is_none() {
+                                    status.push_str(&format!(" · {} rows", theme::count(result.row_count as u64)));
+                                    if let Some(affected) = result.affected_rows {
+                                        status.push_str(&format!(" · {} affected", theme::count(affected)));
+                                    }
+                                }
+                                ui.add(egui::Label::new(
+                                    RichText::new(&status)
+                                        .font(ui_font(11.5))
+                                        .color(theme::MUTED),
+                                ).truncate()).on_hover_text(status);
+                            }
+                        });
                     });
                 });
             });
@@ -3005,53 +3025,23 @@ impl Workbench {
             .iter()
             .find(|t| t.id == tab_id)
             .and_then(|t| t.embedded.clone());
-        let duration = result.duration_ms;
         if embedded.is_some() {
-            Frame::new()
-                .inner_margin(Margin::symmetric(14, 6))
-                .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            RichText::new(format!(
-                                "Table viewer · query completed in {duration} ms"
-                            ))
-                            .color(theme::MUTED),
-                        );
-                        chip(ui, "Editable table", theme::SUCCESS);
-                    });
-                });
             self.table_ui(ui, tab_id, profile, true);
             return;
         }
-        Frame::new()
-            .inner_margin(Margin::symmetric(14, 6))
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    let affected = result
-                        .affected_rows
-                        .map_or_else(String::new, |n| format!(" · {} affected", theme::count(n)));
-                    ui.label(
-                        RichText::new(format!(
-                            "{} rows{affected} · {duration} ms",
-                            theme::count(result.row_count as u64)
-                        ))
-                            .color(theme::MUTED),
-                    );
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if !result.columns.is_empty() {
-                            chip(ui, "Read-only result", theme::MUTED).on_hover_text(
-                                "This query does not resolve to one complete table, so Anybase cannot safely map edits back to rows.",
-                            );
-                        }
-                        if result.truncated {
-                            chip(ui, "truncated", theme::MODIFIED);
-                        }
-                    });
+        if !result.notices.is_empty() {
+            Frame::new()
+                .inner_margin(Margin::symmetric(14, 6))
+                .show(ui, |ui| {
+                    for notice in &result.notices {
+                        ui.label(
+                            RichText::new(notice)
+                                .font(ui_font(11.5))
+                                .color(theme::MUTED),
+                        );
+                    }
                 });
-                for notice in &result.notices {
-                    ui.label(RichText::new(notice).font(ui_font(11.5)).color(theme::MUTED));
-                }
-            });
+        }
         if !result.columns.is_empty() {
             Frame::new()
                 .stroke(Stroke::new(1.0, theme::BORDER))
