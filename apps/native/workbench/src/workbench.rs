@@ -2414,7 +2414,10 @@ impl Workbench {
                 });
             });
 
-        egui::TopBottomPanel::top(egui::Id::new(("query-editor", tab_id)))
+        // A full-width 12-point grab area at the editor/results boundary.
+        let resize_radius = ui.style().interaction.resize_grab_radius_side;
+        ui.style_mut().interaction.resize_grab_radius_side = 6.0;
+        let editor_panel = egui::TopBottomPanel::top(egui::Id::new(("query-editor", tab_id)))
             .resizable(true)
             .default_height(260.0)
             .height_range(140.0..=(ui.available_height() - 120.0).max(160.0))
@@ -2424,7 +2427,7 @@ impl Workbench {
                 top: 0,
                 bottom: 12,
             }))
-            .show_separator_line(false)
+            .show_separator_line(true)
             .show_inside(ui, |ui| {
                 let card = |fill| {
                     Frame::new()
@@ -2538,6 +2541,15 @@ impl Workbench {
                         }
                     });
             });
+        ui.style_mut().interaction.resize_grab_radius_side = resize_radius;
+        let grip = egui::Rect::from_center_size(
+            egui::pos2(
+                editor_panel.response.rect.center().x,
+                editor_panel.response.rect.bottom(),
+            ),
+            Vec2::new(36.0, 3.0),
+        );
+        ui.painter().rect_filled(grip, 1.5, theme::FAINT);
 
         if let Some((sql, refresh)) = run {
             self.run_query(tab_id, sql, refresh, false);
@@ -3861,6 +3873,73 @@ mod tests {
         let mut app = Workbench::with_context(egui::Context::default(), true);
         app.pending_requests.clear();
         app
+    }
+
+    #[test]
+    fn query_results_resize_from_the_wide_grip_and_keep_their_height() {
+        for embedded in [false, true] {
+            let mut app = app();
+            let profile = Uuid::from_u128(1);
+            app.open_query(profile, true);
+            let tab_id = app.active_tab.unwrap();
+            app.query_results.insert(
+                tab_id,
+                DemoStore::new().run_query(&QueryRequest {
+                    profile_id: profile,
+                    sql: "SELECT now();".into(),
+                    max_rows: None,
+                }),
+            );
+            if embedded {
+                app.tabs[0].embedded = Some(("public".into(), "customers".into()));
+                app.tables.entry(tab_id).or_default().page = Some(page().into());
+            }
+            let ctx = app.context.clone();
+            let panel_id = egui::Id::new(("query-editor", tab_id));
+            let mut frame = |events| {
+                let tab = app.tabs[0].clone();
+                let _ = ctx.run(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(1280.0, 800.0),
+                        )),
+                        events,
+                        ..Default::default()
+                    },
+                    |ctx| {
+                        egui::CentralPanel::default().show(ctx, |ui| app.query_ui(ui, &tab));
+                    },
+                );
+                egui::containers::panel::PanelState::load(&ctx, panel_id)
+                    .unwrap()
+                    .rect
+            };
+            frame(vec![]);
+            let initial = frame(vec![]);
+            // Grab from the bottom padding, away from the hairline. This is
+            // beyond the old target even with egui's nearby-widget hit slop.
+            let start = egui::pos2(initial.center().x, initial.bottom() - 10.0);
+            frame(vec![
+                egui::Event::PointerMoved(start),
+                egui::Event::PointerButton {
+                    pos: start,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ]);
+            let end = start - egui::vec2(0.0, 80.0);
+            frame(vec![egui::Event::PointerMoved(end)]);
+            let resized = frame(vec![egui::Event::PointerButton {
+                pos: end,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            }]);
+            assert!((resized.height() - (initial.height() - 90.0)).abs() < 1.0);
+            assert_eq!(frame(vec![]), resized, "a redraw must not reset the split");
+        }
     }
 
     #[test]

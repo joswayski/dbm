@@ -331,6 +331,21 @@ final class HistoryRow: NSView {
     }
 }
 
+/// A visible, full-width drag target, separate from the editor and table borders.
+final class QuerySplitView: NSSplitView {
+    override var dividerThickness: CGFloat { 12 }
+
+    override func drawDivider(in rect: NSRect) {
+        Graphite.bg.setFill()
+        rect.fill()
+        Graphite.border.setFill()
+        NSRect(x: rect.minX + 14, y: rect.midY, width: max(0, rect.width - 28), height: 1).fill()
+        Graphite.faint.setFill()
+        NSBezierPath(roundedRect: NSRect(x: rect.midX - 18, y: rect.midY - 1, width: 36, height: 3),
+                     xRadius: 1.5, yRadius: 1.5).fill()
+    }
+}
+
 final class QueryPane: NSView, NSTextViewDelegate, NSSplitViewDelegate {
     private weak var host: QueryHost?
     let tab: WorkTab
@@ -362,7 +377,7 @@ final class QueryPane: NSView, NSTextViewDelegate, NSSplitViewDelegate {
     private let placeholder = label("Results will appear here.", font: Graphite.ui(12.5), color: Graphite.faint)
     private(set) var embeddedPane: TablePane?
     private var shownResult: UUID?
-    private let split = NSSplitView()
+    private let split = QuerySplitView()
 
     init(tab: WorkTab, host: QueryHost) {
         self.tab = tab
@@ -485,7 +500,7 @@ final class QueryPane: NSView, NSTextViewDelegate, NSSplitViewDelegate {
         top.translatesAutoresizingMaskIntoConstraints = false
         let row = hstack([editorCard, historyCard], spacing: 10)
         row.distribution = .fill
-        top.pin(row, insets: NSEdgeInsets(top: 2, left: 14, bottom: 10, right: 14))
+        top.pin(row, insets: NSEdgeInsets(top: 2, left: 14, bottom: 0, right: 14))
         editorCard.heightAnchor.constraint(equalTo: row.heightAnchor).isActive = true
         historyCard.heightAnchor.constraint(equalTo: row.heightAnchor).isActive = true
         editorCard.setContentHuggingPriority(.init(1), for: .horizontal)
@@ -559,7 +574,12 @@ final class QueryPane: NSView, NSTextViewDelegate, NSSplitViewDelegate {
 
     func splitView(_ splitView: NSSplitView, constrainMinCoordinate proposedMinimumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat { 150 }
     func splitView(_ splitView: NSSplitView, constrainMaxCoordinate proposedMaximumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
-        splitView.bounds.height - 120
+        splitView.bounds.height - splitView.dividerThickness - 120
+    }
+
+    func splitView(_ splitView: NSSplitView, effectiveRect proposedEffectiveRect: NSRect,
+                   forDrawnRect drawnRect: NSRect, ofDividerAt dividerIndex: Int) -> NSRect {
+        drawnRect.insetBy(dx: 0, dy: -2).intersection(splitView.bounds)
     }
 
     // MARK: State → views
