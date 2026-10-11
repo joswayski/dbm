@@ -77,27 +77,36 @@ final class Updater {
         state = .installing
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("dbm-native-update-\(UUID().uuidString)")
+        // Downloading, unpacking, and verifying take a while, so they run off
+        // the main thread; only the result and the relaunch come back to it.
         DispatchQueue.global(qos: .userInitiated).async {
-            let reply = Bridge.helper(["command": "updateDownload", "update": update, "directory": directory.path])
+            let failure = Updater.prepare(update, in: directory, current: current)
             DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                do {
-                    guard case .success(let value) = reply else {
-                        if case .failure(let error) = reply { throw error }
-                        return
-                    }
-                    guard let archive = value as? String else {
-                        throw BridgeFailure(message: "The update download returned no file.")
-                    }
-                    try self.replaceAndRelaunch(archive: archive, in: directory, current: current)
-                } catch {
-                    self.state = .failed(error.localizedDescription)
+                if let failure {
+                    self?.state = .failed(failure.localizedDescription)
+                } else {
+                    // The user confirmed that unsaved work is discarded.
+                    exit(0)
                 }
             }
         }
     }
 
-    private func run(_ tool: String, _ arguments: [String]) throws {
+    /// Downloads and stages the update, returning the error that stopped it.
+    private static func prepare(_ update: [String: Any], in directory: URL, current: URL) -> Error? {
+        do {
+            let value = try Bridge.helper(["command": "updateDownload", "update": update, "directory": directory.path]).get()
+            guard let archive = value as? String else {
+                throw BridgeFailure(message: "The update download returned no file.")
+            }
+            try scheduleSwap(archive: archive, in: directory, current: current)
+            return nil
+        } catch {
+            return error
+        }
+    }
+
+    private static func run(_ tool: String, _ arguments: [String]) throws {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: tool)
         process.arguments = arguments
@@ -108,7 +117,9 @@ final class Updater {
         }
     }
 
-    private func replaceAndRelaunch(archive: String, in directory: URL, current: URL) throws {
+    /// Unpacks and verifies the new bundle, then starts a script that swaps
+    /// it in and reopens it once this process exits.
+    private static func scheduleSwap(archive: String, in directory: URL, current: URL) throws {
         let unpacked = directory.appendingPathComponent("unpacked")
         try run("/usr/bin/ditto", ["-x", "-k", archive, unpacked.path])
         let contents = try FileManager.default.contentsOfDirectory(at: unpacked, includingPropertiesForKeys: nil)
@@ -139,8 +150,6 @@ final class Updater {
             "PATH": "/usr/bin:/bin",
         ]
         try swap.run()
-        // The user confirmed that unsaved work is discarded.
-        exit(0)
     }
 
     /// The top bar button's label and tooltip, as the desktop's
