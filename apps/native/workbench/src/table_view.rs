@@ -1106,6 +1106,35 @@ pub fn cell_text(value: &Value) -> RichText {
     }
 }
 
+/// Leave room for the copy control without copying the truncated label text.
+fn value_cell(ui: &mut egui::Ui, value: &Value, text: RichText, right: bool, tooltip: bool) {
+    let rect = ui.max_rect();
+    let text_rect = Rect::from_min_max(
+        rect.left_top() + Vec2::new(10.0, 0.0),
+        rect.right_bottom() - Vec2::new(36.0, 0.0),
+    );
+    let mut text_ui = ui.new_child(egui::UiBuilder::new().max_rect(text_rect));
+    aligned(&mut text_ui, right, |ui| {
+        ui.add(
+            egui::Label::new(text)
+                .truncate()
+                .show_tooltip_when_elided(tooltip),
+        );
+    });
+    let button_rect = Rect::from_center_size(
+        rect.right_center() - Vec2::new(18.0, 0.0),
+        Vec2::splat(28.0),
+    );
+    let mut button_ui = ui.new_child(egui::UiBuilder::new().max_rect(button_rect));
+    if icons::button(&mut button_ui, Icon::Copy, None, "Copy value")
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .clicked()
+    {
+        ui.ctx().copy_text(display_value(value));
+    }
+    ui.advance_cursor_after_rect(rect);
+}
+
 fn hairline(ui: &egui::Ui) {
     let rect = ui.max_rect();
     ui.painter().hline(
@@ -1864,11 +1893,7 @@ pub fn result_grid(ui: &mut egui::Ui, tab_id: u64, columns: &[QueryColumn], rows
                         for (column, value) in rows[index].iter().enumerate().take(columns.len()) {
                             row.col(|ui| {
                                 hairline(ui);
-                                ui.add_space(6.0);
-                                aligned(ui, numeric[column], |ui| {
-                                    ui.add_space(10.0);
-                                    ui.add(egui::Label::new(cell_text(value)).truncate());
-                                });
+                                value_cell(ui, value, cell_text(value), numeric[column], true);
                             });
                         }
                     });
@@ -2080,14 +2105,18 @@ fn grid(
                                 if deleted {
                                     text = text.color(theme::DANGER).strikethrough();
                                 }
-                                aligned(ui, right_align, |ui| {
-                                    ui.add_space(10.0);
-                                    ui.add(
-                                        egui::Label::new(text)
-                                            .truncate()
-                                            .show_tooltip_when_elided(pending.is_none()),
-                                    );
-                                });
+                                if state.collapsed_columns.contains(&column) {
+                                    aligned(ui, right_align, |ui| {
+                                        ui.add_space(10.0);
+                                        ui.add(
+                                            egui::Label::new(text)
+                                                .truncate()
+                                                .show_tooltip_when_elided(pending.is_none()),
+                                        );
+                                    });
+                                } else {
+                                    value_cell(ui, value, text, right_align, pending.is_none());
+                                }
                                 if focus == Some(ColumnFocus::Dimmed) {
                                     ui.painter().rect_filled(
                                         rect,
@@ -2829,6 +2858,138 @@ pub mod tests {
         assert!(Arc::ptr_eq(state.page.as_ref().unwrap(), &shared));
         assert_eq!(shared.rows[0][1], original);
         assert_eq!(state.pending[&0].changes[1], json!("ada@example.com"));
+    }
+
+    #[test]
+    fn cell_copy_buttons_copy_full_values_without_selecting_or_editing_rows() {
+        let long = format!("quoted, \"value\"\n{}\n終わり", "é".repeat(220));
+        let expected = [
+            "987654321",
+            &long,
+            "false",
+            "NULL",
+            "15",
+            "",
+            "true",
+            "{\"x\":[1,\"é\"]}",
+        ];
+        for query_results in [false, true] {
+            let context = egui::Context::default();
+            theme::configure(&context);
+            context.enable_accesskit();
+            let mut page = page();
+            page.rows = vec![
+                vec![
+                    json!(987654321),
+                    json!("source@example.com"),
+                    json!(false),
+                    Value::Null,
+                ],
+                vec![json!(15), json!(""), json!(true), json!({"x": [1, "é"]})],
+            ];
+            let columns: Vec<QueryColumn> = page
+                .metadata
+                .columns
+                .iter()
+                .map(|column| QueryColumn {
+                    name: column.name.clone(),
+                    data_type: column.data_type.clone(),
+                })
+                .collect();
+            let mut rows = page.rows.clone();
+            rows[0][1] = json!(long);
+            let mut state = TableState {
+                page: Some(Arc::new(page)),
+                ..Default::default()
+            };
+            stage_cell(&mut state, 0, 1, &long);
+            let cx = TableContext {
+                tab_id: 1,
+                schema: "public",
+                table: "customers",
+                embedded: false,
+                read_only: true,
+                saving: false,
+                exporting: false,
+            };
+            let mut frame = |events| {
+                context.run(
+                    egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            Vec2::new(1200.0, 700.0),
+                        )),
+                        events,
+                        ..Default::default()
+                    },
+                    |ctx| {
+                        egui::CentralPanel::default().show(ctx, |ui| {
+                            if query_results {
+                                result_grid(ui, 1, &columns, &rows);
+                            } else {
+                                assert!(show(ui, &cx, &mut state).is_empty());
+                            }
+                        });
+                    },
+                )
+            };
+            frame(vec![]);
+            let output = frame(vec![]);
+            let mut buttons: Vec<_> = output
+                .platform_output
+                .accesskit_update
+                .unwrap()
+                .nodes
+                .iter()
+                .filter(|(_, node)| node.label() == Some("Copy value"))
+                .map(|(_, node)| {
+                    let bounds = node.bounds().unwrap();
+                    egui::pos2(
+                        ((bounds.x0 + bounds.x1) / 2.0) as f32,
+                        ((bounds.y0 + bounds.y1) / 2.0) as f32,
+                    )
+                })
+                .collect();
+            buttons.sort_by(|a, b| a.y.total_cmp(&b.y).then(a.x.total_cmp(&b.x)));
+            assert_eq!(buttons.len(), expected.len());
+            for (pos, expected) in buttons.into_iter().zip(expected) {
+                frame(vec![
+                    egui::Event::PointerMoved(pos),
+                    egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed: true,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ]);
+                let output = frame(vec![egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                }]);
+                let copied: Vec<_> = output
+                    .platform_output
+                    .commands
+                    .iter()
+                    .filter_map(|command| {
+                        if let egui::OutputCommand::CopyText(text) = command {
+                            Some(text.as_str())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                assert_eq!(copied, vec![expected], "query_results={query_results}");
+            }
+            assert!(state.selected.is_empty());
+            assert!(state.editing.is_none());
+            assert_eq!(state.pending[&0].changes[1], json!(long));
+            assert_eq!(
+                state.page.as_ref().unwrap().rows[0][1],
+                json!("source@example.com")
+            );
+        }
     }
 
     #[test]
