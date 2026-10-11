@@ -988,6 +988,8 @@ final class SnapshotDriver {
         check(Helpers.csv(columns: ["value"], rows: [["line\nnext"], ["line\rnext"], ["line\r\nnext"]])
                   == "value\n\"line\nnext\"\n\"line\rnext\"\n\"line\r\nnext\"",
               "CSV must quote LF, CR, and CRLF fields")
+        check(Helpers.csv(columns: ["na,\u{0301}me"], rows: [["a\"\u{0301}b"]]) == "\"na,\u{0301}me\"\n\"a\"\"\u{0301}b\"",
+              "CSV must quote and escape delimiter scalars within grapheme clusters")
         let largeRows: [[Any]] = Array(repeating: [String(repeating: "x", count: 200)], count: 10_000)
         check(Helpers.csv(columns: ["value"], rows: largeRows).utf8.count == 2_010_005,
               "CSV copy must not silently lose results larger than the bridge request limit")
