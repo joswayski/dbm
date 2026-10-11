@@ -50,8 +50,12 @@ What the app does today, what is deliberately not built yet, and what it stores 
   CSV export. Redis connections show numbered databases, a SCAN-backed key
   index, and per-type key folders (strings, hashes, lists, sets, sorted sets,
   streams) that each show up to 250 keys, sampled in one SCAN pass.
-- CSV exports replace the chosen file only after every page is written
-  successfully. A failed export leaves an existing file unchanged.
+- CSV exports of PostgreSQL and MySQL tables stream every matching row from
+  one statement, so tables without a primary key export each row exactly once
+  (PostgreSQL reads one consistent snapshot). Redis exports page through keys
+  in order. The chosen file is replaced only after every row is written
+  successfully; a failed export leaves an existing file unchanged. A connection
+  lost mid-export reconnects once and restarts the export.
 - Redis key-index pages scan the complete matching keyspace, deduplicate keys,
   and default to key-name order; browsing and export have no 5,000-key cutoff.
   Unfiltered key-name pages fetch type and TTL only for visible keys. Filtering

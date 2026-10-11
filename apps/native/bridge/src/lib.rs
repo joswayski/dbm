@@ -18,7 +18,7 @@ use dbm_core::{
     cell_values::{editable_text, parse_cell_input},
     connection_url::parse_connection_url,
     demo::{self, DemoStore, profile_from_input},
-    export::export_csv,
+    export::{export_csv, export_table},
     models::{
         DatabaseEngine, MutationBatch, QueryRequest, SaveProfileInput, SchemaNode, TableColumn,
         TablePageRequest, TlsMode, WorkspaceInfo,
@@ -408,13 +408,18 @@ async fn dispatch(state: &AppState, request: Request) -> Result<Value, String> {
             columns,
             path,
         } => {
-            return export_with_progress(&path, &columns, &request, |page| {
-                state.with_session_retry(page.profile_id, move |session| {
-                    let page = page.clone();
-                    async move { session.table_page(&page).await }
-                })
-            })
+            set_export_progress(&path, Some(0));
+            let progress = |rows: u64| set_export_progress(&path, Some(rows));
+            let result = export_table(
+                state,
+                std::path::Path::new(&path),
+                &columns,
+                &request,
+                &progress,
+            )
             .await;
+            set_export_progress(&path, None);
+            return Ok(json!({ "rows": result? }));
         }
         helper => return helper_value(helper),
     }

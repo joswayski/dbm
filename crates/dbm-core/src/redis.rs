@@ -2910,6 +2910,44 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn exports_page_through_every_key_in_order() {
+        let Some((_server, session)) = start_test_redis().await else {
+            eprintln!("skipping live Redis test because redis-server is unavailable");
+            return;
+        };
+        {
+            let mut conn = session.conn().await;
+            let mut pipe = redis_rs::pipe();
+            for index in 0..2_345 {
+                pipe.cmd("SET").arg(format!("k:{index:05}")).arg(1).ignore();
+            }
+            pipe.query_async::<()>(&mut *conn).await.unwrap();
+        }
+        let session = crate::session::DbSession::Redis(session);
+        let request = TablePageRequest {
+            profile_id: session.profile().id,
+            schema: "keys".into(),
+            table: "all".into(),
+            offset: 40,
+            limit: 5,
+            filters: Vec::new(),
+            order_by: None,
+            include_total: Some(true),
+        };
+        let mut keys = Vec::new();
+        let sent = session
+            .export_rows(&request, &mut |row: Vec<JsonValue>| {
+                keys.push(row[0].as_str().unwrap_or_default().to_owned());
+                Ok(())
+            })
+            .await
+            .unwrap();
+        assert_eq!(sent, 2_345);
+        let expected: Vec<_> = (0..2_345).map(|index| format!("k:{index:05}")).collect();
+        assert_eq!(keys, expected);
+    }
+
+    #[tokio::test]
     async fn schema_tree_fills_every_folder_from_one_scan_pass() {
         let Some((_server, session)) = start_test_redis().await else {
             eprintln!("skipping live Redis test because redis-server is unavailable");

@@ -1,6 +1,7 @@
 use std::time::{Duration, Instant};
 
 use crate::error::{AppError, AppResult};
+use crate::export::RowSink;
 use crate::models::{
     ConnectionProfile, DatabaseEngine, DatabaseRef, FilterCondition, FilterOperator, MutationBatch,
     MutationResult, OrderSpec, QueryColumn, QueryResponse, RowMutation, SchemaNode, TableColumn,
@@ -175,6 +176,38 @@ impl MysqlSession {
             limit,
             has_more,
         })
+    }
+
+    /// Streams every row matching `request`'s filters and order (its offset
+    /// and limit are ignored) to `sink`, from one statement. Unlike paging,
+    /// this needs no stable order, so tables without a primary key export
+    /// each row exactly once.
+    pub async fn export_rows(
+        &self,
+        request: &TablePageRequest,
+        sink: &mut RowSink<'_>,
+    ) -> AppResult<u64> {
+        let mut conn = self.conn().await?;
+        let metadata = load_table_metadata(&mut conn, &request.schema, &request.table).await?;
+        let selected_columns = metadata
+            .columns
+            .iter()
+            .map(|column| quote_identifier(&column.name))
+            .collect::<Vec<_>>();
+        let table_name = qualified_name(&request.schema, &request.table)?;
+        let (predicate, params) = build_predicate(&metadata, &request.filters)?;
+        let order_by = build_order_by(&metadata, request.order_by.as_ref())?;
+        let sql = format!(
+            "SELECT {} FROM {table_name}{predicate}{order_by}",
+            selected_columns.join(", ")
+        );
+        let mut rows = conn.exec_iter(sql, params).await?;
+        let mut written = 0;
+        while let Some(row) = rows.next().await? {
+            sink(json_row(row))?;
+            written += 1;
+        }
+        Ok(written)
     }
 
     pub async fn run_query(&self, sql: &str, max_rows: Option<u32>) -> AppResult<QueryResponse> {

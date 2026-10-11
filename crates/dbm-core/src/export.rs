@@ -6,33 +6,128 @@ use std::future::Future;
 use std::io::Write;
 use std::path::Path;
 
-use crate::models::{TablePage, TablePageRequest};
-use crate::sql_text::{csv_document, csv_line};
+use serde_json::Value;
 
-/// Rows fetched per request while exporting, as in the desktop app.
+use crate::error::{AppError, AppResult};
+use crate::models::{TablePage, TablePageRequest};
+use crate::sql_text::csv_line;
+use crate::state::AppState;
+
+/// Rows fetched per request while exporting a paged source (Redis and the
+/// demo fixture), as in the desktop app.
 pub const EXPORT_PAGE_SIZE: u32 = 1_000;
+
+/// Receives each exported row; an error stops the export.
+pub type RowSink<'a> = dyn FnMut(Vec<Value>) -> AppResult<()> + Send + 'a;
+
+/// A CSV export being written to a temporary file next to its destination,
+/// which is replaced only by `finish`. Dropping it unfinished (after a failure
+/// or cancellation) removes the temporary file and leaves the destination as
+/// it was.
+pub struct CsvExport {
+    out: std::io::BufWriter<tempfile::NamedTempFile>,
+    columns: usize,
+    written: u64,
+}
+
+impl CsvExport {
+    /// Starts the file with a UTF-8 byte-order mark for spreadsheet apps and
+    /// the header row.
+    pub fn create(path: &Path, columns: &[String]) -> Result<Self, String> {
+        // Keep the temporary file on the destination filesystem for an atomic
+        // replacement.
+        let parent = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        let file = tempfile::NamedTempFile::new_in(parent).map_err(|e| e.to_string())?;
+        let mut out = std::io::BufWriter::new(file);
+        let header: Vec<Value> = columns.iter().cloned().map(Value::String).collect();
+        write!(out, "\u{feff}{}", csv_line(&header)).map_err(|e| e.to_string())?;
+        Ok(Self {
+            out,
+            columns: columns.len(),
+            written: 0,
+        })
+    }
+
+    /// Writes one row, ignoring values beyond the header's columns (such as
+    /// PostgreSQL's `xmin`).
+    pub fn write_row(&mut self, row: &[Value]) -> Result<(), String> {
+        write!(self.out, "\n{}", csv_line(row.iter().take(self.columns)))
+            .map_err(|e| e.to_string())?;
+        self.written += 1;
+        Ok(())
+    }
+
+    pub fn written(&self) -> u64 {
+        self.written
+    }
+
+    /// Flushes the file and moves it over `path`; returns the rows written.
+    pub fn finish(self, path: &Path) -> Result<u64, String> {
+        let file = self.out.into_inner().map_err(|e| e.to_string())?;
+        file.as_file().sync_all().map_err(|e| e.to_string())?;
+        file.persist(path).map_err(|e| e.to_string())?;
+        Ok(self.written)
+    }
+}
 
 /// Saves an already-loaded result without executing its query again. Like a
 /// table export, this replaces the destination only after writing succeeds.
 pub fn export_result_csv(
     path: &Path,
     columns: &[String],
-    rows: &[Vec<serde_json::Value>],
+    rows: &[Vec<Value>],
 ) -> Result<u64, String> {
-    let parent = path
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."));
-    let mut file = tempfile::NamedTempFile::new_in(parent).map_err(|e| e.to_string())?;
-    write!(file, "\u{feff}{}", csv_document(columns, rows)).map_err(|e| e.to_string())?;
-    file.as_file().sync_all().map_err(|e| e.to_string())?;
-    file.persist(path).map_err(|e| e.to_string())?;
-    Ok(rows.len() as u64)
+    let mut file = CsvExport::create(path, columns)?;
+    for row in rows {
+        file.write_row(row)?;
+    }
+    file.finish(path)
 }
 
-/// Streams every page of `request` (its offset and limit are ignored) to
-/// `path` as CSV and returns the number of rows written. The destination is
-/// replaced only after the complete export succeeds; failures leave it intact.
+/// Exports every row matching `request`'s filters and order (its offset and
+/// limit are ignored) from the profile's live session to `path` as CSV, and
+/// returns the number of rows written. PostgreSQL and MySQL stream one
+/// statement, so tables without a primary key export each row exactly once;
+/// Redis pages in key order. `progress` receives the rows written so far. A
+/// connection lost before the export finishes is reconnected and the export
+/// restarts from the first row.
+pub async fn export_table(
+    state: &AppState,
+    path: &Path,
+    columns: &[String],
+    request: &TablePageRequest,
+    progress: &(dyn Fn(u64) + Sync),
+) -> Result<u64, String> {
+    let export = |session: std::sync::Arc<crate::session::DbSession>| async move {
+        progress(0);
+        let mut file = CsvExport::create(path, columns).map_err(AppError::Storage)?;
+        let mut sink = |row: Vec<Value>| {
+            file.write_row(&row).map_err(AppError::Storage)?;
+            // Report every 100 rows rather than on each one.
+            if file.written() % 100 == 0 {
+                progress(file.written());
+            }
+            Ok(())
+        };
+        session.export_rows(request, &mut sink).await?;
+        file.finish(path).map_err(AppError::Storage)
+    };
+    state
+        .with_session_retry(request.profile_id, export)
+        .await
+        .map_err(|error| match error {
+            AppError::Storage(message) => message,
+            other => other.to_string(),
+        })
+}
+
+/// Writes every page of `request` (its offset and limit are ignored) to
+/// `path` as CSV and returns the number of rows written. Used for paged
+/// sources such as the demo fixture. The destination is replaced only after
+/// the complete export succeeds; failures leave it intact.
 pub async fn export_csv<F, Fut, E>(
     path: &Path,
     columns: &[String],
@@ -44,22 +139,8 @@ where
     Fut: Future<Output = Result<TablePage, E>>,
     E: std::fmt::Display,
 {
-    // Keep the temporary file on the destination filesystem for an atomic
-    // replacement. Dropping it also cleans up failed or canceled exports.
-    let parent = path
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."));
-    let file = tempfile::NamedTempFile::new_in(parent).map_err(|e| e.to_string())?;
-    let mut out = std::io::BufWriter::new(file);
-    let header: Vec<serde_json::Value> = columns
-        .iter()
-        .cloned()
-        .map(serde_json::Value::String)
-        .collect();
-    write!(out, "\u{feff}{}", csv_line(&header)).map_err(|e| e.to_string())?;
+    let mut file = CsvExport::create(path, columns)?;
     let mut offset = 0u32;
-    let mut written = 0u64;
     loop {
         let page = load(TablePageRequest {
             offset,
@@ -70,19 +151,14 @@ where
         .await
         .map_err(|e| e.to_string())?;
         for row in &page.rows {
-            write!(out, "\n{}", csv_line(row.iter().take(columns.len())))
-                .map_err(|e| e.to_string())?;
+            file.write_row(row)?;
         }
-        written += page.rows.len() as u64;
         offset += u32::try_from(page.rows.len()).map_err(|e| e.to_string())?;
         if !page.has_more || page.rows.is_empty() {
             break;
         }
     }
-    let file = out.into_inner().map_err(|e| e.to_string())?;
-    file.as_file().sync_all().map_err(|e| e.to_string())?;
-    file.persist(path).map_err(|e| e.to_string())?;
-    Ok(written)
+    file.finish(path)
 }
 
 #[cfg(test)]
@@ -266,5 +342,137 @@ mod tests {
             "untouched"
         );
         assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
+    }
+
+    /// Live checks of `export_table` against `DBM_TEST_POSTGRES_PORT` and
+    /// `DBM_TEST_MYSQL_PORT` (local servers trusting `postgres` / `root`).
+    #[test]
+    fn tables_without_a_primary_key_export_every_row_exactly_once() {
+        use crate::models::{
+            ConnectionProfile, DatabaseEngine, FilterCondition, FilterOperator, TlsMode,
+        };
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        for (engine, variable, username, database) in [
+            (
+                DatabaseEngine::Postgres,
+                "DBM_TEST_POSTGRES_PORT",
+                "postgres",
+                "postgres",
+            ),
+            (
+                DatabaseEngine::Mysql,
+                "DBM_TEST_MYSQL_PORT",
+                "root",
+                "mysql",
+            ),
+        ] {
+            let Some(port) = std::env::var(variable).ok().and_then(|p| p.parse().ok()) else {
+                continue;
+            };
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            runtime.block_on(async {
+                let directory = tempfile::tempdir().unwrap();
+                let state = AppState::mobile(&directory.path().join("state.sqlite3")).unwrap();
+                let id = Uuid::new_v4();
+                let profile = ConnectionProfile {
+                    id,
+                    name: "test-export".into(),
+                    color: None,
+                    engine,
+                    host: "127.0.0.1".into(),
+                    port,
+                    username: username.into(),
+                    default_database: database.into(),
+                    tls_mode: TlsMode::Disabled,
+                    ca_cert_path: None,
+                    ssh: None,
+                    read_only: false,
+                    open_on_startup: false,
+                    created_at: chrono::Utc::now(),
+                    updated_at: chrono::Utc::now(),
+                };
+                state.connect(profile).await.unwrap();
+                let session = state.session(id).await.unwrap();
+                let table = format!("dbm_export_{}", id.simple());
+                // No primary key, duplicate rows, and more rows than a page.
+                let (schema, create, fill) = match engine {
+                    DatabaseEngine::Postgres => (
+                        "public".to_owned(),
+                        format!("CREATE TABLE public.{table} (n int, label text)"),
+                        format!(
+                            "INSERT INTO public.{table} SELECT g % 1200, 'row ' || (g % 1200) \
+                             FROM generate_series(1, 2500) g"
+                        ),
+                    ),
+                    _ => (
+                        table.clone(),
+                        format!(
+                            "CREATE DATABASE {table}; CREATE TABLE {table}.{table} (n int, label text)"
+                        ),
+                        format!(
+                            "INSERT INTO {table}.{table} \
+                             WITH RECURSIVE g(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM g WHERE i < 2500) \
+                             SELECT i % 1200, CONCAT('row ', i % 1200) FROM g"
+                        ),
+                    ),
+                };
+                session.run_query(&create, None).await.unwrap();
+                if engine == DatabaseEngine::Mysql {
+                    // MySQL and MariaDB name the recursion limit differently.
+                    for limit in ["cte_max_recursion_depth", "max_recursive_iterations"] {
+                        let set = format!("SET SESSION {limit} = 3000");
+                        session.run_query(&set, None).await.ok();
+                    }
+                }
+                session.run_query(&fill, None).await.unwrap();
+                let path = directory.path().join("export.csv");
+                let progress = AtomicU64::new(0);
+                let report = |rows: u64| progress.store(rows, Ordering::Relaxed);
+                let request = TablePageRequest {
+                    profile_id: id,
+                    schema: schema.clone(),
+                    table: table.clone(),
+                    offset: 40,
+                    limit: 5,
+                    filters: vec![FilterCondition {
+                        column: "n".into(),
+                        operator: FilterOperator::LessThan,
+                        value: Some("1000".into()),
+                    }],
+                    order_by: None,
+                    include_total: Some(true),
+                };
+                let columns = vec!["n".to_owned(), "label".to_owned()];
+                let rows = export_table(&state, &path, &columns, &request, &report)
+                    .await
+                    .unwrap();
+                let drop = match engine {
+                    DatabaseEngine::Postgres => format!("DROP TABLE public.{table}"),
+                    _ => format!("DROP DATABASE {table}"),
+                };
+                session.run_query(&drop, None).await.unwrap();
+                // Values repeat (g % 1200), so the table has duplicate rows.
+                let expected = (1..=2500).filter(|g| g % 1200 < 1000).count();
+                assert_eq!(rows as usize, expected, "{engine:?}");
+                assert_eq!(
+                    progress.load(Ordering::Relaxed) as usize / 100,
+                    expected / 100
+                );
+                let text = std::fs::read_to_string(&path).unwrap();
+                let mut lines: Vec<&str> = text.lines().skip(1).collect();
+                lines.sort_unstable();
+                let mut wanted: Vec<String> = (1..=2500)
+                    .map(|g| g % 1200)
+                    .filter(|n| *n < 1000)
+                    .map(|n| format!("{n},row {n}"))
+                    .collect();
+                wanted.sort_unstable();
+                assert_eq!(lines, wanted, "{engine:?}: each row exactly once");
+            });
+        }
     }
 }

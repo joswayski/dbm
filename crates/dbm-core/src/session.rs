@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use crate::error::{AppError, AppResult};
+use crate::export::{EXPORT_PAGE_SIZE, RowSink};
 use crate::models::{
     ConnectionProfile, DatabaseEngine, DatabaseRef, MutationBatch, MutationResult, QueryResponse,
     SchemaNode, TablePage, TablePageRequest,
@@ -83,6 +84,43 @@ impl DbSession {
             Self::Postgres(session) => session.table_page(request).await,
             Self::Mysql(session) => session.table_page(request).await,
             Self::Redis(session) => session.table_page(request).await,
+        }
+    }
+
+    /// Sends every row matching `request`'s filters and order (its offset and
+    /// limit are ignored) to `sink` and returns how many were sent. SQL engines
+    /// stream one statement; Redis pages through its key-ordered views.
+    pub async fn export_rows(
+        &self,
+        request: &TablePageRequest,
+        sink: &mut RowSink<'_>,
+    ) -> AppResult<u64> {
+        match self {
+            Self::Postgres(session) => session.export_rows(request, sink).await,
+            Self::Mysql(session) => session.export_rows(request, sink).await,
+            Self::Redis(session) => {
+                let mut sent = 0u64;
+                loop {
+                    let page = session
+                        .table_page(&TablePageRequest {
+                            offset: u32::try_from(sent).map_err(|_| {
+                                AppError::Unsupported("too many rows to export".into())
+                            })?,
+                            limit: EXPORT_PAGE_SIZE,
+                            include_total: Some(false),
+                            ..request.clone()
+                        })
+                        .await?;
+                    let more = page.has_more && !page.rows.is_empty();
+                    for row in page.rows {
+                        sink(row)?;
+                        sent += 1;
+                    }
+                    if !more {
+                        return Ok(sent);
+                    }
+                }
+            }
         }
     }
 

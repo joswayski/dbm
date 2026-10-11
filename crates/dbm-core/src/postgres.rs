@@ -3,6 +3,7 @@ use std::pin::pin;
 use std::time::{Duration, Instant};
 
 use crate::error::{AppError, AppResult};
+use crate::export::RowSink;
 use crate::models::{
     ConnectionProfile, DatabaseEngine, DatabaseRef, FilterCondition, FilterOperator, MutationBatch,
     MutationResult, OrderSpec, QueryColumn, QueryResponse, RowMutation, SchemaNode, TableColumn,
@@ -233,22 +234,7 @@ impl PgSession {
             if column_types.iter().all(decodes_natively) {
                 self.client.query(&statement, &[]).await
             } else {
-                // Types without a native decoder (numeric, uuid, enums, arrays, ...) are
-                // read in their text form rather than showing up as NULL.
-                // The alias must differ from the column name: ORDER BY resolves a bare
-                // name to an output column first and would otherwise sort the text.
-                let columns = quoted_columns
-                    .into_iter()
-                    .zip(&column_types)
-                    .enumerate()
-                    .map(|(index, (column, ty))| {
-                        if decodes_natively(ty) {
-                            column
-                        } else {
-                            format!("{column}::text AS \"__dbm_text_{index}\"")
-                        }
-                    })
-                    .collect();
+                let columns = text_cast_columns(quoted_columns, &column_types);
                 // Unprepared, in one round trip.
                 self.client.query_typed(&page_sql(columns), &[]).await
             }
@@ -293,6 +279,53 @@ impl PgSession {
             limit,
             has_more,
         })
+    }
+
+    /// Streams every row matching `request`'s filters and order (its offset
+    /// and limit are ignored) to `sink`, from one statement. Unlike paging,
+    /// this sees one consistent snapshot and needs no stable order, so tables
+    /// without a primary key export each row exactly once.
+    pub async fn export_rows(
+        &self,
+        request: &TablePageRequest,
+        sink: &mut RowSink<'_>,
+    ) -> AppResult<u64> {
+        let metadata = self.table_metadata(&request.schema, &request.table).await?;
+        let table_name = qualified_name(&request.schema, &request.table)?;
+        let predicate = build_predicate(&metadata, &request.filters)?;
+        let order_by = build_order_by(&metadata, request.order_by.as_ref())?;
+        let select = |columns: Vec<String>| {
+            format!(
+                "SELECT {} FROM {table_name}{predicate}{order_by}",
+                columns.join(", ")
+            )
+        };
+        let quoted_columns = metadata
+            .columns
+            .iter()
+            .map(|column| quote_identifier(&column.name))
+            .collect::<Vec<_>>();
+        let column_types = self
+            .client
+            .prepare(&select(quoted_columns.clone()))
+            .await?
+            .columns()
+            .iter()
+            .map(|column| column.type_().clone())
+            .collect::<Vec<_>>();
+        let sql = select(text_cast_columns(quoted_columns, &column_types));
+        let no_params = std::iter::empty::<(&(dyn tokio_postgres::types::ToSql + Sync), Type)>();
+        let mut rows = pin!(self.client.query_typed_raw(&sql, no_params).await?);
+        let mut written = 0;
+        while let Some(row) = rows.try_next().await? {
+            sink(
+                (0..row.len())
+                    .map(|index| value_from_row(&row, index))
+                    .collect(),
+            )?;
+            written += 1;
+        }
+        Ok(written)
     }
 
     pub async fn run_query(&self, sql: &str, max_rows: Option<u32>) -> AppResult<QueryResponse> {
@@ -948,6 +981,25 @@ fn json_to_sql(value: &Value) -> String {
         Value::String(value) => quote_literal(value),
         Value::Array(_) | Value::Object(_) => quote_literal(&value.to_string()),
     }
+}
+
+/// Selects types without a native decoder (numeric, uuid, enums, arrays, ...)
+/// in their text form rather than letting them show up as NULL. The alias must
+/// differ from the column name: ORDER BY resolves a bare name to an output
+/// column first and would otherwise sort the text.
+fn text_cast_columns(quoted_columns: Vec<String>, column_types: &[Type]) -> Vec<String> {
+    quoted_columns
+        .into_iter()
+        .zip(column_types)
+        .enumerate()
+        .map(|(index, (column, ty))| {
+            if decodes_natively(ty) {
+                column
+            } else {
+                format!("{column}::text AS \"__dbm_text_{index}\"")
+            }
+        })
+        .collect()
 }
 
 fn value_from_row(row: &Row, index: usize) -> Value {

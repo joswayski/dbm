@@ -2,8 +2,8 @@
 //! the shared core state (or the isolated demo fixture) and answers UI
 //! commands in order.
 
-use std::future::Future;
 use std::path::PathBuf;
+use std::sync::atomic::Ordering;
 use std::sync::mpsc::{self, Receiver, Sender};
 
 use dbm_core::demo::{self, DemoStore, profile_from_input};
@@ -250,8 +250,16 @@ async fn execute_live(state: &AppState, command: Command) -> Result<Payload, Str
             )
         }
         Command::ExportCsv(request) => {
-            let (path, rows) = export_csv(request, |page| live_table_page(state, page)).await?;
-            Payload::Exported(path, rows)
+            let progress = |rows: u64| request.progress.store(rows, Ordering::Relaxed);
+            let rows = dbm_core::export::export_table(
+                state,
+                &request.path,
+                &request.columns,
+                &request.page,
+                &progress,
+            )
+            .await?;
+            Payload::Exported(request.path, rows)
         }
     };
     Ok(result)
@@ -319,19 +327,15 @@ pub fn save_result_csv(
         .map(drop)
 }
 
-/// Streams every filtered row to the chosen file with the shared exporter.
-async fn export_csv<F, Fut>(request: ExportRequest, mut load: F) -> Result<(PathBuf, u64), String>
-where
-    F: FnMut(TablePageRequest) -> Fut,
-    Fut: Future<Output = Result<TablePage, String>>,
-{
+/// Pages the demo fixture into the chosen file with the shared exporter.
+async fn export_demo_csv(request: ExportRequest) -> Result<(PathBuf, u64), String> {
     let path = request.path;
     let progress = request.progress;
-    progress.store(0, std::sync::atomic::Ordering::Relaxed);
+    progress.store(0, Ordering::Relaxed);
     // Each page request starts at the number of rows already written.
     let tracked = |page: TablePageRequest| {
-        progress.store(u64::from(page.offset), std::sync::atomic::Ordering::Relaxed);
-        load(page)
+        progress.store(u64::from(page.offset), Ordering::Relaxed);
+        async move { Ok::<_, String>(demo::table_page(&page)) }
     };
     let rows =
         dbm_core::export::export_csv(&path, &request.columns, &request.page, tracked).await?;
@@ -395,8 +399,7 @@ impl DemoBackend {
             Command::Table(request) => Payload::Table(demo::table_page(&request)),
             Command::Mutate(_) => return Err(store.apply_mutations().unwrap_err()),
             Command::ExportCsv(request) => {
-                let (path, rows) =
-                    export_csv(request, |page| async move { Ok(demo::table_page(&page)) }).await?;
+                let (path, rows) = export_demo_csv(request).await?;
                 Payload::Exported(path, rows)
             }
         })
