@@ -35,6 +35,10 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 const MAX_REQUEST_BYTES: usize = 1_048_576;
+/// Session-free helpers are pure functions over the request. Some carry a
+/// whole schema tree or script (`SELECT *` resolution, highlighting), so they
+/// accept far more.
+const MAX_HELPER_REQUEST_BYTES: usize = 256 * 1_048_576;
 
 /// Rows written so far by each running export, keyed by destination path,
 /// so a host can show progress through the session-free helper call while
@@ -777,8 +781,8 @@ pub unsafe extern "C" fn dbm_bridge_helper_call(request: *const u8, length: usiz
         if request.is_null() {
             return error_response("native bridge request is null");
         }
-        if length > MAX_REQUEST_BYTES {
-            return error_response("native request exceeds 1 MiB limit");
+        if length > MAX_HELPER_REQUEST_BYTES {
+            return error_response("native helper request exceeds 256 MiB limit");
         }
         // SAFETY: The caller guarantees `length` readable bytes for non-null `request`.
         let bytes = unsafe { std::slice::from_raw_parts(request, length) };

@@ -778,15 +778,18 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, NS
             tab.tableState?.message = nil
             self.reloadPane(tab)
             // The export holds the session, so poll the session-free helper.
-            let poll = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
-                guard let self, self.exporting.contains(tab.id) else { return }
+            let poll = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] timer in
+                // Stops itself once the export ends or its connection closes.
+                guard let self, self.exporting.contains(tab.id) else { timer.invalidate(); return }
                 if case .success(let rows) = Bridge.helper(["command": "exportProgress", "path": url.path]), !(rows is NSNull) {
                     self.exportRows[tab.id] = int(rows)
                     self.reloadPane(tab)
                 }
             }
             let command: [String: Any] = ["command": "exportCsv", "request": request, "columns": page.columns.map(\.name), "path": url.path]
-            self.send(command, profile: tab.profileID) { result in
+            // No generation guard: a profile edit mid-export must still clear
+            // `exporting`, or quitting stays blocked. A closed tab ignores it.
+            self.send(command) { result in
                 poll.invalidate()
                 self.exporting.remove(tab.id)
                 self.exportRows[tab.id] = nil

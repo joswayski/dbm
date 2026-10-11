@@ -23,7 +23,10 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
     private weak var host: TableHost?
     let tab: WorkTab
     private let embedded: Bool
-    private var state: TableState { tab.tableState! }
+    /// The tab's table state. A detached viewer (its query tab was re-run or
+    /// its connection switched databases) reads an empty placeholder instead.
+    private var state: TableState { tab.tableState ?? detachedState }
+    private let detachedState = TableState()
 
     private let titleSchema = label("", font: Graphite.ui(15), color: Graphite.muted)
     private let titleTable = label("", font: Graphite.ui(15, .semibold), color: Graphite.textStrong)
@@ -311,6 +314,9 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
         inspectorWidth.constant = state.inspectorOpen ? Graphite.inspectorWidth : 0
         inspector.isHidden = !state.inspectorOpen
 
+        // A load replaces the rows, so an open cell editor would stage its
+        // text onto whatever row lands at the same index.
+        if state.loading { endEditingOverlay() }
         reloadFilters()
         reloadGridColumns()
         if editor == nil { grid.reloadData() }
@@ -361,7 +367,8 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
             perPage.stringValue = ""
             [previousButton, pageLabel, nextButton].forEach { $0.isHidden = true }
         }
-        limitField.stringValue = String(state.limit)
+        // Export progress reloads several times a second; keep typed text.
+        if limitField.currentEditor() == nil { limitField.stringValue = String(state.limit) }
     }
 
     private var editable: Bool {
@@ -400,28 +407,40 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
         for (index, filter) in state.filters.enumerated() {
             let column = GPopUp(items: names, width: 170)
             column.selectItem(withTitle: filter.column)
-            column.onSelect = { [weak self] selected in self?.state.filters[index].column = names[selected] }
+            column.onSelect = { [weak self] selected in
+                guard let self, self.state.filters.indices.contains(index) else { return }
+                self.state.filters[index].column = names[selected]
+            }
             let operatorPopup = GPopUp(items: filterOperators.map(\.1), width: 170)
             operatorPopup.selectItem(at: filterOperators.firstIndex { $0.0 == filter.operatorName } ?? 2)
             operatorPopup.onSelect = { [weak self] selected in
-                self?.state.filters[index].operatorName = filterOperators[selected].0
-                self?.reload()
+                guard let self, self.state.filters.indices.contains(index) else { return }
+                self.state.filters[index].operatorName = filterOperators[selected].0
+                self.reload()
             }
             let value: NSView
             if filterNeedsValue(filter.operatorName) {
                 let field = GTextField(filter.value, placeholder: ["in", "notIn"].contains(filter.operatorName) ? "value 1, value 2, …" : "Value…")
-                field.onChange = { [weak self] text in self?.state.filters[index].value = text }
+                field.onChange = { [weak self] text in
+                    guard let self, self.state.filters.indices.contains(index) else { return }
+                    self.state.filters[index].value = text
+                }
                 field.onCommit = { [weak self] text in
-                    self?.state.filters[index].value = text
-                    if NSApp.currentEvent?.type == .keyDown, NSApp.currentEvent?.keyCode == 36 { self?.applyFilters() }
+                    guard let self, self.state.filters.indices.contains(index) else { return }
+                    self.state.filters[index].value = text
+                    if NSApp.currentEvent?.type == .keyDown, NSApp.currentEvent?.keyCode == 36 { self.applyFilters() }
                 }
                 value = field
             } else {
                 value = label("No value needed", font: Graphite.ui(12.5), color: Graphite.faint)
             }
             let remove = GButton("", icon: .close, style: .icon, tooltip: "Remove filter") { [weak self] in
-                self?.state.filters.remove(at: index)
-                self?.reload()
+                guard let self else { return }
+                // Commit a value being typed while `index` still names its filter.
+                self.window?.makeFirstResponder(nil)
+                guard self.state.filters.indices.contains(index) else { return }
+                self.state.filters.remove(at: index)
+                self.reload()
             }
             let row = hstack([column, operatorPopup, value, remove], spacing: 8)
             value.setContentHuggingPriority(.init(1), for: .horizontal)
@@ -575,7 +594,8 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
     }
 
     func tableView(_ tableView: NSTableView, didClick tableColumn: NSTableColumn) {
-        guard let page = state.page, let index = Int(tableColumn.identifier.rawValue) else { return }
+        endEditingOverlay()
+        guard let page = state.page, let index = Int(tableColumn.identifier.rawValue), page.columns.indices.contains(index) else { return }
         guard state.pending.isEmpty else { showMessage(.error(pendingRefreshError)); return }
         let name = page.columns[index].name
         let current = state.effectiveOrder
@@ -610,8 +630,11 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
         field.constraints.filter { $0.firstAttribute == .height }.forEach { $0.isActive = false }
         field.frame = grid.frameOfCell(atColumn: column, row: row)
         field.translatesAutoresizingMaskIntoConstraints = true
+        let editingState = state
         field.onCommit = { [weak self] text in
             guard let self else { return }
+            // The rows may have been replaced since editing began.
+            guard self.tab.tableState === editingState, !editingState.loading else { self.endEditingOverlay(); return }
             self.state.stage(row: row, column: column, text: text)
             self.endEditingOverlay()
             self.grid.reloadData()
@@ -687,6 +710,7 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
     // MARK: Actions
 
     private func refresh() {
+        endEditingOverlay()
         guard state.pending.isEmpty else { showMessage(.error(pendingRefreshError)); return }
         host?.loadTable(tab)
     }
@@ -792,6 +816,7 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
     }
 
     private func sortChanged() {
+        endEditingOverlay()
         guard let page = state.page else { return }
         let offset = page.primaryKey.isEmpty ? 1 : 0
         let index = sortColumn.indexOfSelectedItem - offset
@@ -804,11 +829,13 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
     }
 
     private func reloadIfClean() {
+        endEditingOverlay()
         guard state.pending.isEmpty else { showMessage(.error(pendingRefreshError)); reload(); return }
         host?.loadTable(tab)
     }
 
     private func page(_ delta: Int) {
+        endEditingOverlay()
         guard state.pending.isEmpty else { return }
         state.pageIndex = max(0, state.pageIndex + delta)
         host?.loadTable(tab)

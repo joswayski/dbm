@@ -264,7 +264,12 @@ final class SidebarView: PanelView {
                 trailing.append(GButton("", icon: expanded ? .chevronUp : .chevronDown, style: .icon,
                                         tooltip: expanded ? "Collapse connection" : "Expand connection") { [weak app] in app?.toggleExpanded(id) })
             }
-            if profile.readOnly { trailing.insert(Chip("Read-only", color: Graphite.muted), at: 0) }
+            if profile.readOnly {
+                let chip = Chip("Read-only", color: Graphite.muted)
+                trailing.insert(chip, at: 0)
+                // Keep the name and subtitle clear of the chip.
+                row.trailingInset += chip.intrinsicContentSize.width + 2
+            }
             trailing.append(more)
             let actions = hstack(trailing, spacing: 2)
             row.addSubview(actions)
@@ -438,7 +443,8 @@ final class ResizeHandle: NSView {
     override func draw(_ dirtyRect: NSRect) {
         guard hovering || dragging else { return }
         Graphite.accent.setFill()
-        NSRect(x: bounds.midX - 1, y: 0, width: 2, height: bounds.height).fill()
+        // Whole points, so the 5 pt grip's line isn't blurred across pixels.
+        NSRect(x: floor(bounds.midX) - 1, y: 0, width: 2, height: bounds.height).fill()
     }
 }
 
@@ -671,15 +677,24 @@ final class TabStrip: PanelView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    /// Removing an open rename field commits it, and the commit refreshes the
+    /// app, which would reload the strip again mid-rebuild.
+    private var reloading = false
+
     func reload() {
+        guard !reloading else { return }
+        reloading = true
+        defer { reloading = false }
         row.arrangedSubviews.forEach { $0.removeFromSuperview() }
         for tab in app.tabs {
-            var button: TabButton!
-            button = TabButton(
+            // Weak: the rename button is a subview of the tab button.
+            weak var weakButton: TabButton?
+            let button = TabButton(
                 tab: tab, active: app.activeTab === tab,
                 onClose: { [weak app] in app?.closeTab(tab) },
-                onRename: tab.kind == .query ? { [weak self] in if let button { self?.beginRename(button) } } : nil,
+                onRename: tab.kind == .query ? { [weak self] in if let button = weakButton { self?.beginRename(button) } } : nil,
                 onCollapse: { [weak app] in app?.collapseTab(tab) })
+            weakButton = button
             button.color = app.profile(tab.profileID)?.color ?? Graphite.accent
             button.onClick = { [weak app] in app?.selectTab(tab) }
             button.onMiddleClick = { [weak app] in app?.closeTab(tab) }
@@ -710,7 +725,9 @@ final class TabStrip: PanelView {
             field.centerYAnchor.constraint(equalTo: button.centerYAnchor),
         ])
         field.setAccessibilityLabel("Rename \(button.tab.title)")
-        field.onCommit = { [weak app] text in app?.renameTab(button.tab, text) }
+        // Capture the tab, not the button that holds this field.
+        let tab = button.tab
+        field.onCommit = { [weak app] text in app?.renameTab(tab, text) }
         field.onCancel = { [weak self] in self?.reload() }
         window?.makeFirstResponder(field)
         field.currentEditor()?.selectAll(nil)

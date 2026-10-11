@@ -245,3 +245,17 @@ fn helper_calls_need_no_session_and_reject_database_commands() {
         );
     }
 }
+
+#[test]
+fn helper_calls_accept_requests_larger_than_session_calls() {
+    // Copying a large result as CSV sends every row through the helper.
+    let cell = "x".repeat(2 * 1_048_576);
+    let request = json!({"command": "csv", "columns": ["a"], "rows": [[cell]]}).to_string();
+    assert!(request.len() > 1_048_576);
+    let reply = unsafe { take(dbm_bridge_helper_call(request.as_ptr(), request.len())) };
+    assert_eq!(reply["ok"], true);
+    assert_eq!(
+        reply["value"].as_str().unwrap().len(),
+        "a\n".len() + cell.len()
+    );
+}
