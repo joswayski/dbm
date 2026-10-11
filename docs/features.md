@@ -6,10 +6,12 @@ What the app does today, what is deliberately not built yet, and what it stores 
 
 - PostgreSQL, MySQL, and Redis direct connections with disabled, preferred, or
   required TLS. Required verifies the server certificate (against the
-  profile's CA when one is set) and never continues in plaintext. Preferred
-  encrypts without verifying the certificate unless a CA is set, and PostgreSQL
-  and MySQL fall back to plaintext only when TLS itself fails, not after
-  errors such as a rejected password. Connection attempts give up after 20 seconds.
+  profile's CA when one is set, in addition to the system roots) and never
+  continues in plaintext. Preferred encrypts without verifying the certificate
+  unless a CA is set, and falls back to plaintext only when TLS itself fails
+  (for Redis, also when the TLS handshake takes longer than 5 seconds), not
+  after errors such as a rejected password. Connection attempts give up after
+  20 seconds.
 - Local connection profiles and query history in an application SQLite database.
 - Each connection remembers the database last successfully selected in the
   sidebar, including Redis database indices. That selection becomes the saved
@@ -47,7 +49,7 @@ What the app does today, what is deliberately not built yet, and what it stores 
   structured multi-filtering, ordering, visible-page CSV copy, and full filtered
   CSV export. Redis connections show numbered databases, a SCAN-backed key
   index, and per-type key folders (strings, hashes, lists, sets, sorted sets,
-  streams).
+  streams) that each show up to 250 keys, sampled in one SCAN pass.
 - CSV exports replace the chosen file only after every page is written
   successfully. A failed export leaves an existing file unchanged.
 - Redis key-index pages scan the complete matching keyspace, deduplicate keys,
@@ -55,6 +57,10 @@ What the app does today, what is deliberately not built yet, and what it stores 
   Unfiltered key-name pages fetch type and TTL only for visible keys. Filtering
   or sorting by metadata inspects all matching keys, so large keyspaces can take
   longer. Pages and exports are not snapshots of concurrent database changes.
+  Key filters other than equals, contains, starts with, and ends with scan
+  every key. Key names that are not valid UTF-8 are left out of the key index
+  and sidebar. Binary values, hash fields, and set members show as `\x…` hex,
+  and values over 256 KiB are truncated.
 - Unfiltered Redis lists in ascending index order fetch only the requested page
   plus one lookahead element, with `LLEN` supplying the total. Filtering or
   other sort orders still load the complete list before paging.
@@ -75,7 +81,12 @@ What the app does today, what is deliberately not built yet, and what it stores 
 - Inline edits and staged deletes for primary-key-backed tables. PostgreSQL
   edits are guarded by `xmin` optimistic concurrency; MySQL edits match on the
   primary key. Redis table views edit strings, hashes, lists, sets, and sorted
-  sets in place, and can delete keys from the key index. Read-only profile
+  sets in place, and can delete keys from the key index. Values, hash fields,
+  and members shown as `\x…` hex or truncated cannot be saved, so a preview
+  never overwrites stored data; keys, list elements, and hash fields that only
+  have such a value can still be deleted. Key-index TTL edits take seconds:
+  blank or negative removes the expiry, and 0 is rejected instead of deleting
+  the key. Read-only profile
   mode blocks GUI writes on every engine; PostgreSQL and MySQL sessions for
   read-only profiles are also marked read-only on the server, so writes the
   app cannot recognize are rejected too. Statements that would switch such a
