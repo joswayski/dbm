@@ -31,6 +31,7 @@ verified-TLS database validation; both remain outstanding.
   the app's read-only mode is a safeguard, not an authorization boundary.
 - Connect opens the SQL/Redis workbench. Query results are capped at 1,000 rows;
   schema/key exploration and read-only table/key pages use 25 rows per page.
+  The mobile Rust bridge clamps larger requests to these caps.
 - Database selection, refresh, loading/errors, and explicit local demo fixtures.
 - The desktop Graphite workbench layout and bundled Space Mono fonts:
   connection identity, colored tab edges, compact controls and dense grids.

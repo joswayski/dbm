@@ -247,7 +247,32 @@ async fn dispatch_mobile(state: &AppState, request: Request) -> Result<Value, St
         | Request::ListQueryHistory { .. } => {}
         _ => return Err("operation is unavailable in the read-only mobile app".into()),
     }
-    dispatch(state, request).await
+    dispatch(state, clamp_mobile_request(request)).await
+}
+
+/// Mobile query results are capped at 1,000 rows (docs/mobile.md).
+const MOBILE_QUERY_ROWS: u32 = 1_000;
+/// Mobile table and key pages show 25 rows.
+const MOBILE_PAGE_ROWS: u32 = 25;
+
+/// Applies the mobile row caps here, so a client cannot ask for more.
+fn clamp_mobile_request(request: Request) -> Request {
+    match request {
+        Request::Query { mut request } => {
+            request.max_rows = Some(
+                request
+                    .max_rows
+                    .unwrap_or(MOBILE_QUERY_ROWS)
+                    .clamp(1, MOBILE_QUERY_ROWS),
+            );
+            Request::Query { request }
+        }
+        Request::LoadTablePage { mut request } => {
+            request.limit = request.limit.clamp(1, MOBILE_PAGE_ROWS);
+            Request::LoadTablePage { request }
+        }
+        other => other,
+    }
 }
 
 async fn dispatch(state: &AppState, request: Request) -> Result<Value, String> {
@@ -888,6 +913,38 @@ mod tests {
         );
         drop(reopened);
         std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn mobile_requests_are_clamped_to_the_documented_row_caps() {
+        let id = Uuid::new_v4();
+        let query = |max_rows: Value| {
+            let request = serde_json::from_value(json!({"command": "query",
+                "request": {"profileId": id, "sql": "SELECT 1", "maxRows": max_rows}}))
+            .unwrap();
+            match clamp_mobile_request(request) {
+                Request::Query { request } => request.max_rows,
+                _ => panic!("expected a query"),
+            }
+        };
+        assert_eq!(query(json!(10_000)), Some(1_000));
+        assert_eq!(query(Value::Null), Some(1_000));
+        assert_eq!(query(json!(0)), Some(1));
+        assert_eq!(query(json!(200)), Some(200));
+        let page = |limit: u32| {
+            let request = serde_json::from_value(json!({"command": "loadTablePage",
+                "request": {"profileId": id, "schema": "public", "table": "items",
+                    "offset": 50, "limit": limit, "filters": [], "orderBy": null}}))
+            .unwrap();
+            match clamp_mobile_request(request) {
+                Request::LoadTablePage { request } => (request.offset, request.limit),
+                _ => panic!("expected a table page"),
+            }
+        };
+        assert_eq!(page(500), (50, 25));
+        assert_eq!(page(25), (50, 25));
+        assert_eq!(page(10), (50, 10));
+        assert_eq!(page(0), (50, 1));
     }
 
     #[test]
