@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 use std::collections::BTreeSet;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use redis_rs::aio::MultiplexedConnection;
 use redis_rs::{Client, Cmd, ConnectionAddr, ConnectionInfo, RedisConnectionInfo, Value};
@@ -24,6 +24,8 @@ const SCAN_COUNT: usize = 1_000;
 const PIPELINE_KEYS: usize = 1_000;
 const MAX_VALUE_BYTES: usize = 256 * 1024;
 const TRUNCATION_MARKER: &str = "… (truncated)";
+/// How long Preferred TLS may take before falling back to plaintext.
+const PREFERRED_TLS_TIMEOUT: Duration = Duration::from_secs(5);
 const KEY_TYPES: [&str; 6] = ["string", "hash", "list", "set", "zset", "stream"];
 
 pub struct RedisSession {
@@ -168,19 +170,50 @@ impl RedisSession {
     }
 }
 
+/// `Ok(Err(_))` is a failed connection attempt; `Err(_)` is a profile problem,
+/// such as an unreadable CA file, that retrying without TLS cannot fix.
+type ConnectAttempt = AppResult<redis_rs::RedisResult<MultiplexedConnection>>;
+
 async fn connect_client(
     profile: &ConnectionProfile,
     password: Option<&str>,
 ) -> AppResult<MultiplexedConnection> {
     if matches!(profile.tls_mode, TlsMode::Disabled) {
-        return open_connection(profile, password, false).await;
+        return Ok(open_connection(profile, password, false).await??);
     }
-    match open_connection(profile, password, true).await {
+    let attempt = open_connection(profile, password, true);
+    let attempt = if matches!(profile.tls_mode, TlsMode::Preferred) {
+        // A plaintext Redis server can read a TLS ClientHello as a partial
+        // inline command and wait for more input, so the handshake would
+        // never finish. Bound it, leaving the plaintext retry time within
+        // the overall connect timeout.
+        tokio::time::timeout(PREFERRED_TLS_TIMEOUT, attempt)
+            .await
+            .unwrap_or_else(|_| {
+                Ok(Err(redis_rs::RedisError::from(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "TLS handshake timed out",
+                ))))
+            })
+    } else {
+        attempt.await
+    };
+    let tls_error = match attempt? {
+        Ok(connection) => return Ok(connection),
+        Err(error) => error,
+    };
+    // Preferred TLS only falls back when the TLS transport failed. A server
+    // reply such as WRONGPASS or NOAUTH arrived over working TLS, and
+    // retrying in plaintext would only replace it with a less useful error.
+    if !matches!(profile.tls_mode, TlsMode::Preferred) || !tls_error.is_io_error() {
+        return Err(tls_error.into());
+    }
+    match open_connection(profile, password, false).await? {
         Ok(connection) => Ok(connection),
-        Err(_error) if matches!(profile.tls_mode, TlsMode::Preferred) => {
-            open_connection(profile, password, false).await
-        }
-        Err(error) => Err(error),
+        Err(plain_error) if plain_error.is_io_error() => Err(AppError::Database(format!(
+            "TLS connection failed: {tls_error}; plaintext fallback failed: {plain_error}"
+        ))),
+        Err(plain_error) => Err(plain_error.into()),
     }
 }
 
@@ -188,11 +221,18 @@ async fn open_connection(
     profile: &ConnectionProfile,
     password: Option<&str>,
     tls: bool,
-) -> AppResult<MultiplexedConnection> {
+) -> ConnectAttempt {
+    let info = connection_info(profile, password, tls)?;
     #[cfg(not(target_os = "android"))]
-    let client = Client::open(connection_info(profile, password, tls)?)?;
+    let connection = match profile.ca_cert_path.as_deref().filter(|_| tls) {
+        Some(path) => {
+            let connector = native_tls_connector(path)?;
+            connect_native_tls(&profile.host, profile.port, &info.redis, connector).await
+        }
+        None => Client::open(info)?.get_multiplexed_async_connection().await,
+    };
     #[cfg(target_os = "android")]
-    let client = if tls {
+    let connection = if tls {
         let path = profile.ca_cert_path.as_deref().ok_or_else(|| {
             AppError::InvalidInput("Android TLS requires the platform CA bundle".into())
         })?;
@@ -200,17 +240,80 @@ async fn open_connection(
             AppError::InvalidInput(format!("could not read CA bundle: {error}"))
         })?;
         Client::build_with_tls(
-            connection_info(profile, password, tls)?,
+            info,
             redis_rs::TlsCertificates {
                 client_tls: None,
                 root_cert: Some(roots),
             },
         )?
+        .get_multiplexed_async_connection()
+        .await
     } else {
-        Client::open(connection_info(profile, password, tls)?)?
+        Client::open(info)?.get_multiplexed_async_connection().await
     };
-    let mut connection = client.get_multiplexed_async_connection().await?;
-    let _: String = redis_rs::cmd("PING").query_async(&mut connection).await?;
+    let mut connection = match connection {
+        Ok(connection) => connection,
+        Err(error) => return Ok(Err(error)),
+    };
+    Ok(redis_rs::cmd("PING")
+        .query_async::<String>(&mut connection)
+        .await
+        .map(|_| connection))
+}
+
+/// redis-rs's native-tls transport cannot take extra root certificates, so
+/// profiles with a CA file connect their own TLS stream, verified against the
+/// system roots plus that CA, like PostgreSQL profiles.
+#[cfg(not(target_os = "android"))]
+fn native_tls_connector(path: &str) -> AppResult<native_tls::TlsConnector> {
+    let pem = std::fs::read(path).map_err(|error| {
+        AppError::InvalidInput(format!("could not read CA certificate {path}: {error}"))
+    })?;
+    let certificates = pem::parse_many(&pem).map_err(|error| {
+        AppError::InvalidInput(format!("could not parse CA certificate {path}: {error}"))
+    })?;
+    if certificates.is_empty() {
+        return Err(AppError::InvalidInput(
+            "CA bundle contains no certificates".into(),
+        ));
+    }
+    let mut connector = native_tls::TlsConnector::builder();
+    for certificate in certificates {
+        if certificate.tag() != "CERTIFICATE" {
+            return Err(AppError::InvalidInput(
+                "CA bundle must contain certificates only".into(),
+            ));
+        }
+        connector.add_root_certificate(
+            native_tls::Certificate::from_der(certificate.contents()).map_err(|error| {
+                AppError::InvalidInput(format!("could not parse CA certificate: {error}"))
+            })?,
+        );
+    }
+    connector
+        .build()
+        .map_err(|error| AppError::InvalidInput(format!("could not use CA certificate: {error}")))
+}
+
+#[cfg(not(target_os = "android"))]
+async fn connect_native_tls(
+    host: &str,
+    port: u16,
+    redis: &RedisConnectionInfo,
+    connector: native_tls::TlsConnector,
+) -> redis_rs::RedisResult<MultiplexedConnection> {
+    let tcp = tokio::net::TcpStream::connect((host, port)).await?;
+    tcp.set_nodelay(true)?;
+    let stream = tokio_native_tls::TlsConnector::from(connector)
+        .connect(host, tcp)
+        .await?;
+    let (connection, driver) = MultiplexedConnection::new_with_config(
+        redis,
+        stream,
+        redis_rs::AsyncConnectionConfig::new(),
+    )
+    .await?;
+    tokio::spawn(driver);
     Ok(connection)
 }
 
@@ -224,6 +327,8 @@ fn connection_info(
         ConnectionAddr::TcpTls {
             host: profile.host.clone(),
             port: profile.port,
+            // Preferred TLS without a CA encrypts without verifying, as
+            // before; a configured CA is always verified.
             insecure: matches!(profile.tls_mode, TlsMode::Preferred)
                 && profile.ca_cert_path.is_none(),
             tls_params: None,
@@ -234,8 +339,8 @@ fn connection_info(
     let mut redis = RedisConnectionInfo {
         db,
         username: None,
+        // Passwords are sent exactly as entered; spaces can be part of one.
         password: password
-            .map(str::trim)
             .filter(|value| !value.is_empty())
             .map(ToOwned::to_owned),
         protocol: redis_rs::ProtocolVersion::RESP2,
@@ -3280,6 +3385,205 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result.applied, 1);
+    }
+
+    /// Starts a TLS-only redis-server with a throwaway CA, or `None` when
+    /// openssl or a TLS-capable redis-server is unavailable.
+    async fn start_tls_redis(
+        directory: &std::path::Path,
+        password: &str,
+    ) -> Option<(TestRedis, u16, String)> {
+        let path = |name: &str| directory.join(name).to_string_lossy().into_owned();
+        std::fs::write(
+            directory.join("server.ext"),
+            "subjectAltName=IP:127.0.0.1\nextendedKeyUsage=serverAuth\nkeyUsage=digitalSignature,keyEncipherment\n",
+        )
+        .ok()?;
+        let openssl = |args: &[&str]| {
+            Command::new("openssl")
+                .args(args)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .is_ok_and(|status| status.success())
+        };
+        let ready = openssl(&[
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-days",
+            "2",
+            "-subj",
+            "/CN=Anybase Test CA",
+            "-keyout",
+            &path("ca.key"),
+            "-out",
+            &path("ca.crt"),
+        ]) && openssl(&[
+            "req",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-subj",
+            "/CN=127.0.0.1",
+            "-keyout",
+            &path("server.key"),
+            "-out",
+            &path("server.csr"),
+        ]) && openssl(&[
+            "x509",
+            "-req",
+            "-days",
+            "2",
+            "-in",
+            &path("server.csr"),
+            "-CA",
+            &path("ca.crt"),
+            "-CAkey",
+            &path("ca.key"),
+            "-CAcreateserial",
+            "-extfile",
+            &path("server.ext"),
+            "-out",
+            &path("server.crt"),
+        ]);
+        if !ready {
+            return None;
+        }
+        let port = unused_port()?;
+        let child = Command::new("redis-server")
+            .args([
+                "--port",
+                "0",
+                "--tls-port",
+                &port.to_string(),
+                "--bind",
+                "127.0.0.1",
+                "--tls-cert-file",
+                &path("server.crt"),
+                "--tls-key-file",
+                &path("server.key"),
+                "--tls-ca-cert-file",
+                &path("ca.crt"),
+                "--tls-auth-clients",
+                "no",
+                "--requirepass",
+                password,
+                "--save",
+                "",
+                "--appendonly",
+                "no",
+            ])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .ok()?;
+        let server = TestRedis { child };
+        let mut profile = test_profile(port, false);
+        profile.tls_mode = TlsMode::Required;
+        profile.ca_cert_path = Some(path("ca.crt"));
+        for _ in 0..80 {
+            if RedisSession::connect(profile.clone(), Some(password.into()))
+                .await
+                .is_ok()
+            {
+                return Some((server, port, path("ca.crt")));
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        None
+    }
+
+    #[tokio::test]
+    async fn tls_profiles_use_their_ca_and_report_auth_errors() {
+        let directory = tempfile::tempdir().unwrap();
+        let Some((_server, port, ca)) = start_tls_redis(directory.path(), "secret").await else {
+            eprintln!(
+                "skipping live Redis TLS test because openssl or TLS redis-server is unavailable"
+            );
+            return;
+        };
+        let profile = |mode: TlsMode, ca: Option<&str>| {
+            let mut profile = test_profile(port, false);
+            profile.tls_mode = mode;
+            profile.ca_cert_path = ca.map(ToOwned::to_owned);
+            profile
+        };
+        let session =
+            RedisSession::connect(profile(TlsMode::Required, Some(&ca)), Some("secret".into()))
+                .await
+                .expect("the profile CA verifies the server");
+        assert_eq!(
+            session.run_query("PING", None).await.unwrap().rows,
+            vec![vec![JsonValue::from("PONG")]]
+        );
+        let error = RedisSession::connect(profile(TlsMode::Required, None), Some("secret".into()))
+            .await
+            .err()
+            .expect("an unknown CA is rejected");
+        assert!(error.to_string().contains("TLS"), "{error}");
+
+        // A wrong password over working TLS is reported as such, not hidden
+        // behind a plaintext retry against the TLS-only port.
+        for ca in [Some(ca.as_str()), None] {
+            let error =
+                RedisSession::connect(profile(TlsMode::Preferred, ca), Some("wrong".into()))
+                    .await
+                    .err()
+                    .expect("wrong password");
+            let message = error.to_string();
+            assert!(
+                message.contains("Password authentication failed"),
+                "{message}"
+            );
+            assert!(!message.contains("plaintext"), "{message}");
+        }
+
+        let error = RedisSession::connect(
+            profile(
+                TlsMode::Required,
+                Some(&directory.path().join("missing.pem").to_string_lossy()),
+            ),
+            Some("secret".into()),
+        )
+        .await
+        .err()
+        .expect("missing CA file");
+        assert!(
+            error.to_string().contains("could not read CA certificate"),
+            "{error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn preferred_tls_falls_back_and_passwords_keep_their_spaces() {
+        let Some((_server, session)) = start_test_redis().await else {
+            eprintln!("skipping live Redis test because redis-server is unavailable");
+            return;
+        };
+        let port = session.profile().port;
+        session
+            .run_query(r#"CONFIG SET requirepass " spaced pass ""#, None)
+            .await
+            .unwrap();
+        let mut profile = test_profile(port, false);
+        profile.tls_mode = TlsMode::Preferred;
+        let fallback = RedisSession::connect(profile.clone(), Some(" spaced pass ".into()))
+            .await
+            .expect("plaintext fallback after a failed TLS handshake");
+        assert_eq!(
+            fallback.run_query("PING", None).await.unwrap().rows,
+            vec![vec![JsonValue::from("PONG")]]
+        );
+        profile.tls_mode = TlsMode::Disabled;
+        assert!(
+            RedisSession::connect(profile, Some("spaced pass".into()))
+                .await
+                .is_err(),
+            "the trimmed password is a different password"
+        );
     }
 
     #[tokio::test]

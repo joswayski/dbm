@@ -31,6 +31,7 @@ keyring.workspace = true
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
 redis_rs.workspace = true
+tokio-native-tls = "0.3"
 
 [target.'cfg(target_os = "android")'.dependencies]
 native-tls = { workspace = true, features = ["vendored"] }
