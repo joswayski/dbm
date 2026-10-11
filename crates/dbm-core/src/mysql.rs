@@ -587,11 +587,20 @@ fn build_predicate(
                 filter.column
             )));
         }
+        let binary = metadata
+            .columns
+            .iter()
+            .any(|column| column.name == filter.column && is_binary_type(&column.data_type));
         let column = quote_identifier(&filter.column);
         let text_column = format!("CAST({column} AS CHAR)");
         let value = filter.value.as_deref().unwrap_or_default();
         let mut bind = |value: String| {
-            params.push(Value::from(value));
+            // Binary columns match the `\x` hex form they display. LIKE
+            // patterns never decode: `%` is not a hex digit.
+            params.push(match decode_hex_literal(&value).filter(|_| binary) {
+                Some(bytes) => Value::Bytes(bytes),
+                None => Value::from(value),
+            });
             "?"
         };
         let clause = match filter.operator {
@@ -729,6 +738,11 @@ fn mysql_param(value: &JsonValue, data_type: &str) -> Value {
             .or_else(|| number.as_f64().map(Value::Double))
             .unwrap_or_else(|| Value::from(number.to_string())),
         JsonValue::String(text) => {
+            if is_binary_type(data_type)
+                && let Some(bytes) = decode_hex_literal(text)
+            {
+                return Value::Bytes(bytes);
+            }
             if is_integer_type(data_type) {
                 if let Ok(integer) = text.parse::<i64>() {
                     return Value::Int(integer);
@@ -744,17 +758,38 @@ fn mysql_param(value: &JsonValue, data_type: &str) -> Value {
 }
 
 fn is_integer_type(data_type: &str) -> bool {
+    has_type_name(
+        data_type,
+        &[
+            "tinyint",
+            "smallint",
+            "mediumint",
+            "int",
+            "bigint",
+            "integer",
+        ],
+    )
+}
+
+/// Column types whose values are bytes, displayed as `\x` hex when they are
+/// not UTF-8 text.
+fn is_binary_type(data_type: &str) -> bool {
+    has_type_name(
+        data_type,
+        &[
+            "binary",
+            "varbinary",
+            "tinyblob",
+            "blob",
+            "mediumblob",
+            "longblob",
+        ],
+    )
+}
+
+fn has_type_name(data_type: &str, names: &[&str]) -> bool {
     let data_type = data_type.trim_start().to_ascii_lowercase();
-    [
-        "tinyint",
-        "smallint",
-        "mediumint",
-        "int",
-        "bigint",
-        "integer",
-    ]
-    .iter()
-    .any(|prefix| {
+    names.iter().any(|prefix| {
         data_type
             .strip_prefix(prefix)
             .is_some_and(|rest| rest.is_empty() || rest.starts_with(['(', ' ']))
@@ -764,9 +799,64 @@ fn is_integer_type(data_type: &str) -> bool {
 fn json_row(row: Row) -> Vec<JsonValue> {
     (0..row.len())
         .map(|index| {
+            let binary = row.columns_ref().get(index).is_some_and(is_binary_column);
             row.as_ref(index)
-                .map(value_from_mysql)
-                .unwrap_or(JsonValue::Null)
+                .map_or(JsonValue::Null, |value| json_cell(value, binary))
+        })
+        .collect()
+}
+
+fn json_cell(value: &Value, binary: bool) -> JsonValue {
+    match value {
+        // Binary values are shown as text only when they read as text. Control
+        // bytes (as in packed UUIDs) and text that would read as a `\x` hex
+        // literal are shown in hex, so editing them binds the same bytes back.
+        Value::Bytes(bytes) if binary && !shows_as_text(bytes) => {
+            JsonValue::String(format!("\\x{}", hex_encode(bytes)))
+        }
+        value => value_from_mysql(value),
+    }
+}
+
+/// BINARY, VARBINARY, and BLOB result columns: string types in the binary
+/// character set (63), whose values are shown as text or `\x` hex.
+fn is_binary_column(column: &mysql_async::Column) -> bool {
+    const BINARY_CHARSET: u16 = 63;
+    column.character_set() == BINARY_CHARSET
+        && matches!(
+            column.column_type(),
+            ColumnType::MYSQL_TYPE_STRING
+                | ColumnType::MYSQL_TYPE_VAR_STRING
+                | ColumnType::MYSQL_TYPE_VARCHAR
+                | ColumnType::MYSQL_TYPE_TINY_BLOB
+                | ColumnType::MYSQL_TYPE_MEDIUM_BLOB
+                | ColumnType::MYSQL_TYPE_LONG_BLOB
+                | ColumnType::MYSQL_TYPE_BLOB
+        )
+}
+
+fn shows_as_text(bytes: &[u8]) -> bool {
+    std::str::from_utf8(bytes).is_ok_and(|text| {
+        decode_hex_literal(text).is_none()
+            && !text
+                .chars()
+                .any(|character| character.is_control() && !matches!(character, '\t' | '\n' | '\r'))
+    })
+}
+
+/// Decodes the `\x0a1b...` form used to display binary values that are not
+/// UTF-8 text.
+fn decode_hex_literal(text: &str) -> Option<Vec<u8>> {
+    let digits = text.strip_prefix("\\x")?.as_bytes();
+    if digits.len() % 2 != 0 {
+        return None;
+    }
+    digits
+        .chunks(2)
+        .map(|pair| {
+            let high = char::from(pair[0]).to_digit(16)?;
+            let low = char::from(pair[1]).to_digit(16)?;
+            u8::try_from(high * 16 + low).ok()
         })
         .collect()
 }
@@ -1056,6 +1146,74 @@ mod tests {
     }
 
     #[test]
+    fn binary_values_bind_their_displayed_hex_as_bytes() {
+        assert_eq!(
+            mysql_param(&JsonValue::from("\\x00ff10"), "binary(16)"),
+            Value::Bytes(vec![0x00, 0xff, 0x10])
+        );
+        assert_eq!(
+            mysql_param(&JsonValue::from("\\xDEADbeef"), "varbinary(255)"),
+            Value::Bytes(vec![0xde, 0xad, 0xbe, 0xef])
+        );
+        assert_eq!(
+            mysql_param(&JsonValue::from("\\x"), "longblob"),
+            Value::Bytes(Vec::new())
+        );
+        // Plain text, odd-length, or non-hex input is bound as typed.
+        assert_eq!(
+            mysql_param(&JsonValue::from("hello"), "blob"),
+            Value::from("hello")
+        );
+        assert_eq!(
+            mysql_param(&JsonValue::from("\\x0"), "blob"),
+            Value::from("\\x0")
+        );
+        assert_eq!(
+            mysql_param(&JsonValue::from("\\xzz"), "blob"),
+            Value::from("\\xzz")
+        );
+        // Text columns never decode.
+        assert_eq!(
+            mysql_param(&JsonValue::from("\\x00ff"), "varchar(20)"),
+            Value::from("\\x00ff")
+        );
+        assert!(is_binary_type("binary(16)"));
+        assert!(is_binary_type("BLOB"));
+        assert!(!is_binary_type("binary_thing"));
+        assert!(!is_binary_type("varchar(16)"));
+    }
+
+    #[test]
+    fn binary_cells_round_trip_through_their_display_form() {
+        let binary = mysql_async::Column::new(ColumnType::MYSQL_TYPE_STRING).with_character_set(63);
+        let text =
+            mysql_async::Column::new(ColumnType::MYSQL_TYPE_VAR_STRING).with_character_set(255);
+        assert!(is_binary_column(&binary));
+        assert!(!is_binary_column(&text));
+        for bytes in [
+            vec![0xde, 0xad, 0xbe, 0xef],
+            b"\\x41".to_vec(),
+            b"plain".to_vec(),
+            vec![0x01, 0x02, 0x03, 0x04],
+            b"padded\0\0".to_vec(),
+        ] {
+            let JsonValue::String(shown) = json_cell(&Value::Bytes(bytes.clone()), true) else {
+                panic!("binary values are shown as text");
+            };
+            assert_eq!(
+                mysql_param(&JsonValue::String(shown.clone()), "varbinary(16)"),
+                Value::Bytes(bytes.clone()),
+                "{shown}"
+            );
+        }
+        // Text columns keep showing such text as typed.
+        assert_eq!(
+            json_cell(&Value::Bytes(b"\\x41".to_vec()), false),
+            JsonValue::String("\\x41".into())
+        );
+    }
+
+    #[test]
     fn time_values_use_total_hours() {
         assert_eq!(
             value_from_mysql(&Value::Time(true, 1, 2, 3, 4, 0)),
@@ -1215,6 +1373,116 @@ mod tests {
                 .expect("connection remains usable");
             assert_eq!(response.rows, vec![vec![JsonValue::from("7")]]);
             session.close().await;
+        }
+
+        #[tokio::test]
+        async fn binary_keys_and_values_round_trip_through_edits() {
+            let Some(admin) = profile("mysql", false) else {
+                return;
+            };
+            let database = format!("dbm_test_{}", Uuid::new_v4().simple());
+            let admin = MysqlSession::connect(admin, None).await.expect("connect");
+            admin
+                .run_query(&format!("CREATE DATABASE {database}"), None)
+                .await
+                .expect("create database");
+            let session = MysqlSession::connect(profile(&database, false).expect("profile"), None)
+                .await
+                .expect("connect to test database");
+            session
+                .run_query(
+                    "CREATE TABLE blobs (
+                         tag VARCHAR(10) NOT NULL,
+                         id BINARY(4) NOT NULL,
+                         data VARBINARY(16),
+                         note VARCHAR(20),
+                         PRIMARY KEY (id, tag),
+                         UNIQUE KEY (note)
+                     );
+                     INSERT INTO blobs VALUES
+                         ('a', X'DEADBEEF', X'00FF', '\\\\x00ff'),
+                         ('b', X'01020304', X'5C783431', 'plain')",
+                    None,
+                )
+                .await
+                .expect("fixture");
+            let request = |filters| TablePageRequest {
+                profile_id: Uuid::nil(),
+                schema: database.clone(),
+                table: "blobs".into(),
+                offset: 0,
+                limit: 10,
+                filters,
+                order_by: None,
+                include_total: Some(true),
+            };
+            let page = session
+                .table_page(&request(Vec::new()))
+                .await
+                .expect("page");
+            assert_eq!(page.metadata.primary_key, vec!["id", "tag"]);
+            let rows = page.rows.clone();
+            assert_eq!(rows[0][1], JsonValue::from("\\x01020304"));
+            assert_eq!(rows[1][1], JsonValue::from("\\xdeadbeef"));
+            assert_eq!(rows[1][2], JsonValue::from("\\x00ff"));
+            // Binary text that looks like the hex form is shown in hex too.
+            assert_eq!(rows[0][2], JsonValue::from("\\x5c783431"));
+            // Text columns are never decoded.
+            assert_eq!(rows[1][3], JsonValue::from("\\x00ff"));
+
+            let filtered = session
+                .table_page(&request(vec![FilterCondition {
+                    column: "id".into(),
+                    operator: FilterOperator::Equals,
+                    value: Some("\\xDEADBEEF".into()),
+                }]))
+                .await
+                .expect("filter by displayed hex");
+            assert_eq!(filtered.total_rows, Some(1));
+
+            let mut changes = rows[1].clone();
+            changes[2] = JsonValue::from("\\xcafe");
+            let result = session
+                .apply_mutations(&MutationBatch {
+                    profile_id: Uuid::nil(),
+                    database: database.clone(),
+                    schema: database.clone(),
+                    table: "blobs".into(),
+                    mutations: vec![
+                        RowMutation {
+                            original: rows[1].clone(),
+                            changes,
+                            primary_key: vec![rows[1][1].clone(), rows[1][0].clone()],
+                            xmin: None,
+                            deleted: false,
+                        },
+                        RowMutation {
+                            original: rows[0].clone(),
+                            changes: rows[0].clone(),
+                            primary_key: vec![rows[0][1].clone(), rows[0][0].clone()],
+                            xmin: None,
+                            deleted: true,
+                        },
+                    ],
+                })
+                .await
+                .expect("mutations");
+            assert_eq!((result.applied, result.conflicts.len()), (2, 0));
+            let stored = session
+                .run_query("SELECT HEX(id), HEX(data) FROM blobs", None)
+                .await
+                .expect("select");
+            assert_eq!(
+                stored.rows,
+                vec![vec![JsonValue::from("DEADBEEF"), JsonValue::from("CAFE")]]
+            );
+
+            session.close().await;
+            admin
+                .run_query(&format!("DROP DATABASE {database}"), None)
+                .await
+                .expect("cleanup");
+            admin.close().await;
         }
 
         #[tokio::test]
