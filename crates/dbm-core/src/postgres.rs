@@ -10,6 +10,7 @@ use crate::models::{
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
 use futures_util::TryStreamExt;
 use serde_json::Value;
+use tokio_postgres::config::SslMode;
 use tokio_postgres::types::{FromSql, Type};
 use tokio_postgres::{Client, Config, NoTls, Row, SimpleQueryMessage};
 
@@ -574,33 +575,93 @@ async fn connect_client(profile: &ConnectionProfile, password: Option<&str>) -> 
                 })?,
             );
         }
+    } else if matches!(profile.tls_mode, TlsMode::Preferred) {
+        // Preferred TLS falls back to plaintext anyway, so like libpq's
+        // sslmode=prefer (and MySQL and Redis here) it encrypts without
+        // verifying the server. Required, or a configured CA, verifies.
+        connector
+            .danger_accept_invalid_certs(true)
+            .danger_accept_invalid_hostnames(true);
     }
     let connector = connector
         .build()
         .map_err(|error| AppError::database(&error))?;
-    let mut config = base_config(profile, password);
     let make_connector = postgres_native_tls::MakeTlsConnector::new(connector);
-    match config.connect(make_connector).await {
+    match base_config(profile, password).connect(make_connector).await {
         Ok((client, connection)) => {
-            tokio::spawn(async move {
-                if let Err(error) = connection.await {
-                    tracing::error!(%error, "postgres connection closed");
-                }
-            });
+            spawn_connection(connection);
             Ok(client)
         }
-        Err(_error) if matches!(profile.tls_mode, TlsMode::Preferred) => {
-            config = base_config(profile, password);
-            let (client, connection) = config.connect(NoTls).await?;
-            tokio::spawn(async move {
-                if let Err(error) = connection.await {
-                    tracing::error!(%error, "postgres connection closed");
+        Err(tls_error)
+            if matches!(profile.tls_mode, TlsMode::Preferred)
+                && plaintext_fallback_may_help(&tls_error) =>
+        {
+            let mut config = base_config(profile, password);
+            config.ssl_mode(SslMode::Disable);
+            match config.connect(NoTls).await {
+                Ok((client, connection)) => {
+                    spawn_connection(connection);
+                    Ok(client)
                 }
-            });
-            Ok(client)
+                // A server answer (bad password, unknown database, pg_hba
+                // rejecting plaintext) explains the failure on its own.
+                Err(plain_error) if plain_error.as_db_error().is_some() => Err(plain_error.into()),
+                Err(plain_error) => Err(AppError::Database(format!(
+                    "{}; plaintext fallback also failed: {}",
+                    database_message(tls_error),
+                    database_message(plain_error)
+                ))),
+            }
         }
         Err(error) => Err(AppError::from(error)),
     }
+}
+
+fn database_message(error: tokio_postgres::Error) -> String {
+    match AppError::from(error) {
+        AppError::Database(message) => message,
+        other => other.to_string(),
+    }
+}
+
+/// Whether a failed TLS attempt for a Preferred profile is worth retrying
+/// without TLS. Server answers such as authentication failures carry a
+/// SQLSTATE and would only fail again, and an unreachable or refusing host
+/// would double the wait. TLS handshake failures, and servers that drop the
+/// connection during TLS negotiation, may still accept plaintext.
+fn plaintext_fallback_may_help(error: &tokio_postgres::Error) -> bool {
+    if error.as_db_error().is_some() {
+        return false;
+    }
+    let mut source = std::error::Error::source(error);
+    while let Some(current) = source {
+        if current.downcast_ref::<native_tls::Error>().is_some() {
+            return true;
+        }
+        if let Some(io) = current.downcast_ref::<std::io::Error>() {
+            return matches!(
+                io.kind(),
+                std::io::ErrorKind::UnexpectedEof
+                    | std::io::ErrorKind::ConnectionReset
+                    | std::io::ErrorKind::ConnectionAborted
+                    | std::io::ErrorKind::BrokenPipe
+            );
+        }
+        source = current.source();
+    }
+    false
+}
+
+fn spawn_connection<S, T>(connection: tokio_postgres::Connection<S, T>)
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
+    tokio::spawn(async move {
+        if let Err(error) = connection.await {
+            tracing::error!(%error, "postgres connection closed");
+        }
+    });
 }
 
 async fn connect_without_tls(
@@ -608,11 +669,7 @@ async fn connect_without_tls(
     password: Option<&str>,
 ) -> AppResult<Client> {
     let (client, connection) = base_config(profile, password).connect(NoTls).await?;
-    tokio::spawn(async move {
-        if let Err(error) = connection.await {
-            tracing::error!(%error, "postgres connection closed");
-        }
-    });
+    spawn_connection(connection);
     Ok(client)
 }
 
@@ -626,7 +683,14 @@ fn base_config(profile: &ConnectionProfile, password: Option<&str>) -> Config {
         .application_name("Anybase")
         .connect_timeout(Duration::from_secs(10))
         .keepalives(true)
-        .keepalives_idle(Duration::from_secs(60));
+        .keepalives_idle(Duration::from_secs(60))
+        // tokio-postgres defaults to `prefer`, which silently continues in
+        // plaintext when the server, or anyone in between, declines TLS.
+        .ssl_mode(match profile.tls_mode {
+            TlsMode::Disabled => SslMode::Disable,
+            TlsMode::Preferred => SslMode::Prefer,
+            TlsMode::Required => SslMode::Require,
+        });
     if let Some(password) = password {
         config.password(password);
     }
@@ -1022,6 +1086,55 @@ mod tests {
             "ALTER TABLE users ADD COLUMN note text"
         ));
         assert!(!is_mutating_statement("SELECT * FROM users"));
+    }
+
+    fn test_profile(tls_mode: TlsMode) -> ConnectionProfile {
+        let now = Utc::now();
+        ConnectionProfile {
+            id: uuid::Uuid::nil(),
+            name: "test".into(),
+            color: None,
+            engine: crate::models::DatabaseEngine::Postgres,
+            host: "db.example.com".into(),
+            port: 5432,
+            username: "postgres".into(),
+            default_database: "postgres".into(),
+            tls_mode,
+            ca_cert_path: None,
+            ssh: None,
+            read_only: false,
+            open_on_startup: false,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    #[test]
+    fn ssl_mode_follows_the_profile_tls_mode() {
+        for (tls_mode, ssl_mode) in [
+            (TlsMode::Disabled, SslMode::Disable),
+            (TlsMode::Preferred, SslMode::Prefer),
+            (TlsMode::Required, SslMode::Require),
+        ] {
+            assert_eq!(
+                base_config(&test_profile(tls_mode.clone()), None).get_ssl_mode(),
+                ssl_mode,
+                "{tls_mode:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn preferred_tls_does_not_fall_back_when_the_host_is_unreachable() {
+        // Nothing listens on port 1, so the attempt fails before any TLS or
+        // server answer; retrying in plaintext would only double the wait.
+        let mut profile = test_profile(TlsMode::Preferred);
+        profile.host = "127.0.0.1".into();
+        profile.port = 1;
+        let Err(error) = base_config(&profile, None).connect(NoTls).await else {
+            panic!("nothing listens on port 1");
+        };
+        assert!(!plaintext_fallback_may_help(&error), "{error}");
     }
 
     #[test]
