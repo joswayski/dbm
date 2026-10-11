@@ -3,6 +3,7 @@ import QuartzCore
 
 let pendingRefreshError = "Save or discard pending row changes before refreshing."
 let pendingExportError = "Save or discard pending row changes before exporting."
+let copyFailedError = "Couldn't copy these rows as CSV; the clipboard was left unchanged."
 
 protocol TableHost: AnyObject {
     func revealExport(_ url: URL, open: Bool)
@@ -717,14 +718,18 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
 
     private func copyVisible() {
         let rows = state.copyableRows
-        host?.copyText(state.csv(rows))
+        let text = state.csv(rows)
+        guard !text.isEmpty else { showMessage(.error(copyFailedError)); return }
+        host?.copyText(text)
         showMessage(.notice("Copied \(rows.count) visible \(rows.count == 1 ? "row" : "rows") as CSV."))
     }
 
     private func copySelected() {
         let rows = state.selected.filter { state.pending[$0]?.deleted != true }
         guard !rows.isEmpty else { return }
-        host?.copyText(state.csv(Array(rows)))
+        let text = state.csv(Array(rows))
+        guard !text.isEmpty else { showMessage(.error(copyFailedError)); return }
+        host?.copyText(text)
         showMessage(.notice("Copied \(rows.count) selected \(rows.count == 1 ? "row" : "rows") as CSV."))
     }
 

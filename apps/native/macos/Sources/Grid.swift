@@ -557,6 +557,8 @@ final class ResultGrid: NSObject, NSTableViewDataSource, NSTableViewDelegate {
         let selected = table.selectedRowIndexes
         let picked = selected.isEmpty ? rows : selected.map { rows[$0] }
         let text = Helpers.csv(columns: columnNames, rows: picked)
+        // An empty document means the helper failed; keep the clipboard.
+        guard !text.isEmpty else { NSSound.beep(); return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
     }
