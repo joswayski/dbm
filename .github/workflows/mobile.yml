@@ -121,9 +121,6 @@ jobs:
     needs: route
     runs-on: ${{ needs.route.outputs.mac == 'true' && fromJSON('["self-hosted","josemac"]') || 'macos-15' }}
     timeout-minutes: 30
-    env:
-      # Other runner services share ~/.cargo; their cleanup must not remove our tools.
-      CARGO_HOME: ${{ runner.temp }}/dbm-cargo
     steps:
       - uses: actions/checkout@v4
       # Runs alongside the Rust toolchain and cache restore below, which do
@@ -160,9 +157,12 @@ jobs:
       - name: Install private Rust executables
         shell: bash
         run: |
+          # Other runner services share ~/.cargo; their cleanup must not remove our tools.
+          export CARGO_HOME="$RUNNER_TEMP/dbm-cargo"
           # Install even if shared rustup is on PATH; the toolchain action would reuse it.
           curl --proto '=https' --tlsv1.2 --retry 10 --retry-connrefused --location --silent --show-error --fail https://sh.rustup.rs \
             | sh -s -- --default-toolchain none --no-modify-path -y
+          echo "CARGO_HOME=$CARGO_HOME" >> "$GITHUB_ENV"
           echo "$CARGO_HOME/bin" >> "$GITHUB_PATH"
       - uses: dtolnay/rust-toolchain@master
         with:
