@@ -63,6 +63,14 @@ impl DbSession {
         }
     }
 
+    pub(crate) async fn check_connection(&self) -> AppResult<()> {
+        match self {
+            Self::Postgres(session) => session.check_connection().await,
+            Self::Mysql(session) => session.check_connection().await,
+            Self::Redis(session) => session.check_connection().await,
+        }
+    }
+
     pub async fn list_databases(&self) -> AppResult<Vec<DatabaseRef>> {
         match self {
             Self::Postgres(session) => session.list_databases().await,

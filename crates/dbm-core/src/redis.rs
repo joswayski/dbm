@@ -51,6 +51,20 @@ impl RedisSession {
         &self.profile
     }
 
+    pub(crate) async fn check_connection(&self) -> AppResult<()> {
+        let mut conn = self.conn().await;
+        match redis_rs::cmd("PING")
+            .query_async::<String>(&mut *conn)
+            .await
+        {
+            Ok(_) => Ok(()),
+            // An ACL rejection still proves the server replied. Do not require
+            // PING permission to run commands this user is allowed to execute.
+            Err(error) if error.code() == Some("NOPERM") => Ok(()),
+            Err(error) => Err(error.into()),
+        }
+    }
+
     async fn conn(&self) -> tokio::sync::MutexGuard<'_, MultiplexedConnection> {
         self.connection.lock().await
     }
@@ -2119,6 +2133,61 @@ mod tests {
             created_at: now,
             updated_at: now,
         }
+    }
+
+    #[tokio::test]
+    async fn workbench_recovers_idle_connections_before_incrementing_once() {
+        use crate::models::QueryRequest;
+        use crate::state::AppState;
+
+        let Some((_server, observer)) = start_test_redis().await else {
+            eprintln!("skipping live Redis test because redis-server is unavailable");
+            return;
+        };
+        let directory = tempfile::tempdir().unwrap();
+        let state = AppState::mobile(&directory.path().join("state.sqlite3")).unwrap();
+        let mut profile = observer.profile().clone();
+        profile.default_database = "3".into();
+        let id = profile.id;
+        state.connect(profile).await.unwrap();
+        let run = |sql: &str| {
+            state.run_query(QueryRequest {
+                profile_id: id,
+                sql: sql.into(),
+                max_rows: Some(10),
+            })
+        };
+        run("SET idle-counter 40").await.unwrap();
+        let client_id = run("CLIENT ID").await.unwrap().rows[0][0].as_i64().unwrap();
+        observer
+            .run_query(&format!("CLIENT KILL ID {client_id}"), None)
+            .await
+            .unwrap();
+        assert_eq!(
+            run("INCR idle-counter").await.unwrap().rows,
+            vec![vec![JsonValue::from(41)]]
+        );
+        // Changing ACLs on an existing connection must not make the probe
+        // block commands the user can still run. New connections require PING
+        // during the driver's handshake, so revoke it only after reconnecting.
+        observer
+            .run_query("ACL SETUSER default -ping", None)
+            .await
+            .unwrap();
+        assert_eq!(
+            run("GET idle-counter").await.unwrap().rows,
+            vec![vec![JsonValue::from("41")]]
+        );
+        // Database 0 must remain untouched when database 3 reconnects.
+        assert_eq!(
+            observer
+                .run_query("GET idle-counter", None)
+                .await
+                .unwrap()
+                .rows,
+            vec![vec![JsonValue::Null]]
+        );
+        state.disconnect(id).await;
     }
 
     #[tokio::test]

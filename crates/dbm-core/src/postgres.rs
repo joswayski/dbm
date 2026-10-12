@@ -56,6 +56,11 @@ impl PgSession {
         &self.profile
     }
 
+    pub(crate) async fn check_connection(&self) -> AppResult<()> {
+        // Protocol Sync executes no SQL and also works in an aborted transaction.
+        self.client.check_connection().await.map_err(AppError::from)
+    }
+
     pub async fn list_databases(&self) -> AppResult<Vec<DatabaseRef>> {
         let rows = self
             .client
