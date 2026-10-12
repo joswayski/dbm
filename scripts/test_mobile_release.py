@@ -247,7 +247,6 @@ else:
 
     def test_ios_development_tools_survive_shared_bin_removal(self):
         job = workflow("mobile.yml")["jobs"]["iphone"]
-        cargo_home = job["env"]["CARGO_HOME"].replace("${{ runner.temp }}", str(self.directory / "runner temp"))
         bootstrap = next(step["run"] for step in job["steps"] if step.get("name") == "Install private Rust executables")
         cache = next(step for step in job["steps"] if step.get("uses") == "Swatinem/rust-cache@v2")
         self.assertEqual(cache["with"]["cache-bin"], "false")
@@ -263,23 +262,30 @@ else:
         )
         executable(self.bin / "curl", '#!/bin/sh\ncat "$INSTALLER"\n')
         path_file = self.directory / "github-path"
+        env_file = self.directory / "github-env"
         for shared_installed in [False, True]:
             with self.subTest(shared_installed=shared_installed):
-                shutil.rmtree(cargo_home, ignore_errors=True)
                 path_file.write_text("")
+                env_file.write_text("")
+                runner_temp = self.directory / f"runner temp {shared_installed}"
                 if shared_installed:
                     for name in ["rustup", "cargo", "rustc"]:
                         executable(shared / name, "#!/bin/sh\necho shared\n")
                 env = {
                     "HOME": str(self.directory / "home"),
-                    "CARGO_HOME": cargo_home,
+                    "CARGO_HOME": str(shared.parent),
+                    "RUNNER_TEMP": str(runner_temp),
                     "PATH": f"{shared}:{self.bin}:/usr/bin:/bin",
+                    "GITHUB_ENV": str(env_file),
                     "GITHUB_PATH": str(path_file),
                     "INSTALLER": str(installer),
                     "PRIVATE_TOOL": str(tool),
                 }
                 run = self.run_step("set -euo pipefail\n" + bootstrap, **env)
                 self.assertEqual(run.returncode, 0, run.stderr)
+                env.update(line.split("=", 1) for line in env_file.read_text().splitlines())
+                cargo_home = env["CARGO_HOME"]
+                self.assertTrue(Path(cargo_home).is_relative_to(runner_temp))
                 env["PATH"] = ":".join([*reversed(path_file.read_text().splitlines()), env["PATH"]])
                 # A different runner's cleanup must not remove this job's tools.
                 for binary in shared.iterdir():
