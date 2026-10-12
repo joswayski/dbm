@@ -133,10 +133,15 @@ What the app does today, what is deliberately not built yet, and what it stores 
   through the normal result handling. The cap does not limit server execution
   or network transfer; add SQL `LIMIT` when you need to bound those too.
 - Automatically reconnects once after an idle connection closes, staying on the
-  selected database, then retries read-only schema and table browsing. User
-  queries are never replayed automatically: even `SELECT` can have side effects.
-  A query connection error attempts reconnection for the next explicit run but
-  still reports the failed query; check its effects before running it again.
+  selected database, then retries read-only schema and table browsing. Before
+  submitting SQL or a Redis command, the workbench checks the connection and
+  reconnects once if it has closed, so the requested command can run without an
+  initial error. This adds one round trip per run and preserves healthy session
+  state. Reconnecting cannot restore a lost transaction, temporary tables, or
+  session variables. Submitted commands are never replayed automatically: even
+  `SELECT` can have side effects. A connection error after submission attempts
+  reconnection for the next explicit run but still reports the failed command;
+  check its effects before running it again. Table writes are not retried.
 - Refresh on table previews and query results: reload the current page and
   filters, or re-run the last executed statement, without re-authoring them.
 

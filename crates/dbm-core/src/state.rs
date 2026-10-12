@@ -148,14 +148,26 @@ impl AppState {
         // History follows the active database, not the saved default.
         let session = self.session(request.profile_id).await?;
         let database = session.profile().default_database.clone();
-        // Even SELECT can invoke a writing function or begin a multi-statement
-        // script. A lost response does not prove the server did not execute it.
-        let response = session.run_query(&request.sql, request.max_rows).await;
-        if response.as_ref().is_err_and(AppError::is_connection_lost) {
-            // Prepare for the next explicit run, but never replay user SQL or
-            // hide its original error if reconnecting also fails.
-            let _ = self.connect(session.profile().clone()).await;
-        }
+        // Only the harmless preflight is retried. Once SQL or a Redis command
+        // is submitted, a lost response cannot prove it did not execute.
+        let ready = self
+            .with_session_retry(request.profile_id, |session| async move {
+                session.check_connection().await?;
+                Ok(session)
+            })
+            .await;
+        let response = match ready {
+            Ok(session) => {
+                let response = session.run_query(&request.sql, request.max_rows).await;
+                if response.as_ref().is_err_and(AppError::is_connection_lost) {
+                    // Prepare for the next explicit run, never replay the command
+                    // or hide its original error if reconnecting also fails.
+                    let _ = self.connect(session.profile().clone()).await;
+                }
+                response
+            }
+            Err(error) => Err(error),
+        };
         // Passwords never reach the SQLite file: credential statements are
         // saved with their literals redacted, or not at all.
         if let Some(sql) = history_text(session.profile().engine, &request.sql) {
@@ -180,7 +192,7 @@ mod tests {
     use serde_json::json;
 
     #[tokio::test]
-    async fn failed_user_queries_are_not_replayed_even_when_they_start_with_select() {
+    async fn user_queries_recover_idle_connections_without_replaying_submitted_sql() {
         let Ok(port) = std::env::var("DBM_TEST_POSTGRES_PORT") else {
             return;
         };
@@ -214,7 +226,8 @@ mod tests {
              CREATE FUNCTION {sequence}_bump() RETURNS bigint LANGUAGE plpgsql AS $$
              BEGIN
                  PERFORM nextval('{sequence}');
-                 RAISE EXCEPTION 'connection closed after side effect';
+                 PERFORM pg_terminate_backend(pg_backend_pid());
+                 RETURN 0;
              END $$"
                 ),
                 None,
@@ -258,6 +271,46 @@ mod tests {
         assert_eq!(history.len(), 2);
         assert!(history.iter().all(|entry| !entry.success));
 
+        // Checking a healthy connection must preserve an open transaction,
+        // and must still allow ROLLBACK after a statement aborts it.
+        let run = |sql: &str| {
+            state.run_query(QueryRequest {
+                profile_id: id,
+                sql: sql.into(),
+                max_rows: Some(10),
+            })
+        };
+        run("BEGIN; SET LOCAL application_name = 'health-check-test'")
+            .await
+            .unwrap();
+        assert_eq!(
+            run("SELECT current_setting('application_name')")
+                .await
+                .unwrap()
+                .rows,
+            vec![vec![json!("health-check-test")]]
+        );
+        assert!(run("SELECT 1 / 0").await.is_err());
+        run("ROLLBACK").await.unwrap();
+        assert_eq!(
+            run("SELECT current_setting('application_name')")
+                .await
+                .unwrap()
+                .rows,
+            vec![vec![json!("Anybase")]]
+        );
+
+        // Use a different active database so recovery cannot silently revert
+        // to the original connection target. The recovered INSERT runs once.
+        let database = format!("dbm_idle_{}", id.simple());
+        observer
+            .run_query(&format!("CREATE DATABASE {database}"), None)
+            .await
+            .unwrap();
+        let mut profile = state.session(id).await.unwrap().profile().clone();
+        profile.default_database = database.clone();
+        state.connect(profile).await.unwrap();
+        run("CREATE TABLE idle_writes (n INT)").await.unwrap();
         let pid = state
             .session(id)
             .await
@@ -272,27 +325,55 @@ mod tests {
             .run_query(&format!("SELECT pg_terminate_backend({pid})"), None)
             .await
             .unwrap();
-        let error = state
-            .run_query(QueryRequest {
-                profile_id: id,
-                sql: "SELECT 41".into(),
-                max_rows: Some(10),
-            })
-            .await
-            .unwrap_err();
-        assert!(error.is_connection_lost(), "{error}");
-        // The failed run is not replayed, but reconnection makes the next
-        // explicit run usable without requiring a schema or table refresh.
-        let next = state
-            .run_query(QueryRequest {
-                profile_id: id,
-                sql: "SELECT 73".into(),
-                max_rows: Some(10),
-            })
+        let recovered = run("INSERT INTO idle_writes VALUES (41)").await.unwrap();
+        assert_eq!(recovered.affected_rows, Some(1));
+        assert_eq!(
+            run("SELECT n, current_database() FROM idle_writes")
+                .await
+                .unwrap()
+                .rows,
+            vec![vec![json!(41), json!(database)]]
+        );
+        let history = state.store.list_history(id, &database, 10).unwrap();
+        assert_eq!(history.len(), 3);
+        assert!(history.iter().all(|entry| entry.success));
+
+        // If the reconnect is rejected, surface the error without executing
+        // the pending write. The same profile works once the database is back.
+        let pid = run("SELECT pg_backend_pid()").await.unwrap().rows[0][0]
+            .as_i64()
+            .unwrap();
+        observer
+            .run_query(
+                &format!("ALTER DATABASE {database} ALLOW_CONNECTIONS false"),
+                None,
+            )
             .await
             .unwrap();
-        assert_eq!(next.rows, vec![vec![json!(73)]]);
+        observer
+            .run_query(&format!("SELECT pg_terminate_backend({pid})"), None)
+            .await
+            .unwrap();
+        let error = run("INSERT INTO idle_writes VALUES (73)")
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("could not connect"), "{error}");
+        observer
+            .run_query(
+                &format!("ALTER DATABASE {database} ALLOW_CONNECTIONS true"),
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            run("SELECT n FROM idle_writes").await.unwrap().rows,
+            vec![vec![json!(41)]]
+        );
         state.disconnect(id).await;
+        observer
+            .run_query(&format!("DROP DATABASE {database}"), None)
+            .await
+            .unwrap();
         observer.close().await;
     }
 }

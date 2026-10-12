@@ -48,6 +48,20 @@ impl MysqlSession {
         &self.profile
     }
 
+    pub(crate) async fn check_connection(&self) -> AppResult<()> {
+        // Probe the retained workbench connection, not a different pooled one.
+        let mut workbench = self.workbench.lock().await;
+        if workbench.is_none() {
+            *workbench = Some(self.conn().await?);
+        }
+        workbench
+            .as_mut()
+            .expect("workbench connection was just opened")
+            .ping()
+            .await
+            .map_err(AppError::from)
+    }
+
     pub async fn close(&self) {
         // The pool only finishes disconnecting once every connection is returned.
         drop(self.workbench.lock().await.take());
@@ -1283,6 +1297,80 @@ mod tests {
                 created_at: now,
                 updated_at: now,
             })
+        }
+
+        #[tokio::test]
+        async fn workbench_recovers_idle_connections_without_resetting_healthy_sessions() {
+            use crate::models::QueryRequest;
+            use crate::state::AppState;
+
+            let Some(mut profile) = profile("mysql", false) else {
+                return;
+            };
+            let directory = tempfile::tempdir().unwrap();
+            let state = AppState::mobile(&directory.path().join("state.sqlite3")).unwrap();
+            let id = profile.id;
+            let observer = MysqlSession::connect(profile.clone(), None).await.unwrap();
+            let database = format!("dbm_idle_{}", id.simple());
+            observer
+                .run_query(&format!("CREATE DATABASE {database}"), None)
+                .await
+                .unwrap();
+            profile.default_database = database.clone();
+            state.connect(profile).await.unwrap();
+            let run = |sql: &str| {
+                state.run_query(QueryRequest {
+                    profile_id: id,
+                    sql: sql.into(),
+                    max_rows: Some(10),
+                })
+            };
+            run("CREATE TABLE idle_writes (n INT); SET @kept = 73; BEGIN; INSERT INTO idle_writes VALUES (19)")
+                .await
+                .unwrap();
+            assert_eq!(
+                run("SELECT n, @kept FROM idle_writes").await.unwrap().rows,
+                vec![vec![JsonValue::from("19"), JsonValue::from("73")]]
+            );
+            run("ROLLBACK").await.unwrap();
+            assert!(
+                run("SELECT n FROM idle_writes")
+                    .await
+                    .unwrap()
+                    .rows
+                    .is_empty()
+            );
+            let connection_id = run("SELECT CONNECTION_ID()").await.unwrap().rows[0][0]
+                .as_str()
+                .unwrap()
+                .to_owned();
+            observer
+                .run_query(&format!("KILL CONNECTION {connection_id}"), None)
+                .await
+                .unwrap();
+            assert_eq!(
+                run("INSERT INTO idle_writes VALUES (41)")
+                    .await
+                    .unwrap()
+                    .affected_rows,
+                Some(1)
+            );
+            assert_eq!(
+                run("SELECT n, DATABASE() FROM idle_writes")
+                    .await
+                    .unwrap()
+                    .rows,
+                vec![vec![
+                    JsonValue::from("41"),
+                    JsonValue::from(database.clone())
+                ]]
+            );
+            state.disconnect(id).await;
+            observer
+                .run_query(&format!("DROP DATABASE {database}"), None)
+                .await
+                .unwrap();
+            observer.close().await;
         }
 
         #[tokio::test]

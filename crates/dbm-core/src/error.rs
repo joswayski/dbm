@@ -161,7 +161,8 @@ impl From<keyring::Error> for AppError {
 
 impl From<redis_rs::RedisError> for AppError {
     fn from(error: redis_rs::RedisError) -> Self {
-        Self::database(&error)
+        let lost = error.is_connection_dropped();
+        Self::database_with_connection_state(&error, lost)
     }
 }
 
