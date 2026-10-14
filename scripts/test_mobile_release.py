@@ -204,21 +204,26 @@ else:
             CI_RUN_URL="https://github.com/joswayski/dbm/actions/runs/123",
         )
 
-    def test_ready_notification_pins_the_sha_and_disables_mentions(self):
-        self.configure_curl()
+    def test_ready_release_dispatches_only_the_tested_main_commit(self):
         ready = workflow("mobile-ready.yml")
         self.assertEqual(ready["on"]["workflow_run"]["workflows"], ["Mobile development builds"])
-        self.assertIn("conclusion == 'success'", ready["jobs"]["notify"]["if"])
-        self.assertIn("event == 'push'", ready["jobs"]["notify"]["if"])
-        result = self.run_step(ready["jobs"]["notify"]["steps"][0]["run"])
+        self.assertEqual(ready["on"]["workflow_run"]["branches"], ["main"])
+        job = ready["jobs"]["release"]
+        for condition in ("conclusion == 'success'", "event == 'push'", "head_branch == 'main'"):
+            self.assertIn(condition, job["if"])
+        script = job["steps"][0]["run"]
+        summary = str(self.directory / "summary")
+        result = self.run_step(script, GIT_SHA=SHA, GITHUB_STEP_SUMMARY=summary)
         self.assertEqual(result.returncode, 0, result.stderr)
-        payload = json.loads((self.directory / "calls").read_text())["payload"]
-        self.assertEqual(payload["allowed_mentions"], {"parse": []})
-        self.assertEqual(payload["embeds"][0]["title"], "Native apps; $(touch unsafe)")
+        self.assertEqual(
+            (self.directory / "calls").read_text().splitlines(),
+            [f"workflow run mobile-release.yml --repo joswayski/dbm --ref main -f git_sha={SHA}"],
+        )
+        (self.directory / "calls").unlink()
+        result = self.run_step(script, GIT_SHA="main; touch unsafe", GITHUB_STEP_SUMMARY=summary)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((self.directory / "calls").exists())
         self.assertFalse((self.directory / "unsafe").exists())
-        buttons = payload["components"][0]["components"]
-        self.assertEqual(buttons[0]["custom_id"], f"production-deploy:v1:dbm-mobile:{SHA}")
-        self.assertTrue(buttons[1]["url"].endswith("/mobile-release.yml"))
 
     def test_result_controls_and_rejected_foreign_run_url(self):
         self.configure_curl()
