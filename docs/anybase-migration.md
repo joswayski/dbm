@@ -45,8 +45,8 @@ Everything users read now says Anybase; every identifier in
 - PostgreSQL connections report `application_name` "Anybase"; the demo fixture's
   query result says "Anybase demo".
 - GitHub release titles: "Anybase <version>" and "Anybase mobile (latest)".
-- The Discord mobile release notification and its **Deploy Anybase mobile**
-  button. The button keeps its `dbm-mobile` ID, which Godis matches.
+- Discord mobile release results. Buttons Godis already posted keep their
+  `dbm-mobile` ID.
 - README and website screenshots.
 
 Still to do:

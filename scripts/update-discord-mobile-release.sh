@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Rewrite the "DBM mobile build is ready" Discord notification with the Mobile
+# Rewrite the "Anybase mobile build is ready" Discord notification with the Mobile
 # release result, mirroring joswayski/infrastructure's
 # scripts/update-discord-deployment.sh. Godis turned the button into
 # "Releasing…" when it dispatched this run; this restores the final controls.
@@ -56,7 +56,7 @@ custom_id="production-deploy:v1:dbm-mobile:${git_sha}"
 
 case "$result" in
   success)
-    content="Release completed for **DBM mobile** (\`${short_sha}\`): the signed Android [download](${releases}) is updated. The iPhone build passed processing and tester-group assignment; external testers may still need Apple beta-review approval.
+    content="Release completed for **Anybase mobile** (\`${short_sha}\`): the signed Android [download](${releases}) is updated. The iPhone build passed processing and tester-group assignment; external testers may still need Apple beta-review approval.
 
 ${timing}
 
@@ -66,7 +66,7 @@ ${timing}
     disabled=true
     ;;
   failure)
-    content="Release did not succeed for **DBM mobile** (\`${short_sha}\`): **failure**. Android downloads or an Apple upload may already have completed.
+    content="Release did not succeed for **Anybase mobile** (\`${short_sha}\`): **failure**. Android downloads or an Apple upload may already have completed.
 
 ${timing}
 
@@ -76,7 +76,7 @@ ${timing}
     disabled=false
     ;;
   cancelled | skipped)
-    content="Could not confirm the **DBM mobile** release: **${result}**. Check for completed uploads before retrying.
+    content="Could not confirm the **Anybase mobile** release: **${result}**. Check for completed uploads before retrying.
 
 ${timing}
 
@@ -107,4 +107,4 @@ payload="$(jq -n \
 curl --fail-with-body --silent --show-error --request PATCH \
   --header 'Content-Type: application/json' --data "$payload" \
   "${webhook_url}/messages/${message_id}" >/dev/null
-echo "Updated the DBM mobile Discord release message for run $run_url."
+echo "Updated the Anybase mobile Discord release message for run $run_url."
