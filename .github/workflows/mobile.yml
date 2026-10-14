@@ -133,18 +133,16 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      # Pushes only build for the simulator; they need no test device.
-      - name: Finish Xcode's first launch
-        if: github.event_name == 'push'
-        run: sudo xcodebuild -runFirstLaunch
       # Runs alongside the Rust toolchain and cache restore below, which do
-      # not touch Xcode or the simulator.
+      # not touch Xcode or the simulator. Pushes only build for the simulator,
+      # so they stop after Xcode's first launch. (The wait step below cannot
+      # take an `if`, so this step always runs.)
       - name: Provision the SDK-matched iPhone test simulator
         id: simulator
-        if: github.event_name != 'push'
         background: true
         run: |
           sudo xcodebuild -runFirstLaunch
+          [[ "$GITHUB_EVENT_NAME" != push ]] || exit 0
           # simctl waits for CoreSimulator's cache initialization; xcodebuild does not.
           xcrun simctl list
           version="$(xcrun --sdk iphonesimulator --show-sdk-version)"
@@ -190,7 +188,6 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       # Also applies the simulator's GITHUB_ENV values to the steps below.
       - name: Wait for the test simulator to be created
-        if: github.event_name != 'push'
         wait: simulator
       # prepare.sh (run by build.sh) compiles XcodeGen from source at a pinned
       # commit; reuse that build. Keyed by the commit and the Xcode version, and
