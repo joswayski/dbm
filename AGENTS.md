@@ -88,9 +88,19 @@
 
 ## Shipping
 
-Speed beats ceremony: there are no real users yet, so ship, watch, and fix forward.
+`main` is production: a push to `main` that changes the app becomes the latest
+release, and installed apps update to it within minutes. Speed beats ceremony:
+there are no real users yet, so ship small, watch it land, and fix forward.
 
-- Commit and push straight to `main`; no pull requests. Run the local checks for what you changed first (Validation), then `git pull --rebase origin main` and push. Never force-push `main` or rewrite other agents' commits. Use `gh` for GitHub operations.
+- Before you push, run the local checks for what you changed and build what you
+  touched. CI on `main` is a signal, not a gate: nothing waits for it.
+- Push a branch and open a draft pull request instead of pushing to `main`
+  when:
+  - the work is unfinished and you have to stop (session ending, disk full,
+    missing toolchain). The draft PR is the handoff: say what is done and what
+    is left.
+  - it needs a product decision the owner hasn't made.
+- Otherwise commit and push straight to `main`: `git pull --rebase origin main`, then `git push origin HEAD:main`, retrying the same way if the push is rejected. Never force-push `main` or rewrite other agents' commits. Use `gh` for GitHub operations (or the GitHub MCP tools where `gh` is unavailable).
 - Commit subjects become the desktop release notes (`scripts/release.mjs`), so write them for users.
 - Never put literal CI-skip directives in commit messages, even to explain them: GitHub honors them anywhere in the message, and the path-filtered `Release` and `Mobile development builds` runs would silently not happen.
 - Pushes to `main` run `CI` (about 5 minutes); `Release` unless only Markdown, `docs/`, `apps/web`, agent tooling or the CI/mobile/fallback workflows changed (it signs and publishes the latest desktop release, which installed apps update to, in about 5-10 minutes); `Mobile development builds` when mobile files changed (builds plus Android unit tests and lint; its UI suites run nightly, so don't start it for routine changes); and Cloudflare Workers Builds, which deploys anyba.se.

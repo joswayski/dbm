@@ -8,7 +8,6 @@ on:
 
 permissions:
   contents: read
-  actions: write
 
 # The running build always finishes and only the newest waiting push runs next (GitHub
 # replaces older pending runs in the group), so fast pushes don't pile up.
@@ -52,18 +51,6 @@ jobs:
           makensis -V2 -DVERSION=0.0.0 -DEXE="$RUNNER_TEMP/dbm.exe" \
             -DICON="$PWD/apps/native/icons/icon.ico" \
             -DOUTFILE="$RUNNER_TEMP/DBM-setup.exe" apps/native/windows/installer.nsi
-      - name: Stop the rest of this run after a failure
-        # One failed job already fails the run; cancel the other jobs instead of
-        # letting them hold runners (and block newer pushes) until they finish.
-        if: failure()
-        shell: bash
-        working-directory: .
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
-            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/cancel" >/dev/null \
-            || echo "::warning::Could not cancel the rest of this run"
 
   web:
     needs: route
@@ -125,18 +112,6 @@ jobs:
       - run: cargo test --workspace --all-targets
       - run: cargo test -p dbm-native-bridge --no-default-features
       - run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: Stop the rest of this run after a failure
-        # One failed job already fails the run; cancel the other jobs instead of
-        # letting them hold runners (and block newer pushes) until they finish.
-        if: failure()
-        shell: bash
-        working-directory: .
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
-            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/cancel" >/dev/null \
-            || echo "::warning::Could not cancel the rest of this run"
 
   appkit:
     name: AppKit (macos-14)
@@ -173,18 +148,6 @@ jobs:
           path: |
             target/native/DBM-macos.zip
             target/native/snapshots
-      - name: Stop the rest of this run after a failure
-        # One failed job already fails the run; cancel the other jobs instead of
-        # letting them hold runners (and block newer pushes) until they finish.
-        if: failure()
-        shell: bash
-        working-directory: .
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
-            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/cancel" >/dev/null \
-            || echo "::warning::Could not cancel the rest of this run"
 
   native-workbench:
     needs: route
@@ -227,15 +190,3 @@ jobs:
         with:
           name: DBM-${{ runner.os }}-development
           path: DBM-*.*
-      - name: Stop the rest of this run after a failure
-        # One failed job already fails the run; cancel the other jobs instead of
-        # letting them hold runners (and block newer pushes) until they finish.
-        if: failure()
-        shell: bash
-        working-directory: .
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
-            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/cancel" >/dev/null \
-            || echo "::warning::Could not cancel the rest of this run"
