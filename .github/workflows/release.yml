@@ -415,6 +415,15 @@ jobs:
             cat "$manifest"
           done
           cp native-latest.json latest.json assets/
+      - name: Add Anybase-named first-install downloads
+        working-directory: assets
+        run: |
+          set -euo pipefail
+          # Byte-identical copies for the website and README. The updaters keep
+          # downloading the DBM-named files (docs/anybase-migration.md).
+          cp DBM-macOS.dmg Anybase-macOS.dmg
+          cp DBM-Windows-x64-setup.exe Anybase-Windows-x64-setup.exe
+          cp DBM-Linux-x86_64.AppImage Anybase-Linux-x86_64.AppImage
       - name: Write checksums
         working-directory: assets
         run: |

@@ -10,8 +10,8 @@ when, and which identifiers must never change.
 | Stage | Scope | Status |
 | --- | --- | --- |
 | 1. Website and branding | anyba.se site in `apps/web`; README; josevalerio.com links to anyba.se | Done |
-| 2. App display name | What users see inside and around the installed app | Done, except screenshots and store listings |
-| 3. Download names | Anybase-named first-install downloads | Planned |
+| 2. App display name | What users see inside and around the installed app | Done, except store listings |
+| 3. Download names | Anybase-named first-install downloads | In progress |
 | 4. Repository rename (optional) | `joswayski/dbm` to `joswayski/anybase`, and every hard-coded reference | Planned |
 | 5. Internal names | Crates, env vars, script names | Optional |
 
@@ -45,22 +45,25 @@ Everything users read now says Anybase; every identifier in
 - PostgreSQL connections report `application_name` "Anybase"; the demo fixture's
   query result says "Anybase demo".
 - GitHub release titles: "Anybase <version>" and "Anybase mobile (latest)".
+- The Discord mobile release notification and its **Deploy Anybase mobile**
+  button. The button keeps its `dbm-mobile` ID, which Godis matches.
+- README and website screenshots.
 
 Still to do:
 
-- Refresh `docs/screenshots` (and the website's WebP copies) so the sidebar shows
-  Anybase. The AppKit CI job's `--snapshot-dir` artifact renders the demo states.
 - Rename the Play Console app and the App Store Connect record (store-side names,
-  not in this repository), and the Godis "Deploy DBM mobile" button label.
+  not in this repository).
 - Optional: have the macOS updater move a `DBM.app` install to `Anybase.app`.
   Skipped for now because it would break Dock and login-item references.
 
 ### 3. Download names
 
-Publish `Anybase-macOS.dmg`, `Anybase-Windows-x64-setup.exe`, and
-`Anybase-Linux-x86_64.AppImage` **in addition to** the DBM-named files, then point
-the website and README at them. Installed copies keep downloading the DBM-named
-updater assets listed in [Never change](#never-change).
+Every release publishes `Anybase-macOS.dmg`, `Anybase-Windows-x64-setup.exe`, and
+`Anybase-Linux-x86_64.AppImage`, byte-identical copies of the DBM-named files.
+Installed copies keep downloading the DBM-named updater assets listed in
+[Never change](#never-change), and the DBM-named installers stay for links made
+before the rename. Once a release carries the Anybase files, point the website
+(`apps/web/src/downloads.ts`) and README at them.
 
 ### 4. Repository rename
 
@@ -70,17 +73,22 @@ created at `joswayski/dbm`, so installed apps keep updating through the old
 manifest URL (the updater follows redirects). Repository settings, secrets,
 runners, and GitHub App installations follow the repository.
 
-Three things match the repository **name** and break on rename. Make each accept
-both names and roll it out **before** renaming:
+These match the repository **name** and break on rename. Make each accept both
+names and roll it out **before** renaming:
 
 - **Mobile release signing.** The AWS trust policy in the infrastructure repo's
   `infra/environments/production/release-signing.tf` only accepts
   `repo:joswayski@22891173/dbm@1300057641`. After a rename GitHub sends the new
   name, AWS refuses the role, and Play/TestFlight releases fail. Add the new
   subject and `tofu apply`.
-- **Self-hosted Mac runner.** The job hook written by `scripts/mac-ci-runner.sh`
-  only allows `joswayski/dbm`, so main-branch macOS jobs, including release
-  builds, fail on `josemac`. Add the new name and rerun the setup on the Mac.
+- **Self-hosted runners.** The job hooks written by the infrastructure repo's
+  `scripts/mac-ci-runner.sh`, `scripts/windows-ci-runner.ps1`, and
+  `scripts/windows-ci/linux-runner.sh` only allow `joswayski/dbm`, so jobs routed
+  to `josemac`, `josewin`, and `joselinux` fail. Add the new name and rerun each
+  machine's setup.
+- **Mobile release Discord update.** `scripts/update-discord-mobile-release.sh`
+  only accepts run URLs under `joswayski/dbm`, so the Discord message after a
+  mobile release fails. Accept both names.
 - **Godis mobile Deploy button.** `src/deployments.rs` requests a GitHub App
   token scoped to the repository named `dbm` (`DBM_REPOSITORY`), which no longer
   exists after a rename. Update it and deploy Godis right after the rename. Keep
