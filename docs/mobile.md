@@ -150,11 +150,13 @@ database connections on both mobile platforms remain outstanding.
 `.github/workflows/mobile-release.yml` follows Caper's release approval and
 signing setup. It does not deploy an Anybase server or change desktop distribution.
 After **Mobile development builds** passes for a push to `main` (the build and
-unit-test subset; UI tests run nightly),
-`mobile-ready.yml` posts **Deploy DBM mobile** in the existing Discord deploys
-channel. Godis dispatches the exact SHA; the release rejects commits outside
-`main` or without a successful mobile test run for that SHA. Merging alone does
-not upload or publish mobile apps.
+unit-test subset; UI tests run nightly), `mobile-ready.yml` dispatches it for
+that exact SHA, so a push that changes the mobile apps reaches TestFlight and
+Google Play internal testing in about 15 minutes. Releases run one at a time
+and the newest waiting one replaces older ones. The release still rejects
+commits outside `main` or without a successful mobile test run for that SHA.
+Godis's **Deploy DBM mobile** button can still dispatch a SHA by hand, but
+`mobile-ready.yml` no longer posts it.
 
 The release reads `production/signing/release` through GitHub OIDC role
 `production-dbm-release-signer`; no signing files belong in this repository:
@@ -246,8 +248,8 @@ stores. See
    `dbm_google_play`; Caper's key is unchanged. The separate Play credentials
    remain in the existing shared AWS secret; this is not per-app AWS secret
    access isolation. No additional Terraform resources or apply are needed.
-5. Push the app workflow, wait for its exact `main` mobile tests, then use
-   **Deploy DBM mobile**, or dispatch the tested SHA explicitly:
+5. Push the app workflow; once its exact `main` mobile tests pass,
+   `mobile-ready.yml` releases it. To release a tested SHA by hand:
 
    ```sh
    git fetch origin main
