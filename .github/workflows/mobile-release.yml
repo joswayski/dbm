@@ -1,19 +1,13 @@
 name: Mobile release
 
-# Caper's approval/signing flow, separate from DBM's automatic desktop updater.
+# Signs and uploads the mobile apps for one tested main commit. mobile-ready.yml
+# starts it after Mobile development builds pass on a push; separate from the
+# automatic desktop updater.
 on:
   workflow_dispatch:
     inputs:
       git_sha:
         description: Full main commit to release (blank uses newest main).
-        type: string
-        default: ""
-      discord_message_id:
-        description: Source Discord notification (set by Godis).
-        type: string
-        default: ""
-      discord_started_at:
-        description: Release start timestamp (set by Godis).
         type: string
         default: ""
 
@@ -284,32 +278,3 @@ jobs:
             --prerelease --latest=false --title 'Anybase mobile (latest)' \
             --notes "Signed Android build from $RELEASE_SHA. Install and update through Google Play internal testing: https://play.google.com/apps/testing/com.dbm.nativeapp (tester enrollment required). If the Play upload was saved as a draft, roll it out in Play Console first. The APK below is an alternative download, not the Play install. iPhone delivery runs separately through TestFlight; check this run's iPhone job for its result. Native clients remain read-only and require verified TLS. Desktop downloads and updates are unchanged." \
             release/DBM-Android.apk release/BUILD.json release/SHA256SUMS
-
-  notify-discord:
-    name: Update the Discord result
-    needs: [resolve, android, testflight, publish]
-    if: ${{ always() && github.ref == 'refs/heads/main' && inputs.discord_message_id != '' }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-      - env:
-          DEPLOY_NOTIFICATION_WEBHOOK_URL: ${{ secrets.DEPLOY_NOTIFICATION_WEBHOOK_URL }}
-          RESULTS: ${{ join(needs.*.result, ' ') }}
-          RELEASE_SHA: ${{ needs.resolve.outputs.sha || inputs.git_sha || github.sha }}
-          DISCORD_MESSAGE_ID: ${{ inputs.discord_message_id }}
-          DISCORD_STARTED_AT: ${{ inputs.discord_started_at }}
-        run: |
-          set -euo pipefail
-          result=success
-          for job_result in $RESULTS; do
-            case "$job_result" in
-              success) ;;
-              failure) result=failure ;;
-              *) [[ "$result" == failure ]] || result=cancelled ;;
-            esac
-          done
-          bash scripts/update-discord-mobile-release.sh \
-            --git-sha "$RELEASE_SHA" --message-id "$DISCORD_MESSAGE_ID" --result "$result" \
-            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
-            --started-at "$DISCORD_STARTED_AT" --finished-at "$(date +%s)"

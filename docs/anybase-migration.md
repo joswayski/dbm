@@ -45,8 +45,6 @@ Everything users read now says Anybase; every identifier in
 - PostgreSQL connections report `application_name` "Anybase"; the demo fixture's
   query result says "Anybase demo".
 - GitHub release titles: "Anybase <version>" and "Anybase mobile (latest)".
-- Discord mobile release results. Buttons Godis already posted keep their
-  `dbm-mobile` ID.
 - README and website screenshots.
 
 Still to do:
@@ -86,13 +84,6 @@ names and roll it out **before** renaming:
   `scripts/windows-ci/linux-runner.sh` only allow `joswayski/dbm`, so jobs routed
   to `josemac`, `josewin`, and `joselinux` fail. Add the new name and rerun each
   machine's setup.
-- **Mobile release Discord update.** `scripts/update-discord-mobile-release.sh`
-  only accepts run URLs under `joswayski/dbm`, so the Discord message after a
-  mobile release fails. Accept both names.
-- **Godis mobile Deploy button.** `src/deployments.rs` requests a GitHub App
-  token scoped to the repository named `dbm` (`DBM_REPOSITORY`), which no longer
-  exists after a rename. Update it and deploy Godis right after the rename. Keep
-  the `dbm-mobile` button slug: buttons already posted in Discord carry it.
 
 After the rename, update the remaining references (these keep working through
 redirects meanwhile):

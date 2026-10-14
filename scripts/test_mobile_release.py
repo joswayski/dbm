@@ -183,27 +183,6 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse((self.directory / "calls").exists())
 
-    def configure_curl(self):
-        executable(
-            self.bin / "curl",
-            """#!/usr/bin/env python3
-import json, os, sys
-args = sys.argv[1:]
-if "/pulls?" in args[-1]:
-    print(json.dumps([{"title": "Native apps; $(touch unsafe)", "body": "Test DBM\\n@everyone"}]))
-else:
-    with open(os.environ["CALLS"], "w") as out:
-        json.dump({"url": args[-1], "payload": json.loads(args[args.index("--data") + 1])}, out)
-""",
-        )
-        self.env.update(
-            DEPLOY_NOTIFICATION_WEBHOOK_URL="https://discord.com/api/webhooks/123/fake-token",
-            GITHUB_TOKEN="fixture",
-            GIT_SHA=SHA,
-            COMMIT_MESSAGE="Fallback",
-            CI_RUN_URL="https://github.com/joswayski/dbm/actions/runs/123",
-        )
-
     def test_ready_release_dispatches_only_the_tested_main_commit(self):
         ready = workflow("mobile-ready.yml")
         self.assertEqual(ready["on"]["workflow_run"]["workflows"], ["Mobile development builds"])
@@ -224,31 +203,6 @@ else:
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse((self.directory / "calls").exists())
         self.assertFalse((self.directory / "unsafe").exists())
-
-    def test_result_controls_and_rejected_foreign_run_url(self):
-        self.configure_curl()
-        command = (
-            f'bash "{ROOT}/scripts/update-discord-mobile-release.sh" --git-sha {SHA} '
-            "--message-id 123456789012345678 --started-at 1791080000 --finished-at 1791080073 "
-        )
-        for result, label, disabled in [
-            ("success", "Released", True),
-            ("failure", "Retry release", False),
-            ("cancelled", "Check GitHub", True),
-        ]:
-            run = self.run_step(
-                command + f"--result {result} --run-url https://github.com/joswayski/dbm/actions/runs/123"
-            )
-            self.assertEqual(run.returncode, 0, run.stderr)
-            payload = json.loads((self.directory / "calls").read_text())["payload"]
-            button = payload["components"][0]["components"][0]
-            self.assertEqual((button["label"], button["disabled"]), (label, disabled))
-            self.assertEqual(button["custom_id"], f"production-deploy:v1:dbm-mobile:{SHA}")
-            self.assertIn("Duration: 1m 13s", payload["content"])
-        (self.directory / "calls").unlink()
-        run = self.run_step(command + "--result success --run-url https://github.com/joswayski/caper/actions/runs/123")
-        self.assertNotEqual(run.returncode, 0)
-        self.assertFalse((self.directory / "calls").exists())
 
     def test_ios_development_tools_survive_shared_bin_removal(self):
         job = workflow("mobile.yml")["jobs"]["iphone"]

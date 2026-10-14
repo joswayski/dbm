@@ -22,6 +22,9 @@ on:
       - "apps/web/**"
       - ".github/workflows/ci.yml"
       - ".github/workflows/mobile*.yml"
+      - "scripts/*mobile*"
+      - "scripts/testflight-distribute.py*"
+      - "scripts/play-upload.py*"
       - ".github/workflows/mac-runner-fallback.yml"
   workflow_dispatch:
 

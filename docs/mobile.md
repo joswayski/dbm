@@ -190,7 +190,7 @@ The release reads `production/signing/release` through GitHub OIDC role
   The existing `apple` App Store Connect API key handles cloud-managed signing,
   upload, processing, What to Test, and tester-group assignment. External groups
   may still await Apple's beta review. Android publication does not wait for
-  Apple; Discord reports failure if either platform fails, including partial
+  Apple; the Mobile release run fails if either platform fails, including partial
   uploads. A TestFlight success is not physical-device acceptance.
 
 The Google Play and TestFlight API scripts run through pinned uv 0.12.23 with
