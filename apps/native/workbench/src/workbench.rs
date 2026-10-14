@@ -3533,6 +3533,12 @@ fn icon_btn(
 
 fn editor_layout(engine: DatabaseEngine, text: &str) -> LayoutJob {
     let font = mono(12.5);
+    let mut job = LayoutJob::default();
+    // An empty editor (select all, delete) has no first byte to color.
+    if text.is_empty() {
+        job.append("", 0.0, TextFormat::simple(font, theme::TEXT));
+        return job;
+    }
     let mut colors = vec![theme::TEXT; text.len()];
     for token in highlight(engine, text) {
         let color = match token.kind {
@@ -3546,7 +3552,6 @@ fn editor_layout(engine: DatabaseEngine, text: &str) -> LayoutJob {
             *slot = color;
         }
     }
-    let mut job = LayoutJob::default();
     let mut start = 0;
     for (index, _) in text
         .char_indices()
@@ -3562,9 +3567,6 @@ fn editor_layout(engine: DatabaseEngine, text: &str) -> LayoutJob {
             TextFormat::simple(font.clone(), colors[start]),
         );
         start = index;
-    }
-    if text.is_empty() {
-        job.append("", 0.0, TextFormat::simple(font, theme::TEXT));
     }
     job
 }
@@ -5221,6 +5223,13 @@ mod tests {
             job.sections.len() > 3,
             "keywords, literals, and text are separate sections"
         );
+    }
+
+    #[test]
+    fn editor_layout_handles_an_empty_editor() {
+        let job = editor_layout(DatabaseEngine::Postgres, "");
+        assert_eq!(job.text, "");
+        assert_eq!(job.sections.len(), 1);
     }
 
     #[test]

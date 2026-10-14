@@ -53,7 +53,8 @@ for it and then releases everything merged since.
 
 | Asset | Use |
 | --- | --- |
-| `DBM-macOS.dmg` | First install on macOS (signed, notarized, stapled) |
+| `Anybase-macOS.dmg`, `Anybase-Windows-x64-setup.exe`, `Anybase-Linux-x86_64.AppImage` | First install, linked from anyba.se and the README. Byte-identical copies of the DBM-named files below |
+| `DBM-macOS.dmg` | First install on macOS (signed, notarized, stapled), for links made before the rename |
 | `DBM-macOS.zip` | Native updater on macOS |
 | `DBM.app.tar.gz` | Updates for installs of the former Tauri app on macOS |
 | `DBM-Windows-x64-setup.exe` | First install on Windows; also what former Tauri installs run to update |
@@ -69,8 +70,8 @@ The Windows installer needs no administrator rights: it installs to
 `%LOCALAPPDATA%\DBM\dbm.exe`, adds an **Anybase** Start menu shortcut, and
 registers an uninstaller. There is no `.deb` package.
 
-Asset names, the Windows folder and executable, and the uninstall key keep
-their DBM names from before the Anybase rename, so installed copies keep
+Updater asset names, the Windows folder and executable, and the uninstall key
+keep their DBM names from before the Anybase rename, so installed copies keep
 updating (see [the rename plan](anybase-migration.md#never-change)). The
 macOS archives hold `Anybase.app`, except `DBM.app.tar.gz`, which keeps the
 `DBM.app` folder name the Tauri updater expects. Updates install over the
@@ -253,9 +254,9 @@ To check a downloaded release by hand:
 codesign --verify --deep --strict --verbose=2 Anybase.app
 spctl --assess --type execute --verbose=2 Anybase.app
 xcrun stapler validate Anybase.app
-codesign --verify --strict --verbose=2 DBM-macOS.dmg
-spctl --assess --type open --context context:primary-signature --verbose=2 DBM-macOS.dmg
-xcrun stapler validate DBM-macOS.dmg
+codesign --verify --strict --verbose=2 Anybase-macOS.dmg
+spctl --assess --type open --context context:primary-signature --verbose=2 Anybase-macOS.dmg
+xcrun stapler validate Anybase-macOS.dmg
 ```
 
 Also install the DMG on a clean supported Mac and launch the installed copy
@@ -343,9 +344,9 @@ Verify a download on a clean Ubuntu system:
 
 ```sh
 sha256sum --check --ignore-missing SHA256SUMS
-gh attestation verify ./DBM-Linux-x86_64.AppImage --repo joswayski/dbm
-chmod +x ./DBM-Linux-x86_64.AppImage
-./DBM-Linux-x86_64.AppImage
+gh attestation verify ./Anybase-Linux-x86_64.AppImage --repo joswayski/dbm
+chmod +x ./Anybase-Linux-x86_64.AppImage
+./Anybase-Linux-x86_64.AppImage
 ```
 
 An embedded GPG signature may also be added to the AppImage, but AppImage does
