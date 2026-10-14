@@ -197,9 +197,13 @@ in [the rename plan](anybase-migration.md#website).
 
 ## Screenshots
 
-The README screenshots in `docs/screenshots/` are captured from the native
-apps' `--demo` fixture. The AppKit app can also render the fixture's main
-states to PNG files without interaction:
+The README screenshots in `docs/screenshots/` show the Windows/Linux app
+connected to real local PostgreSQL, MySQL, and Redis servers loaded with sample
+data, captured at 2× in a 1472×920-point window (2944×1840 pixels). The
+connection dialog needs that height to fit without scrolling.
+
+The AppKit app can also render the demo fixture's main states to PNG files
+without interaction:
 
 ```sh
 mkdir -p target/native/snapshots
@@ -210,12 +214,15 @@ This macOS-only run also checks header copying, query pane resizing, and
 replacing query results with fewer rows, different columns, or an empty result.
 The result checks use synthetic data in an isolated grid, not a live database.
 
-The website serves 1600-pixel WebP copies. After replacing a README screenshot,
-regenerate them with ImageMagick:
+The website serves 1600-pixel WebP copies, and `apps/web/public/og.jpg` is the
+change preview at 1200×750. After replacing a README screenshot, regenerate
+them with ImageMagick:
 
 ```sh
 for f in docs/screenshots/*.png; do
   convert "$f" -resize 1600x -quality 84 -define webp:method=6 \
     "apps/web/public/screenshots/$(basename "${f%.png}").webp"
 done
+convert docs/screenshots/change-preview.png -resize 1200x750 -strip -quality 86 \
+  apps/web/public/og.jpg
 ```
