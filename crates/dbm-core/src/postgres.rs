@@ -160,7 +160,10 @@ impl PgSession {
                      JOIN pg_index i ON i.indrelid = rel.oid AND i.indisprimary
                      JOIN pg_attribute a ON a.attrelid = rel.oid AND a.attnum = ANY(i.indkey)
                  )
-                 SELECT ordinal_position, column_name, data_type, is_nullable, column_default,
+                 -- Enums and domains report USER-DEFINED; show their own type name.
+                 SELECT ordinal_position, column_name,
+                        CASE WHEN data_type = 'USER-DEFINED' THEN udt_name::text ELSE data_type END,
+                        is_nullable, column_default,
                         (SELECT relkind FROM rel), (SELECT columns FROM pk)
                  FROM information_schema.columns
                  WHERE table_schema = $1 AND table_name = $2
@@ -1441,6 +1444,36 @@ mod tests {
                 .batch_execute(&format!("DROP TABLE public.{table}"))
                 .await
                 .expect("cleanup");
+        }
+
+        #[tokio::test]
+        async fn enum_columns_report_their_type_name() {
+            let Some(profile) = profile(false) else {
+                return;
+            };
+            let session = PgSession::connect(profile, None).await.expect("connect");
+            let suffix = Uuid::new_v4().simple();
+            session
+                .client
+                .batch_execute(&format!(
+                    "CREATE TYPE public.tier_{suffix} AS ENUM ('free', 'pro');
+                     CREATE TABLE public.plans_{suffix} (id int PRIMARY KEY, tier public.tier_{suffix})"
+                ))
+                .await
+                .expect("fixture");
+            let metadata = session
+                .table_metadata("public", &format!("plans_{suffix}"))
+                .await
+                .expect("metadata");
+            session
+                .client
+                .batch_execute(&format!(
+                    "DROP TABLE public.plans_{suffix}; DROP TYPE public.tier_{suffix}"
+                ))
+                .await
+                .expect("cleanup");
+            assert_eq!(metadata.columns[0].data_type, "integer");
+            assert_eq!(metadata.columns[1].data_type, format!("tier_{suffix}"));
         }
 
         #[tokio::test]
