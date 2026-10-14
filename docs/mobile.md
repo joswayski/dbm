@@ -125,9 +125,11 @@ signing secrets or upload to stores. The separate release workflow below uses
 the existing AWS signing material, as Caper does.
 
 `.github/workflows/mobile.yml` builds Android and iPhone Simulator development
-artifacts, records exact tested revisions/checksums, and runs native demo UI
-tests with retained captures. PR jobs have no signing credentials. A successful
-package step is not proof that the later UI tests pass. Downloads expire after
+artifacts, records exact tested revisions/checksums, and runs Android unit tests
+and lint on pushes to `main` that touch mobile files. The native demo UI tests
+(with retained captures), unsigned release packaging and the iPhone Release
+archive run nightly and on manual dispatch only, so a passing push run does not
+prove the UI tests pass. These jobs have no signing credentials. Downloads expire after
 14 days. Simulator/emulator fixtures do not validate real databases or phones.
 Anybase's existing desktop release workflow remains unchanged; merging app changes
 still publishes desktop updates, not mobile store releases.
@@ -147,7 +149,8 @@ database connections on both mobile platforms remain outstanding.
 
 `.github/workflows/mobile-release.yml` follows Caper's release approval and
 signing setup. It does not deploy an Anybase server or change desktop distribution.
-After **Mobile development builds** passes for a push to `main`,
+After **Mobile development builds** passes for a push to `main` (the build and
+unit-test subset; UI tests run nightly),
 `mobile-ready.yml` posts **Deploy DBM mobile** in the existing Discord deploys
 channel. Godis dispatches the exact SHA; the release rejects commits outside
 `main` or without a successful mobile test run for that SHA. Merging alone does
@@ -243,7 +246,7 @@ stores. See
    `dbm_google_play`; Caper's key is unchanged. The separate Play credentials
    remain in the existing shared AWS secret; this is not per-app AWS secret
    access isolation. No additional Terraform resources or apply are needed.
-5. Merge the app workflow, wait for its exact `main` mobile tests, then use
+5. Push the app workflow, wait for its exact `main` mobile tests, then use
    **Deploy DBM mobile**, or dispatch the tested SHA explicitly:
 
    ```sh

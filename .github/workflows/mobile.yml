@@ -1,17 +1,24 @@
 name: Mobile development builds
 
-# Runs on main only; pull requests get no CI. Use "Run workflow" to test a branch.
+# Pushes to main that touch mobile files build both apps and run Android unit
+# tests and lint (a few minutes); that run gates mobile-release.yml. The slower
+# emulator/simulator UI suites (the iPhone suite caused most failures and
+# cancellations) and the unsigned release packaging checks run only nightly and
+# on "Run workflow", so they never hold the shared self-hosted runners on push.
+# mobile-release.yml builds, lints and tests the signed packages itself.
 on:
   push:
     branches: [main]
     paths: ['apps/native/android/**', 'apps/native/ios/**', 'apps/native/bridge/**', 'crates/dbm-core/**', 'Cargo.*', '.github/workflows/mobile*.yml', 'scripts/*mobile*', 'scripts/testflight-distribute.py*', 'scripts/play-upload.py*']
+  schedule:
+    - cron: '30 9 * * *'
   workflow_dispatch:
 
 # No signing secrets, releases, store uploads, or production/database access.
 permissions:
   contents: read
   actions: write
-# On main (and manual runs) the running build always finishes and only the newest waiting run goes
+# On main (and nightly/manual runs) the running build always finishes and only the newest waiting run goes
 # next (GitHub replaces older pending runs in the group), so nothing piles up.
 concurrency:
   group: mobile-${{ github.ref }}
@@ -56,6 +63,7 @@ jobs:
           cargo install cargo-ndk --version 4.1.2 --locked
       - run: bash apps/native/android/build.sh
       - name: Check release packaging with a disposable signing key
+        if: github.event_name != 'push'
         run: |
           set -euo pipefail
           export DBM_ANDROID_KEYSTORE="$RUNNER_TEMP/dbm-fixture.jks"
@@ -85,11 +93,13 @@ jobs:
           if-no-files-found: error
           retention-days: 14
       - name: Enable KVM for GitHub-hosted native UI tests
+        if: github.event_name != 'push'
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
       - uses: reactivecircus/android-emulator-runner@v2
+        if: github.event_name != 'push'
         with:
           api-level: 36
           arch: x86_64
@@ -97,7 +107,7 @@ jobs:
           disable-animations: true
           script: apps/native/android/gradlew -p apps/native/android --no-daemon connectedDebugAndroidTest
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: always() && github.event_name != 'push'
         with:
           name: DBM-android-ui-${{ github.sha }}
           path: |
@@ -123,10 +133,15 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      # Pushes only build for the simulator; they need no test device.
+      - name: Finish Xcode's first launch
+        if: github.event_name == 'push'
+        run: sudo xcodebuild -runFirstLaunch
       # Runs alongside the Rust toolchain and cache restore below, which do
       # not touch Xcode or the simulator.
       - name: Provision the SDK-matched iPhone test simulator
         id: simulator
+        if: github.event_name != 'push'
         background: true
         run: |
           sudo xcodebuild -runFirstLaunch
@@ -175,6 +190,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       # Also applies the simulator's GITHUB_ENV values to the steps below.
       - name: Wait for the test simulator to be created
+        if: github.event_name != 'push'
         wait: simulator
       # prepare.sh (run by build.sh) compiles XcodeGen from source at a pinned
       # commit; reuse that build. Keyed by the commit and the Xcode version, and
@@ -210,9 +226,13 @@ jobs:
           if-no-files-found: error
           retention-days: 14
       - name: Wait for the test simulator to finish booting
+        if: github.event_name != 'push'
         run: xcrun simctl bootstatus "$DBM_IOS_SIMULATOR_ID" -b
-      - run: bash apps/native/ios/build.sh test
+      - name: Run the iPhone UI tests
+        if: github.event_name != 'push'
+        run: bash apps/native/ios/build.sh test
       - name: Check the Release device archive without signing or uploading
+        if: github.event_name != 'push'
         run: |
           bash apps/native/ios/prepare.sh iphoneos
           xcodebuild -project apps/native/ios/DBM.xcodeproj -scheme DBM -configuration Release \
@@ -220,13 +240,13 @@ jobs:
             -derivedDataPath apps/native/ios/DerivedData-Release \
             DBM_IOS_BUNDLE_ID=app.dbm.ios CODE_SIGNING_ALLOWED=NO archive
       - name: Export native UI screenshots for review
-        if: always()
+        if: always() && github.event_name != 'push'
         run: |
           if [[ -d apps/native/ios/DerivedData-Tests/DBM.xcresult ]]; then
             xcrun xcresulttool export attachments --path apps/native/ios/DerivedData-Tests/DBM.xcresult --output-path dist/mobile/ios-ui
           fi
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: always() && github.event_name != 'push'
         with:
           name: DBM-iphone-ui-${{ github.sha }}
           path: |

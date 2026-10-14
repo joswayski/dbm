@@ -28,11 +28,11 @@
 
 - Keep changes focused on the request and preserve existing behavior unless a change is intentional.
 - Do not overwrite, stage, or publish unrelated work already present in the checkout.
-- Assume other agents may be working in this repository concurrently. Prefer a dedicated branch (or Git worktree) for new work, and never stash, switch, or overwrite another agent's checkout without explicit instruction.
+- Assume other agents may be working in this repository concurrently. Prefer a separate Git worktree for new work (it still lands on `main`; see Shipping), and never stash, switch, or overwrite another agent's checkout without explicit instruction.
 - Reuse established patterns in the repository before introducing a new abstraction or dependency. Match existing naming (`profileId`, `workspace`, tab kinds `"table" | "query"`).
-- Treat macOS, Windows, and Linux parity as the default. Prefer shared UI and logic that works on every supported platform; when a fix or feature must be platform-specific, implement or stub the equivalent path on the others (or explicitly gate with `cfg` / runtime checks), and document any unavoidable limitation in the PR and README if user-facing. Do not assume “works on my Mac” is enough—call out what was and was not verified on other platforms.
+- Treat macOS, Windows, and Linux parity as the default. Prefer shared UI and logic that works on every supported platform; when a fix or feature must be platform-specific, implement or stub the equivalent path on the others (or explicitly gate with `cfg` / runtime checks), and document any unavoidable limitation in the commit message and README if user-facing. Do not assume “works on my Mac” is enough—call out what was and was not verified on other platforms.
 - Do not add telemetry, cloud sync, or network calls that send connection profiles, query history, or database results off-device.
-- Every merge to `main` that changes the app is built and published as the latest release, and installed builds update to it. Keep `main` releasable.
+- Every push to `main` that changes the app is built and published as the latest release, and installed builds update to it. Keep `main` releasable.
 - Keep this file concise and update it when a recurring repository convention or correction should persist across future work.
 
 ## Visual design
@@ -62,9 +62,9 @@
 
 ## Documentation
 
-- Every pull request must leave the root `README.md` and the docs it links to accurate. Update it when a change affects features, platform support, setup, build commands, privacy, networking, releases, or what is implemented vs planned.
+- Every change must leave the root `README.md` and the docs it links to accurate. Update it when a change affects features, platform support, setup, build commands, privacy, networking, releases, or what is implemented vs planned.
 - Keep the root README short and visual: screenshots, the download link, a few feature bullets, and links. Put details in `docs/`: features and follow-ups in `docs/features.md`, setup and builds in `docs/development.md`, releases in `docs/releases.md`.
-- If a pull request does not need a README edit, still verify that its changes do not make the README inaccurate; do not add no-op wording solely to touch the file.
+- If a change does not need a README edit, still verify that its changes do not make the README inaccurate; do not add no-op wording solely to touch the file.
 - Keep current behavior and roadmap / deliberate follow-ups distinct, especially for adapters and transports that are not implemented yet.
 - Describe mobile CI as workflows that build/test/capture development clients,
   not proof that checks passed. iOS cannot be compiled on Linux; physical-device
@@ -84,10 +84,20 @@
   ```
 
 - The AppKit app can only be built on macOS; say so when a change to it was not built.
-- Report exactly which checks ran and any checks that could not run. Do not wait on CI unless asked; the maintainer will report failures.
+- Report exactly which checks ran and any checks that could not run.
 
-## Pull requests
+## Shipping
 
-- Prefer a focused pull request over pushing directly to `main` unless explicitly asked otherwise. Ready-for-review (not draft) is fine by default.
-- Use `gh` for GitHub operations (works more reliably with private repositories than alternate CLIs).
-- Use a concise title and description covering what changed, why it changed, user or developer impact, and validation.
+Speed beats ceremony: there are no real users yet, so ship, watch, and fix forward.
+
+- Commit and push straight to `main`; no pull requests. Run the local checks for what you changed first (Validation), then `git pull --rebase origin main` and push. Never force-push `main` or rewrite other agents' commits. Use `gh` for GitHub operations.
+- Commit subjects become the desktop release notes (`scripts/release.mjs`), so write them for users.
+- Never put literal CI-skip directives in commit messages, even to explain them: GitHub honors them anywhere in the message, and the path-filtered `Release` and `Mobile development builds` runs would silently not happen.
+- Pushes to `main` run `CI` (about 5 minutes); `Release` unless only Markdown, `docs/`, `apps/web`, agent tooling or the CI/mobile/fallback workflows changed (it signs and publishes the latest desktop release, which installed apps update to, in about 5-10 minutes); `Mobile development builds` when mobile files changed (builds plus Android unit tests and lint; its UI suites run nightly, so don't start it for routine changes); and Cloudflare Workers Builds, which deploys anyba.se.
+- After pushing, see what changed through to production yourself, in this order, waiting for each step to succeed before the next. `SHA` is your pushed commit; list its runs with `gh run list --repo joswayski/dbm --commit "$SHA"` and wait with `gh run watch <id> --repo joswayski/dbm --exit-status`. Report what shipped.
+  1. Infrastructure or secrets the change needs (release-signing role, deploy webhook, self-hosted runners) in `joswayski/infrastructure`, following that repository's guidance. Anybase has no server, so no `deploy-*.yml` workflow there deploys this repository.
+  2. Website: Workers Builds deploys `main` on its own. Confirm with `gh api "repos/joswayski/dbm/commits/$SHA/check-runs" --jq '.check_runs[] | select(.name == "Workers Builds: anybase") | .conclusion'`.
+  3. Desktop apps: watch the automatic `Release` run for `SHA` (releases run one at a time, so it may wait for an earlier one). Start it by hand with `gh workflow run release.yml --repo joswayski/dbm --ref main` only when a needed release was skipped.
+  4. Mobile apps, if mobile files changed: once `Mobile development builds` succeeds for `SHA`, run `gh workflow run mobile-release.yml --repo joswayski/dbm --ref main -f git_sha="$SHA"` (about 15 minutes; signs and uploads to TestFlight and Google Play internal testing, like Godis's Discord button).
+- If `CI`, a build or a release fails, fix it forward with another commit. A failed release removes its own draft and tag. A published desktop release cannot be taken back (installed apps already updated), so ship a fix or revert commit, which publishes a newer release.
+- Still ask the owner first for anything irreversible: deleting releases, tags, data or infrastructure; profile-storage migrations that drop data; rotating signing keys or secrets; or changing the identifiers listed under "Never change" in `docs/anybase-migration.md`.

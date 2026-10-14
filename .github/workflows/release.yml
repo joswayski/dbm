@@ -21,6 +21,8 @@ on:
       - ".amp/**"
       - "apps/web/**"
       - ".github/workflows/ci.yml"
+      - ".github/workflows/mobile*.yml"
+      - ".github/workflows/mac-runner-fallback.yml"
   workflow_dispatch:
 
 # One release at a time. A newer merge waits instead of cancelling a release

@@ -15,7 +15,7 @@ Every merge to `main` that changes the app runs `.github/workflows/release.yml`,
 which builds all three platforms and publishes the result as the latest GitHub
 Release. Installed release builds find it through the updater manifest and
 update in place. Changes that only touch Markdown, `docs/`, agent tooling, or
-the CI workflow do not release. Run the workflow manually from the Actions tab
+the CI, mobile, or runner-fallback workflows do not release. Run the workflow manually from the Actions tab
 (**Release → Run workflow** on `main`) to release without a new merge.
 
 These automatic releases are for the maintainer's own machines. Windows builds
@@ -25,8 +25,9 @@ promoted to a wider audience.
 ## How a release is built
 
 1. **prepare** picks the next version and build number, pushes the tag, and
-   creates a draft release whose notes list the pull requests merged since the
-   previous release (Dependabot bumps are omitted).
+   creates a draft release whose notes list the commit subjects (or pull
+   request titles, for merges) on `main` since the previous release
+   (Dependabot bumps are omitted).
 2. **macOS** builds the universal app with `apps/native/macos/build.sh`
    (`DBM_UNIVERSAL=1`), signs it with the Developer ID and the hardened
    runtime, notarizes and staples it, and packages it three ways. The DMG is

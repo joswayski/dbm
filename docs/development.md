@@ -112,14 +112,15 @@ the universal AppKit app with fixture snapshots, and builds the Windows NSIS
 installer from a stand-in executable.
 
 CI runs on pushes to `main` only, not on pull requests, so run these checks
-locally before merging. To run CI on another branch, use "Run workflow" on the
+locally before pushing. To run CI on another branch, use "Run workflow" on the
 CI or mobile workflow in GitHub Actions.
 
 The separate [mobile workflow](../.github/workflows/mobile.yml) is configured to
-build/lint/test Android, run its emulator UI test, build/test the iPhone
-Simulator client, compile the iPhone Rust archive, and retain development
-artifacts and UI captures. These are workflow definitions, not claims about a
-particular run. SwiftUI is not compiled on Linux, and physical-device plus live
+build/lint/unit-test Android and build the iPhone Simulator client on pushes
+that touch mobile files. Nightly and manual runs also run the Android emulator
+and iPhone Simulator UI tests, check unsigned release packaging, compile the
+iPhone Release archive, and retain UI captures. These are workflow definitions,
+not claims about a particular run. SwiftUI is not compiled on Linux, and physical-device plus live
 TLS database validation remains outstanding. Commands and prerequisites are in
 [the mobile contract](mobile.md).
 
