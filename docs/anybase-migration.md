@@ -11,14 +11,14 @@ when, and which identifiers must never change.
 | --- | --- | --- |
 | 1. Website and branding | anyba.se site in `apps/web`; README; josevalerio.com links to anyba.se | Done |
 | 2. App display name | What users see inside and around the installed app | Done, except store listings |
-| 3. Download names | Anybase-named first-install downloads | In progress |
+| 3. Download names | Anybase-named first-install downloads | Done |
 | 4. Repository rename (optional) | `joswayski/dbm` to `joswayski/anybase`, and every hard-coded reference | Planned |
 | 5. Internal names | Crates, env vars, script names | Optional |
 
 ### 1. Website and branding
 
 - `apps/web` builds anyba.se. See [Website](#website).
-- The README leads with Anybase and says download names still say DBM.
+- The README leads with Anybase and says the repository still has the DBM name.
 - josevalerio.com lists Anybase and links to anyba.se.
 
 ### 2. App display name
@@ -59,11 +59,11 @@ Still to do:
 ### 3. Download names
 
 Every release publishes `Anybase-macOS.dmg`, `Anybase-Windows-x64-setup.exe`, and
-`Anybase-Linux-x86_64.AppImage`, byte-identical copies of the DBM-named files.
-Installed copies keep downloading the DBM-named updater assets listed in
+`Anybase-Linux-x86_64.AppImage`, byte-identical copies of the DBM-named files,
+and the website (`apps/web/src/downloads.ts`) and README link to them. Installed
+copies keep downloading the DBM-named updater assets listed in
 [Never change](#never-change), and the DBM-named installers stay for links made
-before the rename. Once a release carries the Anybase files, point the website
-(`apps/web/src/downloads.ts`) and README at them.
+before the rename.
 
 ### 4. Repository rename
 

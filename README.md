@@ -4,17 +4,16 @@ A fast database client for PostgreSQL, MySQL, and Redis. Native desktop apps
 are released for macOS, Windows, and Linux; native Android and iPhone apps are
 available for [early-access testing](#mobile-status).
 
-**[anyba.se](https://anyba.se)**. Formerly DBM: download file names and this
-repository still use the DBM name while [the rename](docs/anybase-migration.md)
-rolls out.
+**[anyba.se](https://anyba.se)**. Formerly DBM: this repository still uses the
+DBM name while [the rename](docs/anybase-migration.md) rolls out.
 
 ## Download
 
 | Platform | Direct download |
 | --- | --- |
-| macOS (Apple Silicon and Intel) | [Download DMG](https://github.com/joswayski/dbm/releases/latest/download/DBM-macOS.dmg) |
-| Windows (x64) | [Download installer](https://github.com/joswayski/dbm/releases/latest/download/DBM-Windows-x64-setup.exe) |
-| Linux (x86_64) | [Download AppImage](https://github.com/joswayski/dbm/releases/latest/download/DBM-Linux-x86_64.AppImage) |
+| macOS (Apple Silicon and Intel) | [Download DMG](https://github.com/joswayski/dbm/releases/latest/download/Anybase-macOS.dmg) |
+| Windows (x64) | [Download installer](https://github.com/joswayski/dbm/releases/latest/download/Anybase-Windows-x64-setup.exe) |
+| Linux (x86_64) | [Download AppImage](https://github.com/joswayski/dbm/releases/latest/download/Anybase-Linux-x86_64.AppImage) |
 
 > The Windows installer is not code-signed yet, so SmartScreen may warn on
 > first install. The macOS app is signed and notarized.

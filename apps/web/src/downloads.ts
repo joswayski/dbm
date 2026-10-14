@@ -7,17 +7,17 @@ export const DOWNLOADS = [
   {
     id: "macos",
     platform: "macOS",
-    href: `${DOWNLOAD_BASE}/DBM-macOS.dmg`,
+    href: `${DOWNLOAD_BASE}/Anybase-macOS.dmg`,
   },
   {
     id: "windows",
     platform: "Windows",
-    href: `${DOWNLOAD_BASE}/DBM-Windows-x64-setup.exe`,
+    href: `${DOWNLOAD_BASE}/Anybase-Windows-x64-setup.exe`,
   },
   {
     id: "linux",
     platform: "Linux",
-    href: `${DOWNLOAD_BASE}/DBM-Linux-x86_64.AppImage`,
+    href: `${DOWNLOAD_BASE}/Anybase-Linux-x86_64.AppImage`,
   },
 ] as const;
 

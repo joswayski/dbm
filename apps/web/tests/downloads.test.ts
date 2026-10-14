@@ -26,9 +26,9 @@ describe("detectDownload", () => {
 describe("DOWNLOADS", () => {
   it("points at the latest release assets", () => {
     expect(DOWNLOADS.map((download) => download.href)).toEqual([
-      "https://github.com/joswayski/dbm/releases/latest/download/DBM-macOS.dmg",
-      "https://github.com/joswayski/dbm/releases/latest/download/DBM-Windows-x64-setup.exe",
-      "https://github.com/joswayski/dbm/releases/latest/download/DBM-Linux-x86_64.AppImage",
+      "https://github.com/joswayski/dbm/releases/latest/download/Anybase-macOS.dmg",
+      "https://github.com/joswayski/dbm/releases/latest/download/Anybase-Windows-x64-setup.exe",
+      "https://github.com/joswayski/dbm/releases/latest/download/Anybase-Linux-x86_64.AppImage",
     ]);
   });
 });
