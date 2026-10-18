@@ -25,9 +25,10 @@ promoted to a wider audience.
 ## How a release is built
 
 1. **prepare** picks the next version and build number, pushes the tag, and
-   creates a draft release whose notes list the commit subjects (or pull
-   request titles, for merges) on `main` since the previous release
-   (Dependabot bumps are omitted).
+   creates a draft release. Its notes are the release highlights (see
+   [Release highlights](#release-highlights)) followed by the commit subjects
+   (or pull request titles, for merges) on `main` since the previous release
+   (Dependabot bumps are omitted); without highlights, just the commits.
 2. **macOS** builds the universal app with `apps/native/macos/build.sh`
    (`DBM_UNIVERSAL=1`), signs it with the Developer ID and the hardened
    runtime, notarizes and staples it, and packages it three ways. The DMG is
@@ -124,9 +125,60 @@ assets must keep the name they were signed under), swaps it in, and restarts.
   and requests foreground focus once; Wayland compositors control focus and
   may ignore that request.
 
-`native-latest.json` lists the build number, version text, notes, and each
-platform's URL and signature. `darwin-aarch64` and `darwin-x86_64` both point
-at the universal zip.
+`native-latest.json` lists the build number, version text, notes, each
+platform's URL and signature, and `releases`: recent releases' highlights
+(below). `darwin-aarch64` and `darwin-x86_64` both point at the universal zip.
+
+The install confirmation is the update review: "Version X · date", the
+version linking to its source commit, then the highlights of every listed
+release newer than the installed build, newest first, with a title an older
+release repeats kept once. If the offered release has no highlights listed, it
+shows the plain notes instead.
+
+**What's new** (Anybase menu on macOS, Help menu on Windows/Linux) shows the
+listed releases up to the installed build, grouped under their UTC publication
+day so every copy dates them alike, each version linking to its commit. The
+newest build whose highlights a copy has shown is stored locally (UserDefaults
+on macOS, the egui settings file on Windows/Linux). A first launch only records
+the installed build; a later launch opens What's new once for highlights it
+has not shown. Installing from the update review marks its highlights read, so
+the restarted app doesn't repeat them.
+
+## Release highlights
+
+`scripts/release-highlights.mjs` asks Anthropic for up to five short,
+user-facing highlights, using Caper's and Captures' editorial prompt and Opus
+request configuration. It reads the first-parent commits since the previous
+release tag, keeping only desktop app sources (`apps/native/macos`,
+`apps/native/bridge`, `apps/native/workbench`, `apps/native/windows`, and
+`crates/`; tests, fixtures, mobile, website, docs, and secret-looking paths are
+excluded), and tells the model which app each change reaches so it can say "on
+macOS" or "on Windows and Linux". The last three releases' highlights are
+included so they are not repeated. Requests are capped at 400,000 characters by
+shortening diffs evenly and marking them truncated; commit metadata is always
+kept. Every highlight must cite commits in the range and pass plain-text,
+length, and unsupported-claim checks; these checks cannot prove every sentence
+is accurate.
+
+`scripts/release.mjs highlights` then builds `releases`: this release's entry
+(build, version, commit, publication time, highlights) ahead of the previous
+release's list, read from its `native-latest.json`, capped at 30 releases and
+64 KiB. The publish job stamps the entry with the publication time. A release
+with nothing user-facing has an empty list. Missing credentials, provider
+errors, or rejected output leave this release out and keep the commit-based
+notes; they never fail the release.
+
+Set the repository Actions secret `ANTHROPIC_API_KEY` (it prompts privately):
+
+```sh
+gh secret set ANTHROPIC_API_KEY --repo joswayski/dbm
+```
+
+Optional repository variables `DBM_RELEASE_NOTES_MODEL` and
+`DBM_RELEASE_NOTES_EFFORT` (`low` to `max`) override `claude-opus-5-5` and
+`high`. Generation sends filtered source diffs and commit messages to
+Anthropic, never connection profiles, history, or data, and the apps make no
+request for it.
 
 Development builds never check for updates. Debug builds can test the updater
 against a local manifest by setting `DBM_UPDATE_MANIFEST` and

@@ -33,6 +33,8 @@ use crate::theme::{self, chip, eyebrow, mono, primary_button, section_label, ui_
 
 const MAX_QUERY_ROWS: u32 = 10_000;
 const SIDEBAR_COLLAPSED_KEY: &str = "dbm.sidebarCollapsed";
+/// The newest build whose release highlights this install has shown.
+const WHATS_NEW_KEY: &str = "dbm.whatsNewAcknowledgedBuild";
 const LARGE_EXPORT_WARNING_ROWS: u64 = 100_000;
 const PASSWORD_LOAD: &str = "Loading saved password";
 fn engine_label(engine: DatabaseEngine) -> &'static str {
@@ -405,6 +407,13 @@ impl Workbench {
             .storage
             .and_then(|storage| storage.get_string(SIDEBAR_COLLAPSED_KEY))
             .is_some_and(|value| value == "true");
+        if !demo {
+            let acknowledged = cc
+                .storage
+                .and_then(|storage| storage.get_string(WHATS_NEW_KEY))
+                .and_then(|value| value.parse().ok());
+            app.updates.start_whats_new(&cc.egui_ctx, acknowledged);
+        }
         app
     }
 
@@ -1390,7 +1399,7 @@ impl eframe::App for Workbench {
         storage.set_string(SIDEBAR_COLLAPSED_KEY, self.sidebar_collapsed.to_string());
     }
 
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         if std::mem::take(&mut self.focus_after_update) {
             // Only the first frame after an update takes focus; subsequent
             // frames must not steal it back from another application.
@@ -1435,6 +1444,13 @@ impl eframe::App for Workbench {
         self.dialogs(ctx);
         self.toast_ui(ctx);
         theme::end_frame(ctx);
+        // Stored at once: installing an update exits without eframe's save.
+        if let Some(build) = self.updates.take_acknowledged() {
+            if let Some(storage) = frame.storage_mut() {
+                storage.set_string(WHATS_NEW_KEY, build.to_string());
+                storage.flush();
+            }
+        }
     }
 }
 
@@ -1449,6 +1465,7 @@ impl Workbench {
             || self.confirm_delete.is_some()
             || self.confirm_query.is_some()
             || self.confirm_update.is_some()
+            || !matches!(self.updates.whats_new, crate::updates::WhatsNew::Closed)
             || self.confirm_export.is_some();
         if modal {
             return;
@@ -1949,6 +1966,10 @@ impl Workbench {
                             );
                             ui.menu_button("Help", |ui| {
                                 theme::menu_scope(ui, 200.0);
+                                if theme::menu_item(ui, "What’s new", false).clicked() {
+                                    self.updates.open_whats_new(ctx);
+                                    ui.close();
+                                }
                                 if ui.add_enabled_ui(!busy, |ui| theme::menu_item(ui, "Check for updates…", false)).inner.clicked() {
                                     self.updates.check(ctx, false);
                                     ui.close();
@@ -3699,11 +3720,120 @@ fn dialog_title(ui: &mut egui::Ui, eyebrow_text: Option<&str>, title: &str) {
     ui.add_space(10.0);
 }
 
+/// "Version 2026.10.18.2 · October 18, 2026", the version linking to the
+/// release's source commit when it is known.
+fn version_line(ui: &mut egui::Ui, version: &str, commit: Option<&str>, date: Option<&str>) {
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
+        let text = format!("Version {version}");
+        match commit.and_then(dbm_update::commit_url) {
+            Some(url) => {
+                ui.hyperlink_to(RichText::new(text).font(ui_font(12.0)), url);
+            }
+            None => {
+                ui.label(RichText::new(text).font(ui_font(12.0)).color(theme::MUTED));
+            }
+        }
+        if let Some(date) = date {
+            ui.label(
+                RichText::new(format!(" · {date}"))
+                    .font(ui_font(12.0))
+                    .color(theme::MUTED),
+            );
+        }
+    });
+}
+
+/// Bold titles over short, muted descriptions.
+fn release_highlights(ui: &mut egui::Ui, highlights: &[dbm_update::Highlight]) {
+    for highlight in highlights {
+        ui.label(
+            RichText::new(&highlight.title)
+                .font(theme::semibold(13.0))
+                .color(theme::TEXT_STRONG),
+        );
+        ui.label(RichText::new(&highlight.body).color(theme::SECONDARY));
+        ui.add_space(8.0);
+    }
+}
+
 fn form_label(ui: &mut egui::Ui, text: &str) {
     ui.label(RichText::new(text).font(ui_font(12.0)).color(theme::MUTED));
 }
 
 impl Workbench {
+    /// Release highlights grouped by UTC day, newest first, each release
+    /// linking its version to the commit it was built from.
+    fn whats_new_dialog(&mut self, ctx: &egui::Context) {
+        use crate::updates::WhatsNew;
+        if matches!(self.updates.whats_new, WhatsNew::Closed) {
+            return;
+        }
+        let mut retry = false;
+        let done = modal(ctx, "What’s new", 460.0, |ui| {
+            dialog_title(ui, None, "What’s new");
+            match &self.updates.whats_new {
+                WhatsNew::Loading => {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label(RichText::new("Loading release highlights…").color(theme::MUTED));
+                    });
+                }
+                WhatsNew::Failed(error) => {
+                    ui.label(
+                        RichText::new("Release highlights couldn’t be loaded.")
+                            .color(theme::SECONDARY),
+                    )
+                    .on_hover_text(error);
+                    if ui.add(theme::secondary_button("Retry").small()).clicked() {
+                        retry = true;
+                    }
+                }
+                WhatsNew::Shown(days) if days.is_empty() => {
+                    ui.label(
+                        RichText::new("No release highlights for this version yet.")
+                            .color(theme::SECONDARY),
+                    );
+                }
+                WhatsNew::Shown(days) => {
+                    for day in days {
+                        ui.label(
+                            RichText::new(&day.date)
+                                .font(ui_font(12.0))
+                                .color(theme::MUTED),
+                        );
+                        ui.separator();
+                        ui.add_space(4.0);
+                        for release in &day.releases {
+                            version_line(ui, &release.version, Some(&release.commit), None);
+                            ui.add_space(4.0);
+                            release_highlights(ui, &release.highlights);
+                        }
+                        ui.add_space(6.0);
+                    }
+                }
+                WhatsNew::Closed => {}
+            }
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.add(primary_button("Done")).clicked()
+                        || ui.input(|i| i.key_pressed(egui::Key::Escape))
+                })
+                .inner
+            })
+            .inner
+        })
+        .unwrap_or(false)
+            || backdrop_clicked(ctx, "What’s new");
+        if retry {
+            self.updates.whats_new = WhatsNew::Closed;
+            self.updates.open_whats_new(ctx);
+        } else if done {
+            self.updates.close_whats_new();
+        }
+    }
+
     fn dialogs(&mut self, ctx: &egui::Context) {
         self.profile_dialog(ctx);
         if let Some(id) = self.confirm_delete {
@@ -3787,27 +3917,61 @@ impl Workbench {
             }
         }
         if let Some(update) = self.confirm_update.clone() {
-            let choice = modal(ctx, "Install update", 420.0, |ui| {
+            let choice = modal(ctx, "Install update", 460.0, |ui| {
                 dialog_title(
                     ui,
                     None,
                     &format!("Install Anybase {} and restart now?", update.version),
                 );
+                version_line(
+                    ui,
+                    &update.version,
+                    update.commit.as_deref(),
+                    update.released.as_deref(),
+                );
+                ui.add_space(12.0);
+                ui.label(eyebrow("What’s new"));
+                ui.separator();
+                ui.add_space(4.0);
+                match &update.highlights {
+                    Some(highlights) if highlights.is_empty() => {
+                        ui.label(
+                            RichText::new("Behind-the-scenes fixes this time.")
+                                .color(theme::SECONDARY),
+                        );
+                    }
+                    Some(highlights) => release_highlights(ui, highlights),
+                    None if !update.notes.trim().is_empty() => {
+                        ui.label(RichText::new(update.notes.trim()).color(theme::SECONDARY));
+                    }
+                    None => {
+                        ui.label(
+                            RichText::new("Release highlights aren’t available for this update.")
+                                .color(theme::SECONDARY),
+                        );
+                    }
+                }
+                ui.add_space(14.0);
                 ui.label(
                     RichText::new("Unsaved query text and pending table edits will be lost.")
-                        .color(theme::SECONDARY),
+                        .font(ui_font(12.0))
+                        .color(theme::MUTED),
                 );
                 ui.add_space(14.0);
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.add(primary_button("Install and restart")).clicked() {
-                        return Some(true);
-                    }
-                    if ui.add(theme::secondary_button("Later")).clicked()
-                        || ui.input(|i| i.key_pressed(egui::Key::Escape))
-                    {
-                        return Some(false);
-                    }
-                    None
+                // A row keeps the buttons from taking the dialog's full height.
+                ui.horizontal(|ui| {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.add(primary_button("Install and restart")).clicked() {
+                            return Some(true);
+                        }
+                        if ui.add(theme::secondary_button("Later")).clicked()
+                            || ui.input(|i| i.key_pressed(egui::Key::Escape))
+                        {
+                            return Some(false);
+                        }
+                        None
+                    })
+                    .inner
                 })
                 .inner
             })
@@ -3820,6 +3984,7 @@ impl Workbench {
                 }
             }
         }
+        self.whats_new_dialog(ctx);
         if let Some(tab_id) = self.confirm_export {
             let total = self
                 .tables

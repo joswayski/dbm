@@ -9,7 +9,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 
-use dbm_update::Available;
+use dbm_update::{Available, Day, Release};
 use eframe::egui;
 
 const FIRST_CHECK_AFTER: f64 = 5.0;
@@ -30,11 +30,28 @@ enum Event {
         quiet: bool,
     },
     Downloaded(Result<PathBuf, String>),
+    History {
+        result: Result<Vec<Release>, String>,
+        /// Opened after an update rather than from the Help menu.
+        unread: bool,
+    },
+}
+
+/// The What's new dialog: release highlights grouped by UTC day.
+pub enum WhatsNew {
+    Closed,
+    Loading,
+    Shown(Vec<Day>),
+    Failed(String),
 }
 
 pub struct Updates {
     pub state: State,
+    pub whats_new: WhatsNew,
     current: Option<u64>,
+    /// The newest build whose highlights this install has shown or skipped.
+    acknowledged: Option<u64>,
+    acknowledged_changed: bool,
     next_check: f64,
     sender: Sender<Event>,
     receiver: Receiver<Event>,
@@ -46,7 +63,10 @@ impl Updates {
         let (sender, receiver) = mpsc::channel();
         Self {
             state: State::Idle,
+            whats_new: WhatsNew::Closed,
             current: dbm_update::current_build(),
+            acknowledged: None,
+            acknowledged_changed: false,
             next_check: FIRST_CHECK_AFTER,
             sender,
             receiver,
@@ -80,6 +100,7 @@ impl Updates {
                     }
                 }
                 Event::Downloaded(Err(error)) => self.state = State::Failed(error),
+                Event::History { result, unread } => self.history_loaded(result, unread),
             }
         }
         if self.enabled() {
@@ -114,6 +135,7 @@ impl Updates {
     }
 
     pub fn install(&mut self, ctx: &egui::Context, update: Available) {
+        self.mark_reviewed(&update);
         self.state = State::Installing;
         let sender = self.sender.clone();
         let ctx = ctx.clone();
@@ -123,6 +145,90 @@ impl Updates {
             let _ = sender.send(Event::Downloaded(result));
             ctx.request_repaint();
         });
+    }
+
+    /// Starts What's new for this launch from the stored acknowledgement. A
+    /// first launch only records the installed build; after an update, the
+    /// highlights it has not shown yet open once.
+    pub fn start_whats_new(&mut self, ctx: &egui::Context, acknowledged: Option<u64>) {
+        let Some(current) = self.current else { return };
+        self.acknowledged = acknowledged;
+        match acknowledged {
+            None => self.acknowledge(current),
+            Some(seen) if seen < current => self.fetch_history(ctx, true),
+            Some(_) => {}
+        }
+    }
+
+    /// Every highlighted release up to this build, from the Help menu.
+    pub fn open_whats_new(&mut self, ctx: &egui::Context) {
+        if self.current.is_none() || matches!(self.whats_new, WhatsNew::Loading) {
+            return;
+        }
+        self.whats_new = WhatsNew::Loading;
+        self.fetch_history(ctx, false);
+    }
+
+    pub fn close_whats_new(&mut self) {
+        self.whats_new = WhatsNew::Closed;
+        if let Some(current) = self.current {
+            self.acknowledge(current);
+        }
+    }
+
+    /// A newly acknowledged build to store, once per change.
+    pub fn take_acknowledged(&mut self) -> Option<u64> {
+        std::mem::take(&mut self.acknowledged_changed)
+            .then_some(self.acknowledged)
+            .flatten()
+    }
+
+    /// The review just showed these highlights, so the restarted build does
+    /// not open them again.
+    fn mark_reviewed(&mut self, update: &Available) {
+        if update.highlights.is_some() {
+            self.acknowledge(update.build);
+        }
+    }
+
+    fn acknowledge(&mut self, build: u64) {
+        if self.acknowledged.is_none_or(|seen| seen < build) {
+            self.acknowledged = Some(build);
+            self.acknowledged_changed = true;
+        }
+    }
+
+    fn fetch_history(&mut self, ctx: &egui::Context, unread: bool) {
+        let sender = self.sender.clone();
+        let ctx = ctx.clone();
+        std::thread::spawn(move || {
+            let _ = sender.send(Event::History {
+                result: dbm_update::history(),
+                unread,
+            });
+            ctx.request_repaint();
+        });
+    }
+
+    fn history_loaded(&mut self, result: Result<Vec<Release>, String>, unread: bool) {
+        let Some(current) = self.current else { return };
+        if unread {
+            // A failed quiet fetch tries again next launch.
+            let Ok(releases) = result else { return };
+            let days = dbm_update::days(&releases, self.acknowledged.unwrap_or(current), current);
+            if days.is_empty() {
+                self.acknowledge(current);
+            } else if matches!(self.whats_new, WhatsNew::Closed) {
+                self.whats_new = WhatsNew::Shown(days);
+            }
+            return;
+        }
+        if matches!(self.whats_new, WhatsNew::Loading) {
+            self.whats_new = match result {
+                Ok(releases) => WhatsNew::Shown(dbm_update::days(&releases, 0, current)),
+                Err(error) => WhatsNew::Failed(error),
+            };
+        }
     }
 
     /// The desktop `UpdateControl`'s wording.
@@ -235,13 +341,79 @@ mod tests {
         assert!(updates.version_label().starts_with("Version "));
         updates.state = State::UpToDate;
         assert_eq!(updates.label(), "Up to date");
-        updates.state = State::Available(Available {
+        updates.state = State::Available(available(None));
+        assert_eq!(updates.label(), "Update to v2026.10.08.1");
+    }
+
+    fn available(highlights: Option<Vec<dbm_update::Highlight>>) -> Available {
+        Available {
             build: 2026100801,
             version: "2026.10.08.1".into(),
             notes: String::new(),
             url: String::new(),
             signature: String::new(),
-        });
-        assert_eq!(updates.label(), "Update to v2026.10.08.1");
+            highlights,
+            released: None,
+            commit: None,
+        }
+    }
+
+    fn release(build: u64, title: &str) -> Release {
+        Release {
+            build,
+            version: build.to_string(),
+            commit: String::new(),
+            published_at: "2026-10-18T12:00:00Z".into(),
+            highlights: vec![dbm_update::Highlight {
+                title: title.into(),
+                body: String::new(),
+            }],
+        }
+    }
+
+    #[test]
+    fn whats_new_opens_once_for_unseen_highlights() {
+        let mut updates = Updates::new();
+        updates.current = Some(30);
+        // First launch: record the installed build without fetching.
+        updates.start_whats_new(&egui::Context::default(), None);
+        assert_eq!(updates.take_acknowledged(), Some(30));
+        assert_eq!(updates.take_acknowledged(), None);
+
+        // After an update from build 10, only releases since then open.
+        updates.acknowledged = Some(10);
+        let releases = vec![
+            release(10, "Seen"),
+            release(20, "New"),
+            release(40, "Later"),
+        ];
+        updates.history_loaded(Ok(releases.clone()), true);
+        let WhatsNew::Shown(days) = &updates.whats_new else {
+            panic!("expected unread highlights")
+        };
+        let builds: Vec<u64> = days[0].releases.iter().map(|r| r.build).collect();
+        assert_eq!(builds, [20]);
+        updates.close_whats_new();
+        assert_eq!(updates.take_acknowledged(), Some(30));
+
+        // Nothing unseen: stay closed and acknowledge quietly.
+        updates.acknowledged = Some(20);
+        updates.history_loaded(Ok(releases), true);
+        assert!(matches!(updates.whats_new, WhatsNew::Closed));
+        assert_eq!(updates.take_acknowledged(), Some(30));
+    }
+
+    #[test]
+    fn installing_from_the_review_marks_its_highlights_read() {
+        let mut updates = Updates::new();
+        updates.acknowledged = Some(1);
+        // Plain notes alone are not highlights the build would reopen.
+        updates.mark_reviewed(&available(None));
+        assert_eq!(updates.take_acknowledged(), None);
+        updates.mark_reviewed(&available(Some(Vec::new())));
+        assert_eq!(updates.take_acknowledged(), Some(2026100801));
+        // An older build never lowers the acknowledgement.
+        updates.acknowledge(5);
+        assert_eq!(updates.take_acknowledged(), None);
     }
 }

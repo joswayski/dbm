@@ -51,7 +51,8 @@ jobs:
       display_version: ${{ steps.version.outputs.display_version }}
       app_version: ${{ steps.version.outputs.app_version }}
       build: ${{ steps.build.outputs.build }}
-      notes: ${{ steps.notes.outputs.notes }}
+      notes: ${{ steps.highlights.outputs.notes || steps.notes.outputs.notes }}
+      releases: ${{ steps.highlights.outputs.releases }}
       release_id: ${{ steps.draft.outputs.release_id }}
     steps:
       - uses: actions/checkout@v4
@@ -82,13 +83,39 @@ jobs:
         env:
           DBM_RELEASE_SHA: ${{ github.sha }}
         run: node scripts/release.mjs notes
+      - name: Load the previous release's highlights
+        if: steps.notes.outputs.previous_tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREVIOUS_TAG: ${{ steps.notes.outputs.previous_tag }}
+        # Releases from before highlights existed have no history to carry on.
+        run: |
+          gh release download "$PREVIOUS_TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern native-latest.json --dir "$RUNNER_TEMP/previous" || true
+      - name: Write user-facing highlights
+        id: highlights
+        # Missing credentials or an unavailable editorial service keep the
+        # commit-based notes; they never stop a release.
+        continue-on-error: true
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Empty variables fall back to the generator defaults (Opus 5.5, high effort).
+          ANTHROPIC_MODEL: ${{ vars.DBM_RELEASE_NOTES_MODEL }}
+          ANTHROPIC_EFFORT: ${{ vars.DBM_RELEASE_NOTES_EFFORT }}
+          DBM_RELEASE_SHA: ${{ github.sha }}
+          PREVIOUS_TAG: ${{ steps.notes.outputs.previous_tag }}
+          PREVIOUS_MANIFEST: ${{ runner.temp }}/previous/native-latest.json
+          BUILD: ${{ steps.build.outputs.build }}
+          DISPLAY_VERSION: ${{ steps.version.outputs.display_version }}
+          NOTES: ${{ steps.notes.outputs.notes }}
+        run: node scripts/release.mjs highlights
       - name: Push the tag and create a draft release
         id: draft
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.version.outputs.tag }}
           DISPLAY_VERSION: ${{ steps.version.outputs.display_version }}
-          NOTES: ${{ steps.notes.outputs.notes }}
+          NOTES: ${{ steps.highlights.outputs.body || steps.notes.outputs.notes }}
           RELEASE_SHA: ${{ github.sha }}
         shell: bash
         run: |
@@ -369,6 +396,7 @@ jobs:
       DISPLAY_VERSION: ${{ needs.prepare.outputs.display_version }}
       BUILD: ${{ needs.prepare.outputs.build }}
       NOTES: ${{ needs.prepare.outputs.notes }}
+      RELEASES: ${{ needs.prepare.outputs.releases }}
       RELEASE_ID: ${{ needs.prepare.outputs.release_id }}
     steps:
       - uses: actions/download-artifact@v4
@@ -389,22 +417,29 @@ jobs:
           windows_setup="$(artifact DBM-Windows-x64-setup.exe)"
           linux_bin="$(artifact DBM-Linux-x64)"
           appimage="$(artifact DBM-Linux-x86_64.AppImage)"
+          pub_date="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
+          # `releases` carries recent highlights (scripts/release.mjs), so
+          # installed apps can show every release they skip and group What's
+          # new by UTC day. This release's entry gets the publication time.
           jq -n \
             --argjson build "$BUILD" --arg version "$DISPLAY_VERSION" --arg notes "$NOTES" \
             --argjson mac "$mac_zip" --argjson windows "$windows_exe" \
             --argjson linux "$linux_bin" --argjson appimage "$appimage" \
+            --argjson releases "${RELEASES:-[]}" --arg pub_date "$pub_date" \
             '{build: $build, version: $version, notes: $notes, platforms: {
                 "darwin-aarch64": $mac, "darwin-x86_64": $mac,
                 "windows-x86_64": $windows,
-                "linux-x86_64": $linux, "linux-x86_64-appimage": $appimage}}' \
+                "linux-x86_64": $linux, "linux-x86_64-appimage": $appimage},
+              releases: ($releases | if length > 0 and .[0].build == $build
+                then .[0].publishedAt = $pub_date else . end)}' \
             > native-latest.json
 
           # The Tauri updater's format. Its version must be newer than the
           # last Tauri release (2026.9.2801), which the CalVer tags ensure.
           jq -n \
             --arg version "$APP_VERSION" --arg notes "$NOTES" \
-            --arg pub_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg pub_date "$pub_date" \
             --argjson mac "$mac_tar" --argjson windows "$windows_setup" --argjson appimage "$appimage" \
             '{version: $version, notes: $notes, pub_date: $pub_date, platforms: {
                 "darwin-aarch64": $mac, "darwin-x86_64": $mac,

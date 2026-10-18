@@ -15,6 +15,9 @@ use std::time::Duration;
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 
+/// Commits behind each release, for its version link.
+pub const REPOSITORY_URL: &str = "https://github.com/joswayski/dbm";
+
 /// The latest release's manifest.
 pub const MANIFEST_URL: &str =
     "https://github.com/joswayski/dbm/releases/latest/download/native-latest.json";
@@ -66,6 +69,40 @@ pub struct Manifest {
     pub version: String,
     pub notes: String,
     pub platforms: BTreeMap<String, Artifact>,
+    /// Recent releases' highlights, newest first, including this one when
+    /// they could be written. Older manifests have none.
+    #[serde(default)]
+    pub releases: Vec<Release>,
+}
+
+/// One release's user-facing highlights, as `scripts/release.mjs` writes them.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Release {
+    pub build: u64,
+    pub version: String,
+    /// The full source commit the release was built from.
+    #[serde(default)]
+    pub commit: String,
+    /// When it was published, in UTC (`2026-10-18T16:44:30Z`).
+    pub published_at: String,
+    /// Empty when a release had nothing user-facing to tell.
+    #[serde(default)]
+    pub highlights: Vec<Highlight>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct Highlight {
+    pub title: String,
+    pub body: String,
+}
+
+/// Releases published on the same UTC day, newest first.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct Day {
+    /// The day as people read it, e.g. "October 18, 2026".
+    pub date: String,
+    pub releases: Vec<Release>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -83,6 +120,18 @@ pub struct Available {
     pub notes: String,
     pub url: String,
     pub signature: String,
+    /// Highlights of every listed release newer than the installed build,
+    /// newest first; a title an older release repeats is kept once. `None`
+    /// when the offered release itself has none listed, so the plain notes
+    /// stand in.
+    #[serde(default)]
+    pub highlights: Option<Vec<Highlight>>,
+    /// The newest of those releases' publication day, e.g. "October 18, 2026".
+    #[serde(default)]
+    pub released: Option<String>,
+    /// The source commit of the build being offered.
+    #[serde(default)]
+    pub commit: Option<String>,
 }
 
 /// The newer build `manifest` offers this platform, if any.
@@ -91,13 +140,120 @@ pub fn select(manifest: &Manifest, current: u64, platform: &str) -> Option<Avail
         return None;
     }
     let artifact = manifest.platforms.get(platform)?;
+    let mut newer: Vec<&Release> = manifest
+        .releases
+        .iter()
+        .filter(|release| release.build > current && release.build <= manifest.build)
+        .collect();
+    newer.sort_by(|a, b| b.build.cmp(&a.build));
+    let target_listed = newer
+        .first()
+        .is_some_and(|release| release.build == manifest.build);
+    let highlights = target_listed.then(|| {
+        let mut seen = std::collections::HashSet::new();
+        newer
+            .iter()
+            .flat_map(|release| &release.highlights)
+            .filter(|highlight| seen.insert(highlight.title.trim().to_lowercase()))
+            .cloned()
+            .collect()
+    });
+    let released = newer
+        .iter()
+        .find(|release| !release.highlights.is_empty())
+        .or(newer.first())
+        .and_then(|release| day_label(&release.published_at));
+    let commit = manifest
+        .releases
+        .iter()
+        .find(|release| release.build == manifest.build && is_commit(&release.commit))
+        .map(|release| release.commit.clone());
     Some(Available {
         build: manifest.build,
         version: manifest.version.clone(),
         notes: manifest.notes.clone(),
         url: artifact.url.clone(),
         signature: artifact.signature.clone(),
+        highlights,
+        released,
+        commit,
     })
+}
+
+/// Releases built after `after` up to and including `through` that have
+/// highlights, grouped by UTC publication day, newest first.
+pub fn days(releases: &[Release], after: u64, through: u64) -> Vec<Day> {
+    let mut listed: Vec<&Release> = releases
+        .iter()
+        .filter(|release| {
+            release.build > after && release.build <= through && !release.highlights.is_empty()
+        })
+        .collect();
+    listed.sort_by(|a, b| b.build.cmp(&a.build));
+    let mut days: Vec<(String, Day)> = Vec::new();
+    for release in listed {
+        let key = release
+            .published_at
+            .get(..10)
+            .unwrap_or_default()
+            .to_owned();
+        match days.last_mut() {
+            Some((last, day)) if *last == key => day.releases.push(release.clone()),
+            _ => days.push((
+                key,
+                Day {
+                    date: day_label(&release.published_at)
+                        .unwrap_or_else(|| release.published_at.clone()),
+                    releases: vec![release.clone()],
+                },
+            )),
+        }
+    }
+    days.into_iter().map(|(_, day)| day).collect()
+}
+
+/// The GitHub page of a release's source commit.
+pub fn commit_url(commit: &str) -> Option<String> {
+    is_commit(commit).then(|| format!("{REPOSITORY_URL}/commit/{commit}"))
+}
+
+fn is_commit(text: &str) -> bool {
+    text.len() == 40
+        && text
+            .bytes()
+            .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+/// "2026-10-18T16:44:30Z" as "October 18, 2026": the UTC day, so every
+/// copy of Anybase groups a release under the same date.
+pub fn day_label(timestamp: &str) -> Option<String> {
+    const MONTHS: [&str; 12] = [
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
+    ];
+    let date = timestamp.get(..10)?;
+    let mut parts = date.split('-');
+    let (year, month, day) = (parts.next()?, parts.next()?, parts.next()?);
+    if year.len() != 4 || month.len() != 2 || day.len() != 2 {
+        return None;
+    }
+    let year: u32 = year.parse().ok()?;
+    let month: usize = month.parse().ok()?;
+    let day: u32 = day.parse().ok()?;
+    let name = MONTHS.get(month.checked_sub(1)?)?;
+    (1..=31)
+        .contains(&day)
+        .then(|| format!("{name} {day}, {year}"))
 }
 
 fn agent() -> ureq::Agent {
@@ -116,15 +272,22 @@ pub fn check(current: u64) -> Result<Option<Available>, String> {
 
 /// [`check`] for an explicit manifest key, e.g. [`LINUX_APPIMAGE`].
 pub fn check_platform(current: u64, platform: &str) -> Result<Option<Available>, String> {
+    Ok(select(&fetch_manifest()?, current, platform))
+}
+
+/// The recent releases the latest manifest lists, for What's new.
+pub fn history() -> Result<Vec<Release>, String> {
+    Ok(fetch_manifest()?.releases)
+}
+
+fn fetch_manifest() -> Result<Manifest, String> {
     let body = agent()
         .get(&debug_override("DBM_UPDATE_MANIFEST", MANIFEST_URL))
         .call()
         .map_err(|error| format!("Couldn't reach the update channel: {error}"))?
         .into_string()
         .map_err(|error| format!("Couldn't read the update manifest: {error}"))?;
-    let manifest: Manifest = serde_json::from_str(&body)
-        .map_err(|error| format!("The update manifest is invalid: {error}"))?;
-    Ok(select(&manifest, current, platform))
+    serde_json::from_str(&body).map_err(|error| format!("The update manifest is invalid: {error}"))
 }
 
 /// Verifies `data` against a `tools/dbm-sign` signature and [`PUBLIC_KEY`].
@@ -251,6 +414,23 @@ mod tests {
                     signature: "sig".into(),
                 },
             )]),
+            releases: Vec::new(),
+        }
+    }
+
+    fn release(build: u64, published_at: &str, titles: &[&str]) -> Release {
+        Release {
+            build,
+            version: format!("2026.10.18.{build}"),
+            commit: format!("{build:0>40}"),
+            published_at: published_at.into(),
+            highlights: titles
+                .iter()
+                .map(|title| Highlight {
+                    title: (*title).into(),
+                    body: format!("{title} body"),
+                })
+                .collect(),
         }
     }
 
@@ -265,12 +445,101 @@ mod tests {
     }
 
     #[test]
+    fn updates_stack_every_newer_release_and_keep_repeated_titles_once() {
+        let mut offered = manifest(8);
+        offered.releases = vec![
+            release(5, "2026-10-17T10:00:00Z", &["Old news"]),
+            release(6, "2026-10-17T20:00:00Z", &["Faster grid", "Saved filters"]),
+            release(7, "2026-10-18T09:00:00Z", &[]),
+            release(8, "2026-10-18T12:00:00Z", &["faster grid ", "Copy as CSV"]),
+        ];
+        let update = select(&offered, 5, "windows-x86_64").unwrap();
+        let titles: Vec<_> = update
+            .highlights
+            .unwrap()
+            .into_iter()
+            .map(|highlight| highlight.title)
+            .collect();
+        // Newest first; the newest wording of a repeated title wins.
+        assert_eq!(titles, ["faster grid ", "Copy as CSV", "Saved filters"]);
+        assert_eq!(update.released.as_deref(), Some("October 18, 2026"));
+        assert_eq!(update.commit, Some(format!("{:0>40}", 8)));
+
+        // The offered release itself is not listed (its highlights could not
+        // be written): the plain notes stand in, not a partial list.
+        offered.releases.retain(|release| release.build < 8);
+        let update = select(&offered, 5, "windows-x86_64").unwrap();
+        assert_eq!(update.highlights, None);
+        assert_eq!(update.commit, None);
+        // Listed but with nothing user-facing: an empty list, not the notes.
+        offered.releases = vec![release(8, "2026-10-18T12:00:00Z", &[])];
+        let update = select(&offered, 5, "windows-x86_64").unwrap();
+        assert_eq!(update.highlights, Some(Vec::new()));
+        assert_eq!(update.released.as_deref(), Some("October 18, 2026"));
+    }
+
+    #[test]
+    fn whats_new_groups_same_day_releases_under_one_utc_date() {
+        let releases = [
+            release(4, "2026-10-16T23:00:00Z", &["Too old"]),
+            release(5, "2026-10-17T23:59:59Z", &["Late night"]),
+            release(6, "2026-10-18T00:00:01Z", &["Just after midnight"]),
+            release(7, "2026-10-18T09:00:00Z", &[]),
+            release(8, "2026-10-18T12:00:00Z", &["Midday"]),
+            release(9, "2026-10-19T12:00:00Z", &["Not installed yet"]),
+        ];
+        let days = days(&releases, 4, 8);
+        let shape: Vec<(String, Vec<u64>)> = days
+            .into_iter()
+            .map(|day| (day.date, day.releases.iter().map(|r| r.build).collect()))
+            .collect();
+        assert_eq!(
+            shape,
+            [
+                ("October 18, 2026".to_owned(), vec![8, 6]),
+                ("October 17, 2026".to_owned(), vec![5]),
+            ]
+        );
+    }
+
+    #[test]
+    fn dates_and_commit_links_are_strict() {
+        assert_eq!(
+            day_label("2026-01-05T00:00:00Z").as_deref(),
+            Some("January 5, 2026")
+        );
+        assert_eq!(day_label("2026-13-05T00:00:00Z"), None);
+        assert_eq!(day_label("soon"), None);
+        let commit = "0123456789abcdef0123456789abcdef01234567";
+        assert_eq!(
+            commit_url(commit).as_deref(),
+            Some(
+                "https://github.com/joswayski/dbm/commit/0123456789abcdef0123456789abcdef01234567"
+            )
+        );
+        assert_eq!(commit_url("abc1234"), None);
+    }
+
+    #[test]
     fn manifests_parse_from_the_published_shape() {
         let text = r#"{"build":3,"version":"Preview build 3 (abc1234)","notes":"",
             "platforms":{"darwin-aarch64":{"url":"https://x/DBM-Native-macOS.zip","signature":"s"}}}"#;
         let parsed: Manifest = serde_json::from_str(text).unwrap();
         assert_eq!(parsed.build, 3);
         assert!(parsed.platforms.contains_key("darwin-aarch64"));
+        assert!(parsed.releases.is_empty());
+
+        let text = r#"{"build":2026101801,"version":"2026.10.18.1","notes":"* Copy as CSV",
+            "platforms":{},"releases":[{"build":2026101801,"version":"2026.10.18.1",
+            "commit":"0123456789abcdef0123456789abcdef01234567","publishedAt":"2026-10-18T12:00:00Z",
+            "highlights":[{"title":"Copy as CSV","body":"Copy rows straight into a spreadsheet."}]}]}"#;
+        let parsed: Manifest = serde_json::from_str(text).unwrap();
+        assert_eq!(parsed.releases[0].highlights[0].title, "Copy as CSV");
+        // Hosts hand an offered update back to `download` as JSON, including
+        // ones serialized before these fields existed.
+        let old = r#"{"build":8,"version":"v","notes":"","url":"u","signature":"s"}"#;
+        let available: Available = serde_json::from_str(old).unwrap();
+        assert_eq!(available.highlights, None);
     }
 
     #[test]

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 
-import { nextReleaseVersion, releaseDate, releaseNotes } from "./release.mjs";
+import { highlightNotes, nextReleaseVersion, releaseDate, releaseHistory, releaseNotes } from "./release.mjs";
 
 test("uses the New York calendar date across UTC midnight", () => {
   assert.equal(releaseDate(new Date("2026-09-25T02:30:00Z")), "2026-09-24");
@@ -59,4 +59,55 @@ test("summarizes merged pull requests and skips Dependabot", () => {
   ]);
   assert.equal(notes, "* Add per-merge releases (#24)\n* Fix schema refresh (#20)\n* Tidy docs");
   assert.equal(releaseNotes([]), "* Maintenance release");
+});
+
+const entry = (build, title = `Release ${build}`) => ({
+  build,
+  version: `2026.10.18.${build}`,
+  commit: String(build).padStart(40, "0"),
+  publishedAt: "2026-10-18T12:00:00Z",
+  highlights: [{ title, body: `${title} body` }],
+});
+
+test("release history puts the new release first and keeps valid entries only", () => {
+  const previous = [
+    entry(2),
+    entry(1),
+    { ...entry(0), commit: "abc1234" },
+    { ...entry(3), extra: "dropped" },
+    "not a release",
+  ];
+  const history = releaseHistory(previous, entry(4));
+  assert.deepEqual(
+    history.map(({ build }) => build),
+    [4, 3, 2, 1],
+  );
+  assert.equal("extra" in history[1], false);
+  // A rerun replaces its own entry instead of listing it twice.
+  assert.deepEqual(
+    releaseHistory(history, entry(4, "Rewritten")).map(({ highlights }) => highlights[0].title),
+    ["Rewritten", "Release 3", "Release 2", "Release 1"],
+  );
+  // Without new highlights the history carries on unchanged.
+  assert.deepEqual(releaseHistory(previous, null), history.slice(1));
+  assert.deepEqual(releaseHistory(undefined, null), []);
+});
+
+test("release history stays within its count and size caps", () => {
+  const many = Array.from({ length: 40 }, (_, index) => entry(index + 1));
+  assert.equal(releaseHistory(many, entry(41)).length, 30);
+  const large = Array.from({ length: 20 }, (_, index) => entry(index + 1, "x".repeat(5_000)));
+  const kept = releaseHistory(large, null);
+  assert.ok(JSON.stringify(kept).length <= 64 * 1024);
+  assert.equal(kept[0].build, 20);
+});
+
+test("highlights read as plain notes for the release page and older installs", () => {
+  assert.equal(
+    highlightNotes([
+      { title: "Copy rows as CSV", body: "Paste them anywhere." },
+      { title: "Saved filters", body: "They stay put." },
+    ]),
+    "* Copy rows as CSV — Paste them anywhere.\n* Saved filters — They stay put.",
+  );
 });

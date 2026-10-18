@@ -202,6 +202,12 @@ enum Request {
         update: dbm_update::Available,
         directory: String,
     },
+    /// Highlighted releases built after `after` up to this build, grouped by
+    /// UTC day, newest first (What's new).
+    #[cfg(feature = "desktop-updater")]
+    WhatsNew {
+        after: u64,
+    },
 }
 
 enum Backend {
@@ -511,6 +517,13 @@ fn helper_value(request: Request) -> Result<Value, String> {
         Request::UpdateDownload { update, directory } => {
             let path = dbm_update::download(&update, std::path::Path::new(&directory))?;
             Ok(Value::String(path.to_string_lossy().into_owned()))
+        }
+        #[cfg(feature = "desktop-updater")]
+        Request::WhatsNew { after } => {
+            let Some(current) = dbm_update::current_build() else {
+                return Ok(Value::Array(Vec::new()));
+            };
+            serde_json::to_value(dbm_update::days(&dbm_update::history()?, after, current))
         }
         Request::DescribeSchemaRefresh {
             previous,

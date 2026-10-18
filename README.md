@@ -39,6 +39,8 @@ DBM name while [the rename](docs/anybase-migration.md) rolls out.
 - Remembered database selections and per-connection **Open on startup** settings.
 - Your connections, history, and data stay on your machine: no telemetry,
   accounts, or sync.
+- Updates show what's new. Release highlights are written when a release is
+  built, from source changes only; the app never sends anything to write them.
 
 See [docs/features.md](docs/features.md) for the full feature list and what is
 planned.

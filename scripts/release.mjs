@@ -1,13 +1,15 @@
 // Version and release-note helpers for the per-merge release workflow.
 //
-//   node scripts/release.mjs version   # next CalVer for the commit being released
-//   node scripts/release.mjs notes     # Markdown notes since the previous release
+//   node scripts/release.mjs version     # next CalVer for the commit being released
+//   node scripts/release.mjs notes       # Markdown notes since the previous release
+//   node scripts/release.mjs highlights  # user-facing highlights and their history
 //
-// Both write their results to $GITHUB_OUTPUT when it is set.
+// Each writes its results to $GITHUB_OUTPUT when it is set.
 
-import { appendFileSync } from "node:fs";
+import { appendFileSync, readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
+import { releaseHighlights } from "./release-highlights.mjs";
 
 export const RELEASE_TIME_ZONE = "America/New_York";
 const MAX_RELEASES_PER_DAY = 99;
@@ -86,6 +88,53 @@ export function releaseNotes(commits) {
   return lines.length > 0 ? lines.join("\n") : "* Maintenance release";
 }
 
+const MAX_HISTORY = 30;
+const MAX_HISTORY_BYTES = 64 * 1024;
+
+/** A manifest `releases` entry in the shape `crates/dbm-update` reads, or null. */
+function releaseEntry(value) {
+  if (!value || typeof value !== "object") return null;
+  const { build, version, commit, publishedAt, highlights } = value;
+  if (
+    !Number.isSafeInteger(build) ||
+    build <= 0 ||
+    typeof version !== "string" ||
+    !/^[0-9a-f]{40}$/u.test(commit) ||
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/u.test(publishedAt) ||
+    !Array.isArray(highlights) ||
+    !highlights.every((item) => item && typeof item.title === "string" && typeof item.body === "string")
+  )
+    return null;
+  return {
+    build,
+    version,
+    commit,
+    publishedAt,
+    highlights: highlights.map(({ title, body }) => ({ title, body })),
+  };
+}
+
+/**
+ * The manifest's `releases`: `release` (when its highlights could be written)
+ * ahead of the previous manifest's, newest first, capped so installed apps
+ * can show every release they skipped and What's new can group them by day.
+ */
+export function releaseHistory(previous, release) {
+  const entries = (Array.isArray(previous) ? previous : [])
+    .map(releaseEntry)
+    .filter((entry) => entry && (!release || entry.build < release.build));
+  if (release) entries.push(releaseEntry(release));
+  entries.sort((a, b) => b.build - a.build);
+  const kept = entries.slice(0, MAX_HISTORY);
+  while (kept.length > 1 && JSON.stringify(kept).length > MAX_HISTORY_BYTES) kept.pop();
+  return kept;
+}
+
+/** Highlights as the release page and the manifests' plain `notes` show them. */
+export function highlightNotes(highlights) {
+  return highlights.map(({ title, body }) => `* ${title} — ${body}`).join("\n");
+}
+
 function git(...args) {
   return execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 }
@@ -131,7 +180,7 @@ function writeOutputs(values) {
   appendFileSync(output, `${lines.join("\n")}\n`);
 }
 
-function main() {
+async function main() {
   const [command] = process.argv.slice(2);
   const sha = process.env.DBM_RELEASE_SHA || "HEAD";
   if (command === "version") {
@@ -149,9 +198,41 @@ function main() {
     process.stdout.write(`${notes}\n`);
     return;
   }
-  throw new Error("usage: node scripts/release.mjs <version|notes>");
+  if (command === "highlights") {
+    const commit = git("rev-parse", `${sha}^{commit}`).trim();
+    let previous = [];
+    try {
+      previous = JSON.parse(readFileSync(process.env.PREVIOUS_MANIFEST, "utf8")).releases ?? [];
+    } catch {
+      // The first release with highlights starts the history.
+    }
+    const recentHighlights = releaseHistory(previous, null)
+      .slice(0, 3)
+      .flatMap((release) => release.highlights);
+    const highlights = await releaseHighlights(process.env.PREVIOUS_TAG || null, commit, {
+      recentHighlights,
+    });
+    const release = highlights && {
+      build: Number(process.env.BUILD),
+      version: process.env.DISPLAY_VERSION,
+      commit,
+      // The publish job stamps the real publication time.
+      publishedAt: new Date().toISOString().replace(/\.\d+Z$/u, "Z"),
+      highlights,
+    };
+    const commitNotes = process.env.NOTES || "* Maintenance release";
+    const notes = highlights?.length ? highlightNotes(highlights) : commitNotes;
+    writeOutputs({
+      notes,
+      body: highlights?.length ? `${notes}\n\n### Commits\n\n${commitNotes}` : commitNotes,
+      releases: JSON.stringify(releaseHistory(previous, release)),
+    });
+    process.stdout.write(`${notes}\n`);
+    return;
+  }
+  throw new Error("usage: node scripts/release.mjs <version|notes|highlights>");
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  main();
+  await main();
 }

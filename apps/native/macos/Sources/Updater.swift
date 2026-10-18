@@ -17,6 +17,10 @@ final class Updater {
 
     private(set) var state = State.idle { didSet { onChange?() } }
     var onChange: (() -> Void)?
+    /// Opens What's new with highlights this install has not shown yet.
+    var onWhatsNew: (([[String: Any]]) -> Void)?
+    /// The newest build whose release highlights this install has shown.
+    private static let acknowledgedKey = "DBMWhatsNewAcknowledgedBuild"
     let currentBuild: Int?
     private var timer: Timer?
 
@@ -74,6 +78,11 @@ final class Updater {
             state = .failed("Move Anybase into a folder you can write to, such as Applications, to update it.")
             return
         }
+        // The review just showed these highlights; the restarted build should
+        // not open them again.
+        if update["highlights"] is [Any], let build = update["build"] as? NSNumber {
+            acknowledge(build.intValue)
+        }
         state = .installing
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("dbm-native-update-\(UUID().uuidString)")
@@ -90,6 +99,45 @@ final class Updater {
                 }
             }
         }
+    }
+
+    // MARK: What's new
+
+    /// A first launch only records the installed build; after an update, the
+    /// highlights it has not shown yet open once.
+    func startWhatsNew() {
+        guard let currentBuild else { return }
+        guard let seen = UserDefaults.standard.object(forKey: Self.acknowledgedKey) as? Int else {
+            acknowledge(currentBuild)
+            return
+        }
+        guard seen < currentBuild else { return }
+        loadWhatsNew(after: seen) { [weak self] result in
+            // A failed quiet fetch tries again next launch.
+            guard case .success(let days) = result else { return }
+            if days.isEmpty {
+                self?.acknowledge(currentBuild)
+            } else {
+                self?.onWhatsNew?(days)
+            }
+        }
+    }
+
+    /// Highlighted releases built after `build` up to this one, grouped by
+    /// UTC day, newest first.
+    func loadWhatsNew(after build: Int, completion: @escaping (Result<[[String: Any]], Error>) -> Void) {
+        DispatchQueue.global(qos: .utility).async {
+            let reply = Bridge.helper(["command": "whatsNew", "after": build]).map { $0 as? [[String: Any]] ?? [] }
+            DispatchQueue.main.async { completion(reply) }
+        }
+    }
+
+    /// Records that highlights up to `build` (this one by default) were shown.
+    func acknowledge(_ build: Int? = nil) {
+        guard let build = build ?? currentBuild else { return }
+        let defaults = UserDefaults.standard
+        if let seen = defaults.object(forKey: Self.acknowledgedKey) as? Int, seen >= build { return }
+        defaults.set(build, forKey: Self.acknowledgedKey)
     }
 
     /// Downloads and stages the update, returning the error that stopped it.

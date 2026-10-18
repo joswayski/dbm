@@ -54,9 +54,13 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, NS
         buildWindow()
         loadProfiles(openOnStartup: true)
         updater.onChange = { [weak self] in self?.updateChanged() }
+        updater.onWhatsNew = { [weak self] days in self?.showWhatsNew(days) }
         topBar.updateButton.handler = { [weak self] in self?.updateClicked() }
         topBar.showUpdate(updater)
-        if !demo { updater.start() }
+        if !demo {
+            updater.start()
+            updater.startWhatsNew()
+        }
         if let index = CommandLine.arguments.firstIndex(of: "--snapshot-dir"), CommandLine.arguments.indices.contains(index + 1) {
             SnapshotDriver(app: self, directory: CommandLine.arguments[index + 1]).start()
         }
@@ -78,11 +82,23 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, NS
         let alert = NSAlert()
         alert.messageText = "Install Anybase \(string(update["version"])) and restart now?"
         alert.informativeText = "Unsaved query text and pending table edits will be lost."
+        alert.accessoryView = ReleaseNotes.accessory(ReleaseNotes.review(update))
         alert.addButton(withTitle: "Install and Restart")
         alert.addButton(withTitle: "Later")
         alert.beginSheetModal(for: window) { [weak self] response in
             if response == .alertFirstButtonReturn { self?.updater.install(update) }
         }
+    }
+
+    /// Release highlights grouped by UTC day; closing marks them read.
+    private func showWhatsNew(_ days: [[String: Any]]) {
+        // Another sheet is up; unread highlights open on a later launch.
+        guard window.attachedSheet == nil else { return }
+        let alert = NSAlert()
+        alert.messageText = "What’s new"
+        alert.accessoryView = ReleaseNotes.accessory(ReleaseNotes.days(days))
+        alert.addButton(withTitle: "Done")
+        alert.beginSheetModal(for: window) { [weak self] _ in self?.updater.acknowledge() }
     }
 
     private func buildWindow() {
@@ -822,7 +838,28 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, NS
     @objc private func menuCloseTab() { if let activeTab { closeTab(activeTab) } else { window.performClose(nil) } }
     @objc private func menuCheckUpdates() { updater.check() }
 
+    @objc private func menuWhatsNew() {
+        updater.loadWhatsNew(after: 0) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success(let days):
+                self.showWhatsNew(days)
+            case .failure(let error):
+                guard self.window.attachedSheet == nil else { return }
+                let alert = NSAlert()
+                alert.messageText = "Release highlights couldn’t be loaded."
+                alert.informativeText = error.localizedDescription
+                alert.addButton(withTitle: "Retry")
+                alert.addButton(withTitle: "Done")
+                alert.beginSheetModal(for: self.window) { [weak self] response in
+                    if response == .alertFirstButtonReturn { self?.menuWhatsNew() }
+                }
+            }
+        }
+    }
+
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(menuWhatsNew) { return updater.enabled && !demo }
         guard menuItem.action == #selector(menuCheckUpdates) else { return true }
         guard updater.enabled && !demo else { return false }
         switch updater.state {
@@ -837,6 +874,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, NS
         menu.addItem(appItem)
         let appMenu = NSMenu()
         appMenu.addItem(withTitle: "About Anybase", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(withTitle: "What’s new", action: #selector(menuWhatsNew), keyEquivalent: "").target = self
         appMenu.addItem(withTitle: "Check for updates…", action: #selector(menuCheckUpdates), keyEquivalent: "").target = self
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Hide Anybase", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")

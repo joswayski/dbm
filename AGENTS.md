@@ -19,7 +19,7 @@
   validation status live in `docs/mobile.md`.
 - `crates/dbm-core` owns database adapters, sessions, keyring, and local SQLite storage; `crates/dbm-update` is the self-updater; `tools/dbm-sign` signs release artifacts.
 - `docs/` holds features, development setup, releases (signing, notarization, publishing), the native architecture, the design system, and screenshots.
-- `scripts/release.mjs` picks release versions and notes for the release workflow.
+- `scripts/release.mjs` picks release versions and notes for the release workflow; `scripts/release-highlights.mjs` writes the user-facing highlights the apps show (`docs/releases.md`).
 - `apps/web` is the anyba.se website (static TanStack Start on a Cloudflare Worker). Changes there do not publish a desktop release.
 - The app is named Anybase in everything users see; many internal identifiers still say DBM. Follow `docs/anybase-migration.md`, and never change the identifiers it lists under "Never change".
 - The Tauri/React app was removed; its installs update onto the native apps through `latest.json` (see `docs/releases.md`). Keep that path working.
@@ -101,7 +101,7 @@ there are no real users yet, so ship small, watch it land, and fix forward.
     is left.
   - it needs a product decision the owner hasn't made.
 - Otherwise commit and push straight to `main`: `git pull --rebase origin main`, then `git push origin HEAD:main`, retrying the same way if the push is rejected. Never force-push `main` or rewrite other agents' commits. Use `gh` for GitHub operations (or the GitHub MCP tools where `gh` is unavailable).
-- Commit subjects become the desktop release notes (`scripts/release.mjs`), so write them for users.
+- Commit subjects feed the desktop release highlights and are the fallback release notes (`scripts/release.mjs`), so write them for users.
 - Never put literal CI-skip directives in commit messages, even to explain them: GitHub honors them anywhere in the message, and the path-filtered `Release` and `Mobile development builds` runs would silently not happen.
 - Pushes to `main` run `CI` (about 5 minutes); `Release` unless only Markdown, `docs/`, `apps/web`, agent tooling, mobile-only scripts or the CI/mobile/fallback workflows changed (it signs and publishes the latest desktop release, which installed apps update to, in about 5-10 minutes); `Mobile development builds` when mobile files changed (builds plus Android unit tests and lint; its UI suites run nightly, so don't start it for routine changes); and Cloudflare Workers Builds, which deploys anyba.se.
 - Everything deploys automatically after a push; you watch it land and fix forward. After pushing, check each step in this order. `SHA` is your pushed commit; list its runs with `gh run list --repo joswayski/dbm --commit "$SHA"` and wait with `gh run watch <id> --repo joswayski/dbm --exit-status`. Report what shipped.
