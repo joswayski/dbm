@@ -139,7 +139,7 @@ jobs:
     name: Build, sign, and notarize (macOS)
     needs: prepare
     environment: release
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 60
     env:
       DBM_NATIVE_BUILD: ${{ needs.prepare.outputs.build }}

@@ -78,9 +78,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-14, windows-2025, ubuntu-24.04]
+        os: [macos-15, windows-2025, ubuntu-24.04]
     needs: route
-    runs-on: ${{ needs.route.outputs.mac == 'true' && matrix.os == 'macos-14' && fromJSON('["self-hosted","josemac"]') || needs.route.outputs.windows == 'true' && startsWith(matrix.os, 'windows') && fromJSON('["self-hosted","josewin"]') || needs.route.outputs.linux == 'true' && startsWith(matrix.os, 'ubuntu') && fromJSON('["self-hosted","joselinux"]') || matrix.os }}
+    runs-on: ${{ needs.route.outputs.mac == 'true' && matrix.os == 'macos-15' && fromJSON('["self-hosted","josemac"]') || needs.route.outputs.windows == 'true' && startsWith(matrix.os, 'windows') && fromJSON('["self-hosted","josewin"]') || needs.route.outputs.linux == 'true' && startsWith(matrix.os, 'ubuntu') && fromJSON('["self-hosted","joselinux"]') || matrix.os }}
     timeout-minutes: 30
     env:
       # CI-only: dev/test builds without debug info compile, link, and cache
@@ -114,9 +114,9 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
   appkit:
-    name: AppKit (macos-14)
+    name: AppKit (macos-15)
     needs: route
-    runs-on: ${{ needs.route.outputs.mac == 'true' && fromJSON('["self-hosted","josemac"]') || 'macos-14' }}
+    runs-on: ${{ needs.route.outputs.mac == 'true' && fromJSON('["self-hosted","josemac"]') || 'macos-15' }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
