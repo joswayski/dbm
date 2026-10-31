@@ -7,6 +7,8 @@ export const REPOSITORY = "joswayski/dbm";
 export const REPO_URL = `https://github.com/${REPOSITORY}`;
 export const AUTHOR_URL = "https://josevalerio.com";
 export const CONTACT_EMAIL = "contact@josevalerio.com";
+export const X_URL = "https://x.com/josevalerio";
+export const CAPER_INVITE_URL = "https://caper.chat/invite/zHclS7oDTX";
 
 export const FEATURES = [
   "Browse databases, schemas, tables, and Redis keys, with filters, sorting, and CSV export.",
