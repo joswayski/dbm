@@ -1,8 +1,17 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { detectDownload, DOWNLOADS, type DownloadId } from "../downloads";
 import { formatRelativeTime, type LatestChange } from "../latestChanges";
-import { AUTHOR_URL, FEATURES, PRODUCT_NAME, REPO_URL, SCREENSHOTS } from "../site";
-import { AppleIcon, GitHubIcon, LinuxIcon, WindowsIcon } from "./icons";
+import {
+  AUTHOR_URL,
+  CAPER_INVITE_URL,
+  CONTACT_EMAIL,
+  FEATURES,
+  PRODUCT_NAME,
+  REPO_URL,
+  SCREENSHOTS,
+  X_URL,
+} from "../site";
+import { AppleIcon, ExternalLinkIcon, GitHubIcon, LinuxIcon, MailIcon, WindowsIcon, XIcon } from "./icons";
 import { ScreenshotViewer } from "./ScreenshotViewer";
 
 type HomeProps = {
@@ -64,6 +73,8 @@ export function Home({ latestChanges, builtAt }: HomeProps) {
         <div className="mt-8 min-h-11">
           <DownloadAction platform={platform} />
         </div>
+
+        <FeedbackList />
       </header>
 
       <section aria-label="Screenshots" className="mt-12">
@@ -159,6 +170,83 @@ function DownloadAction({ platform }: { platform: DownloadId | null | undefined 
       <PlatformIcon id={download.id} />
       Download for {download.platform}
     </a>
+  );
+}
+
+function FeedbackList() {
+  return (
+    <div className="mt-10">
+      <h2 className="text-xs text-ink-faint">Questions or feedback?</h2>
+      <ul className="mt-3 space-y-3 text-sm leading-relaxed text-ink-muted">
+        <li>
+          Tell me on{" "}
+          <a href={X_URL} target="_blank" rel="noreferrer" className="inline-chip" aria-label="@josevalerio on X">
+            <XIcon className="h-3 w-3" />
+            @josevalerio
+            <ExternalLinkIcon className="h-3 w-3 opacity-60" />
+          </a>
+        </li>
+        <li>
+          Share it in the{" "}
+          <a href={CAPER_INVITE_URL} target="_blank" rel="noreferrer" className="inline-chip">
+            #feedback channel on caper.chat
+            <ExternalLinkIcon className="h-3 w-3 opacity-60" />
+          </a>
+        </li>
+        <li>
+          Email me at <CopyEmailButton email={CONTACT_EMAIL} />
+        </li>
+      </ul>
+    </div>
+  );
+}
+
+function CopyEmailButton({ email }: { email: string }) {
+  const [copied, setCopied] = useState(false);
+  const resetTimer = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (resetTimer.current !== null) window.clearTimeout(resetTimer.current);
+    };
+  }, []);
+
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(email);
+    } catch {
+      // Fallback for older browsers or denied clipboard permission.
+      const textarea = document.createElement("textarea");
+      textarea.value = email;
+      textarea.setAttribute("readonly", "");
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textarea);
+    }
+
+    setCopied(true);
+    if (resetTimer.current !== null) window.clearTimeout(resetTimer.current);
+    resetTimer.current = window.setTimeout(() => setCopied(false), 1_800);
+  }
+
+  return (
+    <button
+      type="button"
+      className="group/email inline-chip flex-col items-start gap-1 px-2 py-1"
+      onClick={handleCopy}
+      aria-label={copied ? `Copied ${email}` : `Copy email ${email}`}
+    >
+      <span className="inline-flex items-center gap-1.5">
+        <MailIcon className="h-3 w-3 shrink-0" />
+        <span className="break-all">{email}</span>
+      </span>
+      <span role="status" className="text-[0.625rem] leading-none text-ink-faint group-hover/email:text-accent-text/70">
+        {copied ? "copied!" : "click to copy"}
+      </span>
+    </button>
   );
 }
 

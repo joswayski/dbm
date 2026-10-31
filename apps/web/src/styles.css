@@ -97,6 +97,10 @@
     @apply font-medium text-ink-strong no-underline underline-offset-4 transition-colors duration-150 ease-out hover:text-accent-text hover:underline;
   }
 
+  .inline-chip {
+    @apply inline-flex translate-y-px cursor-pointer items-center gap-1.5 rounded-[5px] border border-border-strong bg-chrome px-1.5 py-0.5 text-[0.8125rem] leading-none font-medium text-ink-strong no-underline transition-colors duration-150 ease-out hover:border-accent/40 hover:bg-accent-soft hover:text-accent-text focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent;
+  }
+
   .section-label {
     @apply font-mono text-[0.6875rem] font-normal tracking-[0.12em] text-accent-text uppercase;
   }
@@ -136,6 +140,7 @@
 
   @media (prefers-reduced-motion: reduce) {
     .text-link,
+    .inline-chip,
     .download-button,
     .screenshot,
     .viewer-button {
