@@ -52,6 +52,7 @@
   --accent-strong: #3b78c7;
   --accent-text: #7db6ff;
   --accent-soft: rgba(76, 154, 255, 0.14);
+  --modified: #f0b14c;
 }
 
 @theme {
@@ -74,6 +75,7 @@
   --color-accent-strong: var(--accent-strong);
   --color-accent-text: var(--accent-text);
   --color-accent-soft: var(--accent-soft);
+  --color-modified: var(--modified);
 }
 
 @layer base {
