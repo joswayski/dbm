@@ -180,7 +180,9 @@ jobs:
   testflight:
     name: iPhone / TestFlight
     needs: resolve
-    runs-on: macos-15
+    # GitHub's Xcode 27 image (public preview) carries the iOS 27.1 SDK that
+    # lets iPhone Duo run the app edge to edge instead of in a centred window.
+    runs-on: xcode-27
     timeout-minutes: 110
     permissions:
       contents: read
@@ -212,11 +214,11 @@ jobs:
           uv export --locked --script .release-tooling/scripts/testflight-distribute.py --output-file "$RUNNER_TEMP/mobile-requirements.txt"
           uv venv --python 3.12 "$RUNNER_TEMP/mobile-python"
           uv pip sync --python "$RUNNER_TEMP/mobile-python/bin/python" --require-hashes "$RUNNER_TEMP/mobile-requirements.txt"
-      - name: Use Xcode 26 (App Store Connect SDK requirement)
+      - name: Use Xcode 27.1 (iOS 27.1 SDK for the full iPhone Duo display)
         run: |
           set -euo pipefail
-          xcode="$(ls -d /Applications/Xcode_26*.app 2>/dev/null | grep -vi beta | sort -V | tail -1 || true)"
-          [[ -n "$xcode" ]] || { echo "Xcode 26 is required." >&2; exit 1; }
+          xcode=/Applications/Xcode_27.1.app
+          [[ -d "$xcode" ]] || { echo "Xcode 27.1 is required:" >&2; ls -d /Applications/Xcode* >&2; exit 1; }
           sudo xcode-select -s "$xcode/Contents/Developer"
           xcodebuild -version
       - uses: aws-actions/configure-aws-credentials@v6.2.3

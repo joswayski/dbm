@@ -186,7 +186,8 @@ The release reads `production/signing/release` through GitHub OIDC role
   The signed Play AAB is retained as the run's `google-play-bundle` artifact for
   30 days, including when the subsequent Play upload fails during first-app setup.
 - **iPhone:** `apps/native/ios/upload-testflight.sh` builds a Release device
-  archive for `app.dbm.ios` with Xcode 26 and build number `<run number>.<attempt>`.
+  archive for `app.dbm.ios` with Xcode 27.1 (GitHub's `xcode-27` image, so
+  iPhone Duo shows it full screen) and build number `<run number>.<attempt>`.
   The existing `apple` App Store Connect API key handles cloud-managed signing,
   upload, processing, What to Test, and tester-group assignment. External groups
   may still await Apple's beta review. Android publication does not wait for
