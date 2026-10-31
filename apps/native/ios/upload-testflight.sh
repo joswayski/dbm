@@ -18,11 +18,16 @@ work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
 bash "$ROOT/prepare.sh" iphoneos
+# The intermediate archive gets a local ad-hoc signature, keeping its
+# entitlements without issuing an Apple Development certificate on every fresh
+# runner (the team's certificate limit stops archives otherwise). Export signs
+# it for distribution.
 xcodebuild -project "$ROOT/DBM.xcodeproj" -scheme DBM -configuration Release \
   -destination 'generic/platform=iOS' -archivePath "$work/DBM.xcarchive" \
   -derivedDataPath "$ROOT/DerivedData-TestFlight" \
   DEVELOPMENT_TEAM="$APPLE_TEAM_ID" DBM_IOS_BUNDLE_ID="$DBM_IOS_BUNDLE_ID" \
-  CURRENT_PROJECT_VERSION="$BUILD_NUMBER" "${auth[@]}" archive
+  CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+  CODE_SIGN_IDENTITY=- AD_HOC_CODE_SIGNING_ALLOWED=YES archive
 
 # plistlib handles escaping rather than interpolating values into XML.
 python3 - "$work/ExportOptions.plist" <<'PY'

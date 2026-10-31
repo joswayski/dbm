@@ -302,9 +302,13 @@ with open(os.environ["CALLS"], "a") as out:
         self.assertIn("DBM_IOS_BUNDLE_ID=app.dbm.ios", calls[0]["args"])
         self.assertIn("CURRENT_PROJECT_VERSION=9.2", calls[0]["args"])
         self.assertEqual(calls[0]["args"][-1], "archive")
+        # Archiving signs locally (ad hoc): asking Apple for a development
+        # certificate on every fresh runner exhausts the team's limit.
+        self.assertIn("CODE_SIGN_IDENTITY=-", calls[0]["args"])
+        self.assertNotIn("-allowProvisioningUpdates", calls[0]["args"])
+        self.assertIn("-allowProvisioningUpdates", calls[1]["args"])
+        self.assertIn("-authenticationKeyPath", calls[1]["args"])
         for call in calls:
-            self.assertIn("-allowProvisioningUpdates", call["args"])
-            self.assertIn("-authenticationKeyPath", call["args"])
             self.assertNotIn("CODE_SIGNING_ALLOWED=NO", call["args"])
         self.assertEqual(
             calls[1]["options"],
