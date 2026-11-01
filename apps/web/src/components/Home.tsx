@@ -11,7 +11,7 @@ import {
   SCREENSHOTS,
   X_URL,
 } from "../site";
-import { AppleIcon, ExternalLinkIcon, GitHubIcon, LinuxIcon, MailIcon, WindowsIcon, XIcon } from "./icons";
+import { AppleIcon, ExternalLinkIcon, GitHubIcon, LinuxIcon, MailIcon, WarningIcon, WindowsIcon, XIcon } from "./icons";
 import { ScreenshotViewer } from "./ScreenshotViewer";
 
 type HomeProps = {
@@ -159,9 +159,15 @@ function DownloadAction({ platform }: { platform: DownloadId | null | undefined 
   const download = DOWNLOADS.find((item) => item.id === platform);
   if (!download) {
     return (
-      <p className="text-sm leading-relaxed text-ink-muted">
-        {PRODUCT_NAME} is a desktop app for macOS, Windows, and Linux. Open this page on your computer to download it.
-      </p>
+      <div role="note" className="border-l-[3px] border-modified py-1 pl-4">
+        <p className="flex items-center gap-2 text-sm font-semibold text-modified">
+          <WarningIcon className="h-4 w-4 shrink-0" />
+          Desktop app
+        </p>
+        <p className="mt-2 text-sm leading-relaxed text-ink-secondary">
+          {PRODUCT_NAME} runs on macOS, Windows, and Linux. Open this page on your computer to download it.
+        </p>
+      </div>
     );
   }
 
