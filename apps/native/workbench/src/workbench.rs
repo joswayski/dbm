@@ -23,13 +23,14 @@ use eframe::egui::{
 };
 use uuid::Uuid;
 
-use crate::backend::{Command, ExportRequest, Payload, RequestId, Work, Worker};
 use crate::icons::{self, Icon};
 use crate::messages::{self, Message};
 use crate::table_view::{
     self, PENDING_REFRESH_ERROR, TableAction, TableContext, TableState, result_grid,
 };
 use crate::theme::{self, chip, eyebrow, mono, primary_button, section_label, ui_font};
+use dbm_desktop::updates;
+use dbm_desktop::worker::{Command, ExportRequest, Payload, RequestId, Work, Worker};
 
 const MAX_QUERY_ROWS: u32 = 10_000;
 const SIDEBAR_COLLAPSED_KEY: &str = "dbm.sidebarCollapsed";
@@ -37,6 +38,12 @@ const SIDEBAR_COLLAPSED_KEY: &str = "dbm.sidebarCollapsed";
 const WHATS_NEW_KEY: &str = "dbm.whatsNewAcknowledgedBuild";
 const LARGE_EXPORT_WARNING_ROWS: u64 = 100_000;
 const PASSWORD_LOAD: &str = "Loading saved password";
+/// Repaints when the worker or updater finishes something in the background.
+fn wake(context: &egui::Context) -> dbm_desktop::Wake {
+    let context = context.clone();
+    std::sync::Arc::new(move || context.request_repaint())
+}
+
 fn engine_label(engine: DatabaseEngine) -> &'static str {
     match engine {
         DatabaseEngine::Postgres => "PostgreSQL",
@@ -333,7 +340,7 @@ struct Completion {
 type ExportDestination = (u64, Option<std::path::PathBuf>);
 
 /// A tab's finished query-result save.
-type SavedResult = (u64, crate::backend::ResultExport);
+type SavedResult = (u64, dbm_desktop::worker::ResultExport);
 
 /// Bottom-right toast, as the desktop app uses for schema refresh summaries.
 struct Toast {
@@ -383,7 +390,7 @@ pub struct Workbench {
         std::sync::mpsc::Receiver<SavedResult>,
     ),
     /// Self-updates from the native preview channel.
-    updates: crate::updates::Updates,
+    updates: updates::Updates,
     /// A downloaded-on-confirm update awaiting the user's go-ahead.
     confirm_update: Option<dbm_update::Available>,
     renaming: Option<(u64, String)>,
@@ -412,14 +419,15 @@ impl Workbench {
                 .storage
                 .and_then(|storage| storage.get_string(WHATS_NEW_KEY))
                 .and_then(|value| value.parse().ok());
-            app.updates.start_whats_new(&cc.egui_ctx, acknowledged);
+            app.updates.start_whats_new(acknowledged);
         }
         app
     }
 
     fn with_context(context: egui::Context, demo: bool) -> Self {
         theme::configure(&context);
-        let worker = Worker::start(context.clone(), demo);
+        let worker = Worker::start(wake(&context), demo);
+        let updates = updates::Updates::new(wake(&context));
         let mut app = Self {
             context,
             worker,
@@ -449,7 +457,7 @@ impl Workbench {
             export_paths: std::sync::mpsc::channel(),
             saving_results: HashSet::new(),
             saved_results: std::sync::mpsc::channel(),
-            updates: crate::updates::Updates::new(),
+            updates,
             confirm_update: None,
             renaming: None,
             tab_in_view: None,
@@ -1324,7 +1332,7 @@ impl Workbench {
         let file_name = format!("{}.{}.csv", safe_file_name(&schema), safe_file_name(&table));
         let done = self.export_paths.0.clone();
         let picked =
-            crate::backend::pick_export_path(self.context.clone(), file_name, move |path| {
+            crate::dialogs::pick_export_path(self.context.clone(), file_name, move |path| {
                 let _ = done.send((tab_id, path));
             });
         match picked {
@@ -1410,7 +1418,9 @@ impl eframe::App for Workbench {
         self.ensure_startup_window_size(ctx);
         self.now = ctx.input(|input| input.time);
         if !self.demo {
-            self.updates.poll(ctx, self.now);
+            if let Some(next_check) = self.updates.poll(self.now) {
+                ctx.request_repaint_after(next_check);
+            }
         }
         self.window_width = ctx.content_rect().width();
         self.drain();
@@ -1465,7 +1475,7 @@ impl Workbench {
             || self.confirm_delete.is_some()
             || self.confirm_query.is_some()
             || self.confirm_update.is_some()
-            || !matches!(self.updates.whats_new, crate::updates::WhatsNew::Closed)
+            || !matches!(self.updates.whats_new, updates::WhatsNew::Closed)
             || self.confirm_export.is_some();
         if modal {
             return;
@@ -1962,22 +1972,22 @@ impl Workbench {
                         if self.updates.enabled() && !self.demo {
                             let busy = matches!(
                                 self.updates.state,
-                                crate::updates::State::Checking | crate::updates::State::Installing
+                                updates::State::Checking | updates::State::Installing
                             );
                             ui.menu_button("Help", |ui| {
                                 theme::menu_scope(ui, 200.0);
                                 if theme::menu_item(ui, "What’s new", false).clicked() {
-                                    self.updates.open_whats_new(ctx);
+                                    self.updates.open_whats_new();
                                     ui.close();
                                 }
                                 if ui.add_enabled_ui(!busy, |ui| theme::menu_item(ui, "Check for updates…", false)).inner.clicked() {
-                                    self.updates.check(ctx, false);
+                                    self.updates.check(false);
                                     ui.close();
                                 }
                             });
                             let height = match self.updates.state {
-                                crate::updates::State::Idle => 14.0,
-                                crate::updates::State::Available(_) | crate::updates::State::Failed(_) => 34.0,
+                                updates::State::Idle => 14.0,
+                                updates::State::Available(_) | updates::State::Failed(_) => 34.0,
                                 _ => 28.0,
                             };
                             ui.allocate_ui_with_layout(Vec2::new(200.0, height), egui::Layout::top_down(egui::Align::Max), |ui| {
@@ -1985,21 +1995,21 @@ impl Workbench {
                                 let label = self.updates.label();
                                 let detail = self.updates.detail();
                                 match &self.updates.state {
-                                    crate::updates::State::Available(_) | crate::updates::State::Failed(_) => {
-                                        let button = if matches!(self.updates.state, crate::updates::State::Available(_)) {
+                                    updates::State::Available(_) | updates::State::Failed(_) => {
+                                        let button = if matches!(self.updates.state, updates::State::Available(_)) {
                                             theme::accent_button(&label)
                                         } else {
                                             theme::secondary_button(&label)
                                         };
                                         if ui.add(button.small()).on_hover_text(&detail).clicked() {
-                                            if let crate::updates::State::Available(update) = &self.updates.state {
+                                            if let updates::State::Available(update) = &self.updates.state {
                                                 self.confirm_update = Some(update.clone());
                                             } else {
-                                                self.updates.check(ctx, false);
+                                                self.updates.check(false);
                                             }
                                         }
                                     }
-                                    crate::updates::State::Idle => {}
+                                    updates::State::Idle => {}
                                     _ => { ui.label(RichText::new(label).font(mono(11.0)).color(theme::MUTED)); }
                                 }
                                 ui.label(RichText::new(self.updates.version_label()).font(mono(10.0)).color(theme::MUTED))
@@ -3506,7 +3516,7 @@ impl Workbench {
             if let Some((file_name, columns, rows)) = export_rows {
                 self.query_errors.remove(&tab_id);
                 let done = self.saved_results.0.clone();
-                let saved = crate::backend::save_result_csv(
+                let saved = crate::dialogs::save_result_csv(
                     self.context.clone(),
                     file_name,
                     columns,
@@ -3765,7 +3775,7 @@ impl Workbench {
     /// Release highlights grouped by UTC day, newest first, each release
     /// linking its version to the commit it was built from.
     fn whats_new_dialog(&mut self, ctx: &egui::Context) {
-        use crate::updates::WhatsNew;
+        use updates::WhatsNew;
         if matches!(self.updates.whats_new, WhatsNew::Closed) {
             return;
         }
@@ -3828,7 +3838,7 @@ impl Workbench {
             || backdrop_clicked(ctx, "What’s new");
         if retry {
             self.updates.whats_new = WhatsNew::Closed;
-            self.updates.open_whats_new(ctx);
+            self.updates.open_whats_new();
         } else if done {
             self.updates.close_whats_new();
         }
@@ -3980,7 +3990,7 @@ impl Workbench {
             if let Some(install) = choice {
                 self.confirm_update = None;
                 if install {
-                    self.updates.install(ctx, update);
+                    self.updates.install(update);
                 }
             }
         }

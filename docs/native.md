@@ -24,6 +24,10 @@ mobile contract, and [releases](releases.md) for desktop packaging and updates.
   Rendering uses native graphics backends and bundled Space Mono fonts. **egui draws
   its own controls, not Windows/GTK system widgets.** It is a separate Cargo
   workspace, so egui's dependency graph stays out of the root workspace.
+- `apps/native/desktop` (`dbm-desktop`) is the UI-free part of the Windows and
+  Linux app: the serialized database worker and the self-updater. A UI toolkit
+  passes it a wake callback that schedules its next frame, so a replacement
+  for egui reuses both unchanged.
 - `apps/native/android` and `apps/native/ios` use Compose and SwiftUI. They call
   the mobile C ABI directly in-process (JNI on Android), not through a local or
   hosted HTTP proxy. The bridge uses host-managed SQLite metadata and

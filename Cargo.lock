@@ -496,6 +496,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "dbm-desktop"
+version = "0.1.0"
+dependencies = [
+ "dbm-core",
+ "dbm-update",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "dbm-native-bridge"
 version = "0.1.0"
 dependencies = [

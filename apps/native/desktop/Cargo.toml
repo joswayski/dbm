@@ -1,0 +1,16 @@
+[package]
+name = "dbm-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+dbm-core = { path = "../../../crates/dbm-core" }
+dbm-update = { path = "../../../crates/dbm-update" }
+tokio = { version = "1", features = ["rt-multi-thread", "time"] }
+uuid = { version = "1", features = ["v4"] }
+
+[lints]
+workspace = true

@@ -2,12 +2,11 @@
 // Release builds are GUI apps on Windows: no console window behind Anybase.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
-mod backend;
+mod dialogs;
 mod icons;
 mod messages;
 mod table_view;
 mod theme;
-mod updates;
 mod workbench;
 
 use eframe::{Renderer, egui};

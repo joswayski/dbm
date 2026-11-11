@@ -13,7 +13,6 @@ use dbm_core::models::{
 };
 use dbm_core::session::DbSession;
 use dbm_core::state::AppState;
-use eframe::egui;
 use uuid::Uuid;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -79,7 +78,7 @@ pub struct Worker {
 }
 
 impl Worker {
-    pub fn start(context: egui::Context, demo: bool) -> Self {
+    pub fn start(wake: crate::Wake, demo: bool) -> Self {
         let (work_tx, work_rx) = mpsc::channel::<Work>();
         let (done_tx, done_rx) = mpsc::channel();
         std::thread::Builder::new()
@@ -109,7 +108,7 @@ impl Worker {
                     {
                         break;
                     }
-                    context.request_repaint();
+                    wake();
                 }
             })
             .expect("start database worker");
@@ -275,57 +274,9 @@ async fn live_table_page(state: &AppState, request: TablePageRequest) -> Result<
         .map_err(string_error)
 }
 
-/// Asks for a CSV destination on its own thread and reports the choice
-/// (`None` when canceled) through `done`.
-pub fn pick_export_path(
-    context: egui::Context,
-    file_name: String,
-    done: impl FnOnce(Option<PathBuf>) + Send + 'static,
-) -> std::io::Result<()> {
-    std::thread::Builder::new()
-        .name("dbm-export-dialog".into())
-        .spawn(move || {
-            let path = rfd::FileDialog::new()
-                .set_file_name(&file_name)
-                .add_filter("CSV", &["csv"])
-                .save_file();
-            done(path);
-            context.request_repaint();
-        })
-        .map(drop)
-}
-
 /// The outcome of saving a query result: the file and its row count, `None`
 /// when the dialog was canceled, or the error that stopped the write.
 pub type ResultExport = Result<Option<(PathBuf, u64)>, String>;
-
-/// Saves already-loaded query rows as CSV, without replaying the SQL or
-/// Redis command: asks for a destination and writes the file on its own
-/// thread, so neither the UI nor the database worker waits on the dialog.
-pub fn save_result_csv(
-    context: egui::Context,
-    file_name: String,
-    columns: Vec<String>,
-    rows: Vec<Vec<serde_json::Value>>,
-    done: impl FnOnce(ResultExport) + Send + 'static,
-) -> std::io::Result<()> {
-    std::thread::Builder::new()
-        .name("dbm-result-export".into())
-        .spawn(move || {
-            let result = rfd::FileDialog::new()
-                .set_file_name(&file_name)
-                .add_filter("CSV", &["csv"])
-                .save_file()
-                .map(|path| {
-                    let rows = dbm_core::export::export_result_csv(&path, &columns, &rows)?;
-                    Ok((path, rows))
-                })
-                .transpose();
-            done(result);
-            context.request_repaint();
-        })
-        .map(drop)
-}
 
 /// Pages the demo fixture into the chosen file with the shared exporter.
 async fn export_demo_csv(request: ExportRequest) -> Result<(PathBuf, u64), String> {
@@ -348,12 +299,12 @@ fn string_error(error: impl std::fmt::Display) -> String {
 
 /// `--demo` answers from the shared in-memory fixture: no local profiles,
 /// network, or persistence.
-pub struct DemoBackend {
+struct DemoBackend {
     store: DemoStore,
 }
 
 impl DemoBackend {
-    pub fn new() -> Self {
+    fn new() -> Self {
         Self {
             store: DemoStore::new(),
         }

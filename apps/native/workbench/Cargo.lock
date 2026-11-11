@@ -958,6 +958,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "dbm-desktop"
+version = "0.1.0"
+dependencies = [
+ "dbm-core",
+ "dbm-update",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "dbm-update"
 version = "0.1.0"
 dependencies = [
@@ -974,6 +984,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "dbm-core",
+ "dbm-desktop",
  "dbm-update",
  "eframe",
  "egui_extras",

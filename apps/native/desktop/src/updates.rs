@@ -10,7 +10,6 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 
 use dbm_update::{Available, Day, Release};
-use eframe::egui;
 
 const FIRST_CHECK_AFTER: f64 = 5.0;
 const CHECK_EVERY: f64 = 30.0 * 60.0;
@@ -55,10 +54,11 @@ pub struct Updates {
     next_check: f64,
     sender: Sender<Event>,
     receiver: Receiver<Event>,
+    wake: crate::Wake,
 }
 
 impl Updates {
-    pub fn new() -> Self {
+    pub fn new(wake: crate::Wake) -> Self {
         remove_previous_executable();
         let (sender, receiver) = mpsc::channel();
         Self {
@@ -70,6 +70,7 @@ impl Updates {
             next_check: FIRST_CHECK_AFTER,
             sender,
             receiver,
+            wake,
         }
     }
 
@@ -77,8 +78,10 @@ impl Updates {
         self.current.is_some()
     }
 
-    /// Applies finished work and runs the periodic quiet check.
-    pub fn poll(&mut self, ctx: &egui::Context, now: f64) {
+    /// Applies finished work and runs the periodic quiet check. `now` is
+    /// seconds since launch; the result is how long until the next check,
+    /// when the UI should call `poll` again even if nothing woke it.
+    pub fn poll(&mut self, now: f64) -> Option<std::time::Duration> {
         while let Ok(event) = self.receiver.try_recv() {
             match event {
                 Event::Checked { result, quiet } => {
@@ -103,18 +106,19 @@ impl Updates {
                 Event::History { result, unread } => self.history_loaded(result, unread),
             }
         }
-        if self.enabled() {
-            if now >= self.next_check {
-                self.next_check = now + CHECK_EVERY;
-                self.check(ctx, true);
-            }
-            ctx.request_repaint_after(std::time::Duration::from_secs_f64(
-                (self.next_check - now).max(1.0),
-            ));
+        if !self.enabled() {
+            return None;
         }
+        if now >= self.next_check {
+            self.next_check = now + CHECK_EVERY;
+            self.check(true);
+        }
+        Some(std::time::Duration::from_secs_f64(
+            (self.next_check - now).max(1.0),
+        ))
     }
 
-    pub fn check(&mut self, ctx: &egui::Context, quiet: bool) {
+    pub fn check(&mut self, quiet: bool) {
         let Some(current) = self.current else { return };
         if matches!(self.state, State::Checking | State::Installing) {
             return;
@@ -123,50 +127,50 @@ impl Updates {
             self.state = State::Checking;
         }
         let sender = self.sender.clone();
-        let ctx = ctx.clone();
+        let wake = self.wake.clone();
         std::thread::spawn(move || {
             let result = match appimage() {
                 Some(_) => dbm_update::check_platform(current, dbm_update::LINUX_APPIMAGE),
                 None => dbm_update::check(current),
             };
             let _ = sender.send(Event::Checked { result, quiet });
-            ctx.request_repaint();
+            wake();
         });
     }
 
-    pub fn install(&mut self, ctx: &egui::Context, update: Available) {
+    pub fn install(&mut self, update: Available) {
         self.mark_reviewed(&update);
         self.state = State::Installing;
         let sender = self.sender.clone();
-        let ctx = ctx.clone();
+        let wake = self.wake.clone();
         std::thread::spawn(move || {
             let directory = std::env::temp_dir().join(format!("dbm-update-{}", update.build));
             let result = dbm_update::download(&update, &directory);
             let _ = sender.send(Event::Downloaded(result));
-            ctx.request_repaint();
+            wake();
         });
     }
 
     /// Starts What's new for this launch from the stored acknowledgement. A
     /// first launch only records the installed build; after an update, the
     /// highlights it has not shown yet open once.
-    pub fn start_whats_new(&mut self, ctx: &egui::Context, acknowledged: Option<u64>) {
+    pub fn start_whats_new(&mut self, acknowledged: Option<u64>) {
         let Some(current) = self.current else { return };
         self.acknowledged = acknowledged;
         match acknowledged {
             None => self.acknowledge(current),
-            Some(seen) if seen < current => self.fetch_history(ctx, true),
+            Some(seen) if seen < current => self.fetch_history(true),
             Some(_) => {}
         }
     }
 
     /// Every highlighted release up to this build, from the Help menu.
-    pub fn open_whats_new(&mut self, ctx: &egui::Context) {
+    pub fn open_whats_new(&mut self) {
         if self.current.is_none() || matches!(self.whats_new, WhatsNew::Loading) {
             return;
         }
         self.whats_new = WhatsNew::Loading;
-        self.fetch_history(ctx, false);
+        self.fetch_history(false);
     }
 
     pub fn close_whats_new(&mut self) {
@@ -198,15 +202,15 @@ impl Updates {
         }
     }
 
-    fn fetch_history(&mut self, ctx: &egui::Context, unread: bool) {
+    fn fetch_history(&mut self, unread: bool) {
         let sender = self.sender.clone();
-        let ctx = ctx.clone();
+        let wake = self.wake.clone();
         std::thread::spawn(move || {
             let _ = sender.send(Event::History {
                 result: dbm_update::history(),
                 unread,
             });
-            ctx.request_repaint();
+            wake();
         });
     }
 
@@ -270,10 +274,10 @@ fn previous_executable(current: &Path) -> PathBuf {
 }
 
 fn remove_previous_executable() {
-    if cfg!(windows) {
-        if let Ok(current) = std::env::current_exe() {
-            let _ = std::fs::remove_file(previous_executable(&current));
-        }
+    if cfg!(windows)
+        && let Ok(current) = std::env::current_exe()
+    {
+        let _ = std::fs::remove_file(previous_executable(&current));
     }
 }
 
@@ -336,7 +340,7 @@ mod tests {
 
     #[test]
     fn header_labels_distinguish_versions_from_status() {
-        let mut updates = Updates::new();
+        let mut updates = Updates::new(std::sync::Arc::new(|| {}));
         assert!(updates.label().is_empty());
         assert!(updates.version_label().starts_with("Version "));
         updates.state = State::UpToDate;
@@ -373,10 +377,10 @@ mod tests {
 
     #[test]
     fn whats_new_opens_once_for_unseen_highlights() {
-        let mut updates = Updates::new();
+        let mut updates = Updates::new(std::sync::Arc::new(|| {}));
         updates.current = Some(30);
         // First launch: record the installed build without fetching.
-        updates.start_whats_new(&egui::Context::default(), None);
+        updates.start_whats_new(None);
         assert_eq!(updates.take_acknowledged(), Some(30));
         assert_eq!(updates.take_acknowledged(), None);
 
@@ -405,7 +409,7 @@ mod tests {
 
     #[test]
     fn installing_from_the_review_marks_its_highlights_read() {
-        let mut updates = Updates::new();
+        let mut updates = Updates::new(std::sync::Arc::new(|| {}));
         updates.acknowledged = Some(1);
         // Plain notes alone are not highlights the build would reopen.
         updates.mark_reviewed(&available(None));

@@ -76,6 +76,7 @@ const ROOTS = [
   ["apps/native/macos/", ["macOS"]],
   ["apps/native/bridge/", ["macOS"]],
   ["apps/native/workbench/", ["Windows", "Linux"]],
+  ["apps/native/desktop/", ["Windows", "Linux"]],
   ["apps/native/windows/", ["Windows"]],
   ["crates/", ["macOS", "Windows", "Linux"]],
 ];

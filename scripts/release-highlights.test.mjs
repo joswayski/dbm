@@ -48,6 +48,7 @@ const highlight = (commit) => ({
 test("only desktop app sources count, each tagged with the apps it reaches", () => {
   assert.deepEqual(pathApps("apps/native/macos/Sources/Grid.swift"), ["macOS"]);
   assert.deepEqual(pathApps("apps/native/workbench/src/workbench.rs"), ["Windows", "Linux"]);
+  assert.deepEqual(pathApps("apps/native/desktop/src/updates.rs"), ["Windows", "Linux"]);
   assert.deepEqual(pathApps("crates/dbm-core/src/lib.rs"), ["macOS", "Windows", "Linux"]);
   for (const path of [
     "apps/web/src/routes/index.tsx",
