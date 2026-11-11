@@ -2,7 +2,7 @@
 
 Anybase ships browser-free desktop apps on **macOS, Windows, and Linux**: AppKit on
 macOS and egui on Windows and Linux, over one shared Rust core. Android Compose
-and iPhone SwiftUI clients are in development and are not desktop-parity or
+and iPhone UIKit clients are in development and are not desktop-parity or
 store releases. None uses Electron, JavaScript, or a WebView. See
 [development](development.md) for desktop commands, [mobile](mobile.md) for the
 mobile contract, and [releases](releases.md) for desktop packaging and updates.
@@ -28,7 +28,7 @@ mobile contract, and [releases](releases.md) for desktop packaging and updates.
   Linux app: the serialized database worker and the self-updater. A UI toolkit
   passes it a wake callback that schedules its next frame, so a replacement
   for egui reuses both unchanged.
-- `apps/native/android` and `apps/native/ios` use Compose and SwiftUI. They call
+- `apps/native/android` and `apps/native/ios` use Compose and UIKit. They call
   the mobile C ABI directly in-process (JNI on Android), not through a local or
   hosted HTTP proxy. The bridge uses host-managed SQLite metadata and
   memory-only passwords, and enforces read-only profiles with verified Required

@@ -1,4 +1,5 @@
-import SwiftUI
+import Combine
+import Foundation
 
 @MainActor
 final class AppModel: ObservableObject {

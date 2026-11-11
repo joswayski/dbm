@@ -41,7 +41,7 @@ Everything users read now says Anybase; every identifier in
 - Linux AppImage desktop entry: `Name=Anybase`,
   `Comment=Database client for PostgreSQL, MySQL, and Redis`.
 - Android: `android:label` and the Compose screens. iPhone: `CFBundleDisplayName`,
-  `CFBundleName`, the local network prompt, and the SwiftUI screens.
+  `CFBundleName`, the local network prompt, and the UIKit screens.
 - PostgreSQL connections report `application_name` "Anybase"; the demo fixture's
   query result says "Anybase demo".
 - GitHub release titles: "Anybase <version>" and "Anybase mobile (latest)".

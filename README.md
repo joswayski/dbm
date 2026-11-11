@@ -53,7 +53,7 @@ public Play Store/App Store releases or desktop-parity clients.
 | Platform | Availability |
 | --- | --- |
 | Android 8.0+ (Kotlin/Compose) | [Google Play internal testing](https://play.google.com/apps/testing/com.dbm.nativeapp) for enrolled testers, or [download the signed APK](https://github.com/joswayski/dbm/releases/download/mobile-latest/DBM-Android.apk) |
-| iPhone, iOS 17+ (SwiftUI) | TestFlight internal testing; a tester invitation is required |
+| iPhone, iOS 17+ (UIKit) | TestFlight internal testing; a tester invitation is required |
 
 Browse PostgreSQL, MySQL, and Redis and run read-only SQL/Redis commands through
 the in-process Rust core. Mobile requires verified TLS, keeps passwords only in
@@ -67,5 +67,5 @@ release evidence, capabilities, safe networking, builds, and validation status.
 - [Releases](docs/releases.md): how releases and in-app updates work
 - [Design system](docs/design-system.md): the Graphite UI
 - [Native architecture](docs/native.md): the shared Rust core and native hosts
-- [Mobile development clients](docs/mobile.md): Android Compose and iPhone SwiftUI scope
+- [Mobile development clients](docs/mobile.md): Android Compose and iPhone UIKit scope
 - [Anybase rename](docs/anybase-migration.md): the DBM to Anybase migration plan and the website

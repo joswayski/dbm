@@ -1,6 +1,6 @@
 # Anybase for iPhone
 
-Native SwiftUI client for iOS 17+. It invokes `dbm-native-bridge` in-process: no HTTP server, web view, telemetry, or cloud sync. Profile metadata and history use a protected SQLite file under Application Support (excluded from iCloud backup). Passwords are passed to Rust only for the current session and are cleared when the form/session closes.
+Native UIKit client for iOS 17+. It invokes `dbm-native-bridge` in-process: no HTTP server, web view, telemetry, or cloud sync. Profile metadata and history use a protected SQLite file under Application Support (excluded from iCloud backup). Passwords are passed to Rust only for the current session and are cleared when the form/session closes.
 
 Mobile connections are deliberately **read-only**, require TLS with Apple platform CA trust, and cap query results at 1,000 rows. Mutation, export and updater commands are not exposed by this app.
 
@@ -17,6 +17,16 @@ DBM_IOS_BUNDLE_ID=com.example.dbm DEVELOPMENT_TEAM=TEAMID bash apps/native/ios/b
 Install a matching Simulator runtime through Xcode's Components settings or `xcodebuild -downloadPlatform iOS -buildVersion "$(xcrun --sdk iphonesimulator --show-sdk-version)"`, then create/select a simulator in Xcode. CI provisions an SDK-matched runtime and a dedicated test simulator; it does not depend on preinstalled device names.
 
 For the explicitly labelled, Debug-only Rust `DemoStore` launch, set the `DBM_DEMO=1` environment variable in the test plan or scheme. Release builds ignore it. The UI test does this and retains an `iphone-connection-form` screenshot in its `.xcresult`.
+
+`DBMBenchmarks` (launch, idle CPU/memory, and CPU while scrolling a query result on the demo) is skipped unless the test runner sees `DBM_BENCH=1`. After `build.sh simulator` has generated the project, run it on a booted simulator with an optimized Debug build (the demo is Debug-only):
+
+```sh
+TEST_RUNNER_DBM_BENCH=1 xcodebuild -project apps/native/ios/DBM.xcodeproj -scheme DBM -configuration Debug \
+  -destination 'platform=iOS Simulator,name=iPhone 16' -derivedDataPath apps/native/ios/DerivedData-Bench \
+  CODE_SIGNING_ALLOWED=NO SWIFT_OPTIMIZATION_LEVEL=-O -only-testing:DBMUITests/DBMBenchmarks test
+```
+
+The values in the log's `measured [...]` lines are simulator numbers on one Mac, not phone numbers.
 
 The device workflow requires a valid signing team/profile; it does not install the resulting app automatically.
 

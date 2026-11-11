@@ -11,7 +11,7 @@ The database adapters, models, session state, credentials, and SQLite store
 live in `crates/dbm-core`; the updater lives in `crates/dbm-update`. See
 [native architecture](native.md) for how the pieces fit together.
 
-Kotlin/Compose Android and SwiftUI iPhone development clients also call that
+Kotlin/Compose Android and UIKit iPhone development clients also call that
 Rust code directly in-process. They have a smaller read-only contract and a
 separate build workflow; see [mobile development](mobile.md) rather than using
 the desktop setup below.
@@ -120,7 +120,7 @@ build/lint/unit-test Android and build the iPhone Simulator client on pushes
 that touch mobile files. Nightly and manual runs also run the Android emulator
 and iPhone Simulator UI tests, check unsigned release packaging, compile the
 iPhone Release archive, and retain UI captures. These are workflow definitions,
-not claims about a particular run. SwiftUI is not compiled on Linux, and physical-device plus live
+not claims about a particular run. The iPhone app is not compiled on Linux, and physical-device plus live
 TLS database validation remains outstanding. Commands and prerequisites are in
 [the mobile contract](mobile.md).
 

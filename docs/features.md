@@ -150,7 +150,7 @@ What the app does today, what is deliberately not built yet, and what it stores 
 
 ## Mobile development clients
 
-The Android Compose and iPhone SwiftUI clients are development builds, not
+The Android Compose and iPhone UIKit clients are development builds, not
 shipped store apps. They provide direct in-process Rust connections for
 PostgreSQL, MySQL, and Redis, with read-only profiles and verified Required TLS.
 Queries are capped at 1,000 rows and read-only table/key pages at 25 rows.

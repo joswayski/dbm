@@ -1,6 +1,5 @@
 import XCTest
 import UIKit
-import SwiftUI
 @testable import DBM
 
 final class ModelsTests: XCTestCase {
@@ -101,7 +100,8 @@ final class ModelsTests: XCTestCase {
         let previous = scene.windows.first { $0.isKeyWindow }
         let window = UIWindow(windowScene: scene)
         window.frame = scene.coordinateSpace.bounds
-        window.rootViewController = UIHostingController(rootView: RootView().environmentObject(model).preferredColorScheme(.dark))
+        window.overrideUserInterfaceStyle = .dark
+        window.rootViewController = RootViewController(model: model)
         window.makeKeyAndVisible()
         defer { window.isHidden = true; previous?.makeKey() }
         window.layoutIfNeeded()

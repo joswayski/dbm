@@ -1,6 +1,6 @@
 # Mobile development clients
 
-Anybase has browser-free **Kotlin/Compose Android** and **SwiftUI iPhone** development
+Anybase has browser-free **Kotlin/Compose Android** and **UIKit iPhone** development
 clients available for early-access testing. They reuse the desktop Rust database
 adapters in-process through JNI and the C ABI. These are not public Play Store/App
 Store releases or desktop-parity apps.
@@ -142,7 +142,7 @@ commands and the signed mobile release workflow are unchanged.
 
 Workflow configuration alone is not proof that a revision passed; the
 [distribution status](#distribution-status) above links to a verified release.
-SwiftUI is not compiled on Linux. Physical-device behavior and live, verified-TLS
+The UIKit iPhone app is not compiled on Linux. Physical-device behavior and live, verified-TLS
 database connections on both mobile platforms remain outstanding.
 
 ## Signed mobile releases (Caper's distribution path)
