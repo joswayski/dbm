@@ -193,7 +193,7 @@ impl Workbench {
             .copied()
             .unwrap_or(250.0)
             .clamp(200.0, 460.0);
-        let (card, history) = inner.split_right(history_w + 10.0);
+        let (history, card) = inner.split_right(history_w + 10.0);
         let history = history.with_min_x(history.left() + 10.0);
         {
             let mut p = ui.painter();
@@ -234,7 +234,7 @@ impl Workbench {
             st.store(ui, Id::new(("sql-editor", tab_id)));
         }
         let card_inner = card.shrink(1.0);
-        let (editor_rect, hint) = card_inner.split_bottom(28.0);
+        let (hint, editor_rect) = card_inner.split_bottom(28.0);
         {
             let mut p = ui.painter();
             p.rect_filled(hint, dbm_ui::Radius::bottom(9.0), theme::CHROME);

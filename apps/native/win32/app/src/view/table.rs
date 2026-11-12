@@ -193,7 +193,7 @@ fn show(ui: &mut Ui, rect: Rect, cx: &Cx<'_>, state: &mut TableState) -> Vec<Act
         &mut actions,
     );
     if !state.pending.is_empty() {
-        let (r, pending_rect) = rest.split_bottom(theme::PENDING_BAR_HEIGHT);
+        let (pending_rect, r) = rest.split_bottom(theme::PENDING_BAR_HEIGHT);
         rest = r;
         bar(ui, pending_rect, false);
         pending_bar(
@@ -211,7 +211,7 @@ fn show(ui: &mut Ui, rect: Rect, cx: &Cx<'_>, state: &mut TableState) -> Vec<Act
     };
     let interactive = !state.loading && !cx.saving;
     let area = if state.inspector_open {
-        let (left, inspector_rect) = rest.split_right(theme::INSPECTOR_WIDTH);
+        let (inspector_rect, left) = rest.split_right(theme::INSPECTOR_WIDTH);
         ui.painter().rect_filled(inspector_rect, 0.0, theme::CHROME);
         ui.painter().vline(
             inspector_rect.left() + 0.5,
@@ -1966,10 +1966,10 @@ fn inspector(ui: &mut Ui, rect: Rect, cx: &Cx<'_>, state: &mut TableState, page:
     let row = page.rows[index].clone();
     let values: Vec<Value> = pending.as_ref().map_or(row, |p| p.changes.clone());
     let footer = editable(cx, page);
-    let (fields, footer_rect) = if footer {
+    let (footer_rect, fields) = if footer {
         body.split_bottom(55.0)
     } else {
-        (body, Rect::NOTHING)
+        (Rect::NOTHING, body)
     };
     {
         let mut c = ui.child(fields, Dir::Down);

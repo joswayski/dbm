@@ -24,6 +24,7 @@ pub struct ScrollArea {
     /// Shrinks to the content's height (up to `max_height`).
     shrink_height: bool,
     bar_inset: bool,
+    hide_bars: bool,
     /// Scrolls this far, once (for "scroll into view").
     scroll_to: Option<Vec2>,
 }
@@ -44,6 +45,7 @@ impl ScrollArea {
             max_height: None,
             shrink_height: false,
             bar_inset: false,
+            hide_bars: false,
             scroll_to: None,
         }
     }
@@ -77,6 +79,12 @@ impl ScrollArea {
     /// The scrollbar takes its own column instead of overlaying content.
     pub fn solid_bar(mut self) -> Self {
         self.bar_inset = true;
+        self
+    }
+
+    /// Scrolls with the wheel only, without drawing scrollbars.
+    pub fn hide_bars(mut self) -> Self {
+        self.hide_bars = true;
         self
     }
 
@@ -213,7 +221,11 @@ impl ScrollArea {
         if self.shrink_height {
             outer = outer.with_max_y(outer.top() + height);
         }
-        let state = self.scrollbars(ui, viewport, state);
+        let state = if self.hide_bars {
+            state
+        } else {
+            self.scrollbars(ui, viewport, state)
+        };
         ui.ctx.insert_data(self.id, state);
         ui.advance_past(outer);
         ScrollOutput {

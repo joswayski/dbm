@@ -58,7 +58,7 @@ impl Workbench {
     fn sidebar_expanded(&mut self, ui: &mut Ui, rect: Rect) {
         let inner = rect.shrink(10.0);
         // `.sidebar-footer`: a hairline above a full-width New connection.
-        let (body, footer) = inner.split_bottom(40.0);
+        let (footer, body) = inner.split_bottom(40.0);
         ui.painter().hline(
             rect.left()..=rect.right(),
             footer.top() + 0.5,

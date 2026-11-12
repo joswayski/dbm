@@ -200,11 +200,17 @@ impl Workbench {
         let scroll_id = Id::new("tab-strip");
         let mut c = ui.child(inner, Dir::Down);
         c.set_clip(inner);
-        let scroll_to = self.tab_scroll_target(&c);
+        let scroll_to = self.tab_scroll_target(&mut c);
         ScrollArea::horizontal(scroll_id)
             .scroll_to_x(scroll_to)
+            .hide_bars()
             .show(&mut c, |ui| {
-                ui.horizontal(31.0, |ui| {
+                // A row only as wide as its tabs, so the strip scrolls just
+                // as far as they reach.
+                let row_rect = Rect::from_min_size(ui.cursor(), vec2(ui.available_width(), 31.0));
+                let used = {
+                    let mut row = ui.child(row_rect, Dir::Right);
+                    let ui = &mut row;
                     ui.spacing.x = 1.0;
                     ui.a11y_group(Id::new("tabs"), Role::Tab, "Tabs", inner, |ui| {
                         let tabs: Vec<Tab> = self.tabs.iter().map(Tab::without_sql).collect();
@@ -223,7 +229,12 @@ impl Workbench {
                             self.open_query(profile, true);
                         }
                     }
-                });
+                    row.min_rect()
+                };
+                ui.advance_past(
+                    used.with_min_y(row_rect.top())
+                        .with_max_y(row_rect.bottom()),
+                );
             });
         // The strip's bottom line, with a gap under the active tab.
         let y = strip.bottom() - 0.5;
@@ -242,7 +253,7 @@ impl Workbench {
     }
 
     /// Scrolls a newly selected tab into view, once.
-    fn tab_scroll_target(&mut self, ui: &Ui) -> Option<f32> {
+    fn tab_scroll_target(&mut self, ui: &mut Ui) -> Option<f32> {
         let active = self.active_tab?;
         if ui.ctx.data::<u64>(Id::new("tab-in-view")) == Some(active) {
             return None;
@@ -251,6 +262,7 @@ impl Workbench {
         let state = ScrollArea::state(ui, Id::new("tab-strip"));
         let left = rect.left() - ui.max_rect().left() + state.offset.x;
         let view = ui.max_rect().width();
+        ui.ctx.insert_data(Id::new("tab-in-view"), active);
         if left < state.offset.x {
             Some(left)
         } else if left + rect.width() > state.offset.x + view {

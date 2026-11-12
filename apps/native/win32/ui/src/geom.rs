@@ -304,16 +304,19 @@ impl Rect {
         (self.with_max_x(x), self.with_min_x(x))
     }
 
+    /// Cuts `w` off the right: (right part, rest).
     pub fn split_right(&self, w: f32) -> (Rect, Rect) {
         let x = (self.max.x - w).max(self.min.x);
         (self.with_min_x(x), self.with_max_x(x))
     }
 
+    /// Cuts `h` off the top: (top part, rest).
     pub fn split_top(&self, h: f32) -> (Rect, Rect) {
         let y = (self.min.y + h).min(self.max.y);
         (self.with_max_y(y), self.with_min_y(y))
     }
 
+    /// Cuts `h` off the bottom: (bottom part, rest).
     pub fn split_bottom(&self, h: f32) -> (Rect, Rect) {
         let y = (self.max.y - h).max(self.min.y);
         (self.with_min_y(y), self.with_max_y(y))
