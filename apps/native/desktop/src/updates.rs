@@ -377,6 +377,7 @@ mod tests {
             highlights,
             released: None,
             commit: None,
+            patch: None,
         }
     }
 

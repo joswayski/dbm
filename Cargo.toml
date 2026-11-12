@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/dbm-core", "crates/dbm-update", "apps/native/bridge", "apps/native/desktop", "tools/dbm-sign"]
+members = ["crates/dbm-core", "crates/dbm-update", "apps/native/bridge", "apps/native/desktop", "tools/dbm-sign", "tools/dbm-delta"]
 resolver = "2"
 
 [workspace.package]

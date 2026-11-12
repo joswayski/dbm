@@ -63,11 +63,13 @@ for it and then releases everything merged since.
 | `Anybase-macOS.dmg`, `Anybase-Windows-x64-setup.exe`, `Anybase-Linux-x86_64.AppImage` | First install, linked from anyba.se and the README. Byte-identical copies of the DBM-named files below |
 | `DBM-macOS.dmg` | First install on macOS (signed, notarized, stapled), for links made before the rename |
 | `DBM-macOS.zip` | Native updater on macOS |
+| `DBM-macOS.app.tar` | The uncompressed bundle tar macOS patch updates rebuild; kept as the base for later patches |
 | `DBM.app.tar.gz` | Updates for installs of the former Tauri app on macOS |
 | `DBM-Windows-x64-setup.exe` | First install on Windows; also what former Tauri installs run to update |
 | `DBM-Windows-x64.exe` | Native updater on Windows (bare executable) |
 | `DBM-Linux-x86_64.AppImage` | Install on Linux, and updates for AppImage copies (native and former Tauri) |
 | `DBM-Linux-x64` | Native updater for a bare Linux executable |
+| `*.patch` | Patch updates from the five newest earlier releases (see [Patch updates](#patch-updates)) |
 | `*.sig` | Updater signature for each updater artifact |
 | `native-latest.json` | Native updater manifest |
 | `latest.json` | Tauri-updater-format manifest, for installs of the former Tauri app |
@@ -116,6 +118,8 @@ then downloads the platform's artifact, verifies its minisign signature
 against the public key in `crates/dbm-update` (including that the signed
 `file:` name in the trusted comment matches the artifact's URL, so release
 assets must keep the name they were signed under), swaps it in, and restarts.
+When the release has a patch from the installed build, it downloads that
+instead (see [Patch updates](#patch-updates)).
 
 If an install fails, Anybase opens a dialog with the error, **Try again**,
 and **Download from anyba.se**, the same fallback Captures uses: the user can
@@ -157,6 +161,40 @@ Win32 and GTK apps read and write in place). A first launch only records
 the installed build; a later launch opens What's new once for highlights it
 has not shown. Installing from the update review marks its highlights read, so
 the restarted app doesn't repeat them.
+
+
+### Patch updates
+
+Each platform in `native-latest.json` may list `patches`: `{fromBuild, url,
+size, target, signature}`. A patch is a bsdiff (`qbsdiff`) that rebuilds the
+release file `target` from an earlier build's installed copy, so an update
+from a recent build downloads kilobytes instead of the whole app. Builds
+before patch support ignore the field.
+
+- **Windows and bare Linux executables:** the patch starts from the running
+  executable and rebuilds `DBM-Windows-x64.exe` or `DBM-Linux-x64`.
+- **AppImage:** it starts from `$APPIMAGE` and rebuilds the AppImage. The
+  image is compressed, so its patches are often dropped as too large.
+- **macOS:** zip entries are compressed, so patches target
+  `DBM-macOS.app.tar` instead: a deterministic, uncompressed tar of the
+  notarized bundle (`dbm_update::bundle_tar`: sorted entries, links kept,
+  no owners, times or extended attributes, root folder `Anybase.app`). The
+  client builds the same tar from the installed bundle, patches it, and the
+  updater unpacks the result with `tar` before the usual `codesign` check.
+
+The rebuilt file must match `signature`, the release key's signature of
+`target` (bound to that file name like every artifact). A missing base, a
+failed download, or a mismatch falls back to the full download in the same
+attempt, so a patch can only make an update smaller, never different.
+
+Release tooling: the macOS job writes the bundle tar with `tools/dbm-delta
+bundle`, checks that it unpacks into an app that passes `codesign --verify
+--deep --strict` and `stapler validate`, and signs it. **publish** downloads
+those files from the five newest published releases and runs `dbm-delta
+diff` for each, which checks that the patch rebuilds the new file exactly.
+Patches over half the full file are dropped. The step never fails a release;
+without patches, apps download full files. Patches and bundle tars stay on
+their releases, so older releases keep serving as bases.
 
 ## Release highlights
 

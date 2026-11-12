@@ -176,7 +176,13 @@ final class Updater {
     /// it in and reopens it once this process exits.
     private static func scheduleSwap(archive: String, in directory: URL, current: URL) throws {
         let unpacked = directory.appendingPathComponent("unpacked")
-        try run("/usr/bin/ditto", ["-x", "-k", archive, unpacked.path])
+        if archive.hasSuffix(".tar") {
+            // A patch update rebuilds the release's uncompressed bundle tar.
+            try FileManager.default.createDirectory(at: unpacked, withIntermediateDirectories: true)
+            try run("/usr/bin/tar", ["-xf", archive, "-C", unpacked.path])
+        } else {
+            try run("/usr/bin/ditto", ["-x", "-k", archive, unpacked.path])
+        }
         let contents = try FileManager.default.contentsOfDirectory(at: unpacked, includingPropertiesForKeys: nil)
         guard let app = contents.first(where: { $0.pathExtension == "app" }) else {
             throw BridgeFailure(message: "The update archive does not contain the app.")

@@ -257,10 +257,26 @@ jobs:
           xcrun stapler staple -v "$out/DBM-macOS.dmg"
           spctl --assess --type open --context context:primary-signature \
             --verbose=2 "$out/DBM-macOS.dmg"
+      - name: Write the bundle tar that patch updates rebuild
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Installed copies rebuild this exact file from their own bundle
+          # (crates/dbm-update/src/patch.rs). It must unpack into an app that
+          # passes the same check the updater runs before swapping it in.
+          cargo build --locked --release -p dbm-delta
+          tar_file="target/native/release/DBM-macOS.app.tar"
+          target/release/dbm-delta bundle target/native/Anybase.app "$tar_file"
+          check="$RUNNER_TEMP/bundle-check"
+          rm -rf "$check" && mkdir -p "$check"
+          tar -xf "$tar_file" -C "$check"
+          codesign --verify --deep --strict --verbose=2 "$check/Anybase.app"
+          xcrun stapler validate "$check/Anybase.app"
       - name: Sign the updater archives with the release key
         run: |
           cargo build --locked --release -p dbm-sign
-          target/release/dbm-sign target/native/release/DBM-macOS.zip target/native/release/DBM.app.tar.gz
+          target/release/dbm-sign target/native/release/DBM-macOS.zip target/native/release/DBM.app.tar.gz \
+            target/native/release/DBM-macOS.app.tar
       - uses: actions/upload-artifact@v4
         with:
           name: release-macos
@@ -388,7 +404,7 @@ jobs:
     name: Validate and publish
     needs: [prepare, macos, workbench, windows-installer]
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 30
     permissions:
       contents: write
       id-token: write
@@ -403,19 +419,74 @@ jobs:
       RELEASES: ${{ needs.prepare.outputs.releases }}
       RELEASE_ID: ${{ needs.prepare.outputs.release_id }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
       - uses: actions/download-artifact@v4
         with:
           pattern: release-*
           path: assets
           merge-multiple: true
+      # Patch updates (docs/releases.md#patch-updates): a bsdiff patch from
+      # each of the five newest releases to this one, for every file an
+      # installed copy can rebuild. Without them apps download whole files,
+      # so this step never fails the release.
+      - name: Build patch updates from earlier releases
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf patches && mkdir -p patches
+          cargo build --locked --release -p dbm-delta
+          files=(DBM-macOS.app.tar DBM-Windows-x64.exe DBM-Linux-x64 DBM-Linux-x86_64.AppImage)
+          patterns=(--pattern native-latest.json)
+          for file in "${files[@]}"; do patterns+=(--pattern "$file"); done
+          gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --exclude-pre-releases \
+            --limit 5 --json tagName --jq '.[].tagName' > "$RUNNER_TEMP/bases.txt"
+          while read -r tag; do
+            dir="$RUNNER_TEMP/bases/$tag"
+            mkdir -p "$dir"
+            gh release download "$tag" --repo "$GITHUB_REPOSITORY" --dir "$dir" "${patterns[@]}" || continue
+            from="$(jq -er .build "$dir/native-latest.json")" || continue
+            (( from < BUILD )) || continue
+            for file in "${files[@]}"; do
+              [[ -f "$dir/$file" && -f "assets/$file" ]] || continue
+              out="patches/$file-$from-to-$BUILD.patch"
+              target/release/dbm-delta diff "$dir/$file" "assets/$file" "$out" || continue
+              # A patch over half the full file is not worth it.
+              if (( $(stat -c %s "$out") * 2 > $(stat -c %s "assets/$file") )); then
+                echo "Dropped $out: over half of $file"
+                rm "$out"
+              fi
+            done
+            rm -rf "$dir"
+          done < "$RUNNER_TEMP/bases.txt"
+          ls -l patches
       - name: Write the updater manifests
         shell: bash
         run: |
           set -euo pipefail
           base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}"
           sig() { tr -d '\n' < "assets/$1.sig"; }
-          artifact() { jq -n --arg url "$base/$1" --arg signature "$(sig "$1")" '{url: $url, signature: $signature}'; }
-          mac_zip="$(artifact DBM-macOS.zip)"
+          # The patches that rebuild release file $1, newest base first.
+          patches_for() {
+            local file from
+            for file in patches/"$1"-*-to-"$BUILD".patch; do
+              [[ -f "$file" ]] || continue
+              from="${file#patches/$1-}"
+              from="${from%-to-$BUILD.patch}"
+              jq -n --argjson from "$from" --arg url "$base/${file#patches/}" \
+                --argjson size "$(stat -c %s "$file")" --arg target "$1" --arg signature "$(sig "$1")" \
+                '{fromBuild: $from, url: $url, size: $size, target: $target, signature: $signature}'
+            done | jq -s 'sort_by(-.fromBuild)'
+          }
+          # $1 is the full download; $2, when given, the file its patches
+          # rebuild (macOS rebuilds the bundle tar, not the zip).
+          artifact() {
+            jq -n --arg url "$base/$1" --arg signature "$(sig "$1")" --argjson patches "$(patches_for "${2:-$1}")" \
+              '{url: $url, signature: $signature} + (if ($patches | length) > 0 then {patches: $patches} else {} end)'
+          }
+          mac_zip="$(artifact DBM-macOS.zip DBM-macOS.app.tar)"
           mac_tar="$(artifact DBM.app.tar.gz)"
           windows_exe="$(artifact DBM-Windows-x64.exe)"
           windows_setup="$(artifact DBM-Windows-x64-setup.exe)"
@@ -457,6 +528,7 @@ jobs:
             cat "$manifest"
           done
           cp native-latest.json latest.json assets/
+          cp patches/*.patch assets/ 2>/dev/null || true
       - name: Add Anybase-named first-install downloads
         working-directory: assets
         run: |

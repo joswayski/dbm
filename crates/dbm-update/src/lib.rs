@@ -15,6 +15,9 @@ use std::time::Duration;
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 
+mod patch;
+pub use patch::{apply, bundle_tar, diff};
+
 /// Commits behind each release, for its version link.
 pub const REPOSITORY_URL: &str = "https://github.com/joswayski/dbm";
 
@@ -110,6 +113,26 @@ pub struct Artifact {
     pub url: String,
     /// `tools/dbm-sign` output: base64 of a minisign signature file.
     pub signature: String,
+    /// Patches from recent earlier builds, which copies of those builds
+    /// download instead of `url`. Older manifests have none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub patches: Vec<Patch>,
+}
+
+/// A bsdiff patch that rebuilds a release file from an earlier build's
+/// installed copy (see `patch.rs`).
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Patch {
+    pub from_build: u64,
+    pub url: String,
+    /// The patch's size in bytes.
+    pub size: u64,
+    /// The release file the patch rebuilds, e.g. `DBM-macOS.app.tar`.
+    pub target: String,
+    /// That file's `tools/dbm-sign` signature, which the rebuilt bytes must
+    /// match.
+    pub signature: String,
 }
 
 /// A newer build for this platform.
@@ -132,6 +155,9 @@ pub struct Available {
     /// The source commit of the build being offered.
     #[serde(default)]
     pub commit: Option<String>,
+    /// The patch from the installed build, when the release has one.
+    #[serde(default)]
+    pub patch: Option<Box<Patch>>,
 }
 
 /// The newer build `manifest` offers this platform, if any.
@@ -168,6 +194,11 @@ pub fn select(manifest: &Manifest, current: u64, platform: &str) -> Option<Avail
         .iter()
         .find(|release| release.build == manifest.build && is_commit(&release.commit))
         .map(|release| release.commit.clone());
+    let patch = artifact
+        .patches
+        .iter()
+        .find(|patch| patch.from_build == current)
+        .map(|patch| Box::new(patch.clone()));
     Some(Available {
         build: manifest.build,
         version: manifest.version.clone(),
@@ -177,6 +208,7 @@ pub fn select(manifest: &Manifest, current: u64, platform: &str) -> Option<Avail
         highlights,
         released,
         commit,
+        patch,
     })
 }
 
@@ -364,37 +396,68 @@ fn url_file_name(url: &str) -> Option<&str> {
 }
 
 /// Downloads `update` into `directory`, verifies its signature, and returns
-/// the file's path. Nothing is written unless the signature verifies.
+/// the file's path. Nothing is written unless the signature verifies. With a
+/// patch from this build, it downloads the patch and rebuilds the release
+/// file from the installed copy; if anything about that fails, it downloads
+/// the whole file.
 pub fn download(update: &Available, directory: &Path) -> Result<PathBuf, String> {
+    let public_key = debug_override("DBM_UPDATE_PUBLIC_KEY", PUBLIC_KEY);
+    if let Some(patch) = &update.patch
+        && let Ok(data) = patched(patch, &public_key)
+    {
+        return save(directory, &patch.target, &data);
+    }
+    let data = fetch(&update.url, MAX_DOWNLOAD_BYTES)?;
+    verify_artifact(&data, &update.signature, &public_key, &update.url)?;
+    save(
+        directory,
+        url_file_name(&update.url).unwrap_or("dbm-update"),
+        &data,
+    )
+}
+
+/// The release file `patch` rebuilds from this installed copy, verified
+/// against that file's signature.
+fn patched(patch: &Patch, public_key: &str) -> Result<Vec<u8>, String> {
+    if url_file_name(&patch.target) != Some(patch.target.as_str()) {
+        return Err("The patch names an invalid file.".into());
+    }
+    let delta = fetch(&patch.url, patch.size.min(MAX_DOWNLOAD_BYTES))?;
+    let base = patch::base(&patch.target).map_err(|error| error.to_string())?;
+    let data =
+        patch::apply(&base, &delta, MAX_DOWNLOAD_BYTES).map_err(|error| error.to_string())?;
+    verify_artifact(&data, &patch.signature, public_key, &patch.target)?;
+    Ok(data)
+}
+
+/// Downloads `url`, refusing more than `limit` bytes.
+fn fetch(url: &str, limit: u64) -> Result<Vec<u8>, String> {
     let response = agent()
-        .get(&update.url)
+        .get(url)
         .call()
         .map_err(|error| format!("Couldn't download the update: {error}"))?;
     let mut data = Vec::new();
     response
         .into_reader()
-        .take(MAX_DOWNLOAD_BYTES + 1)
+        .take(limit + 1)
         .read_to_end(&mut data)
         .map_err(|error| format!("The update download was interrupted: {error}"))?;
-    if data.len() as u64 > MAX_DOWNLOAD_BYTES {
+    if data.len() as u64 > limit {
         return Err("The update is larger than expected; it was not installed.".into());
     }
-    verify_artifact(
-        &data,
-        &update.signature,
-        &debug_override("DBM_UPDATE_PUBLIC_KEY", PUBLIC_KEY),
-        &update.url,
-    )?;
-    let name = update
-        .url
-        .rsplit('/')
-        .next()
-        .filter(|name| !name.is_empty() && !name.contains(['\\', ':']))
-        .unwrap_or("dbm-update");
+    Ok(data)
+}
+
+fn save(directory: &Path, name: &str, data: &[u8]) -> Result<PathBuf, String> {
+    let name = if name.contains(['\\', ':']) {
+        "dbm-update"
+    } else {
+        name
+    };
     std::fs::create_dir_all(directory)
         .map_err(|error| format!("Couldn't prepare the update folder: {error}"))?;
     let path = directory.join(name);
-    std::fs::write(&path, &data).map_err(|error| format!("Couldn't save the update: {error}"))?;
+    std::fs::write(&path, data).map_err(|error| format!("Couldn't save the update: {error}"))?;
     Ok(path)
 }
 
@@ -412,6 +475,7 @@ mod tests {
                 Artifact {
                     url: "https://example.com/dbm-workbench.exe".into(),
                     signature: "sig".into(),
+                    patches: Vec::new(),
                 },
             )]),
             releases: Vec::new(),
@@ -442,6 +506,36 @@ mod tests {
         let update = select(&manifest(8), 7, "windows-x86_64").unwrap();
         assert_eq!(update.build, 8);
         assert_eq!(update.url, "https://example.com/dbm-workbench.exe");
+    }
+
+    #[test]
+    fn only_a_patch_from_the_installed_build_is_offered() {
+        let text = r#"{"build":9,"version":"v9","notes":"","platforms":{"darwin-aarch64":{
+            "url":"https://x/DBM-macOS.zip","signature":"zip-sig","patches":[
+              {"fromBuild":8,"url":"https://x/DBM-macOS.app.tar-8-to-9.patch","size":4096,
+               "target":"DBM-macOS.app.tar","signature":"tar-sig"},
+              {"fromBuild":6,"url":"https://x/DBM-macOS.app.tar-6-to-9.patch","size":9000,
+               "target":"DBM-macOS.app.tar","signature":"tar-sig"}]}}}"#;
+        let manifest: Manifest = serde_json::from_str(text).unwrap();
+        let from_six = select(&manifest, 6, "darwin-aarch64").unwrap();
+        let patch = from_six.patch.unwrap();
+        assert_eq!(patch.url, "https://x/DBM-macOS.app.tar-6-to-9.patch");
+        assert_eq!(
+            (patch.target.as_str(), patch.size),
+            ("DBM-macOS.app.tar", 9000)
+        );
+        // The full download stays the fallback.
+        assert_eq!(from_six.url, "https://x/DBM-macOS.zip");
+        assert_eq!(from_six.signature, "zip-sig");
+        assert_eq!(select(&manifest, 7, "darwin-aarch64").unwrap().patch, None);
+        assert_eq!(
+            select(&manifest, 8, "darwin-aarch64")
+                .unwrap()
+                .patch
+                .unwrap()
+                .size,
+            4096
+        );
     }
 
     #[test]
