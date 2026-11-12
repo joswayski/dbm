@@ -24,6 +24,15 @@ mobile contract, and [releases](releases.md) for desktop packaging and updates.
   Rendering uses native graphics backends and bundled Space Mono fonts. **egui draws
   its own controls, not Windows/GTK system widgets.** It is a separate Cargo
   workspace, so egui's dependency graph stays out of the root workspace.
+- `apps/native/win32` is a native Windows app being built to replace egui on
+  Windows (not shipped yet). It is its own Cargo workspace: `dbm-ui`, a small
+  immediate-mode toolkit rendering with Direct2D/DirectWrite into a
+  DirectComposition swap chain and exposing UI Automation, and `dbm-win32`,
+  the app on `dbm-desktop`. `--demo` uses the same fixture as egui. The
+  `Win32 preview` workflow snapshots its screens on a hosted Windows runner and
+  benchmarks it against egui; off Windows, the `raster` feature renders the
+  same snapshots in software (`cargo run -p dbm-win32 --features raster --
+  --snapshot-dir DIR` from `apps/native/win32`).
 - `apps/native/desktop` (`dbm-desktop`) is the UI-free part of the Windows and
   Linux app: the serialized database worker and the self-updater. A UI toolkit
   passes it a wake callback that schedules its next frame, so a replacement

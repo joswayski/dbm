@@ -191,6 +191,33 @@ jobs:
           name: DBM-${{ runner.os }}-development
           path: DBM-*.*
 
+  native-win32:
+    needs: route
+    name: Native Win32 (Windows)
+    runs-on: ${{ needs.route.outputs.windows == 'true' && fromJSON('["self-hosted","josewin"]') || 'windows-2025' }}
+    timeout-minutes: 30
+    env:
+      CARGO_PROFILE_DEV_DEBUG: 0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.94.0
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/native/win32 -> target
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: cargo fmt --manifest-path apps/native/win32/Cargo.toml --all -- --check
+      - run: cargo test --manifest-path apps/native/win32/Cargo.toml --locked
+      - run: cargo clippy --manifest-path apps/native/win32/Cargo.toml --locked --all-targets -- -D warnings
+      - run: cargo build --manifest-path apps/native/win32/Cargo.toml --locked --release
+      - run: Compress-Archive apps/native/win32/target/release/dbm-win32.exe Anybase-Win32-windows.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Anybase-Win32-development
+          path: Anybase-Win32-windows.zip
+
   native-gtk:
     needs: route
     name: Native GTK (Linux)
