@@ -47,12 +47,14 @@ const highlight = (commit) => ({
 
 test("only desktop app sources count, each tagged with the apps it reaches", () => {
   assert.deepEqual(pathApps("apps/native/macos/Sources/Grid.swift"), ["macOS"]);
-  assert.deepEqual(pathApps("apps/native/workbench/src/workbench.rs"), ["Linux"]);
   assert.deepEqual(pathApps("apps/native/win32/app/src/view/table.rs"), ["Windows"]);
+  assert.deepEqual(pathApps("apps/native/gtk/src/table.rs"), ["Linux"]);
   assert.deepEqual(pathApps("apps/native/desktop/src/updates.rs"), ["Windows", "Linux"]);
   assert.deepEqual(pathApps("crates/dbm-core/src/lib.rs"), ["macOS", "Windows", "Linux"]);
   for (const path of [
     "apps/web/src/routes/index.tsx",
+    // egui no longer ships on any platform.
+    "apps/native/workbench/src/workbench.rs",
     "apps/native/android/app/src/main/java/com/dbm/nativeapp/MainActivity.kt",
     "apps/native/ios/Sources/App.swift",
     "crates/dbm-core/tests/postgres.rs",
@@ -71,7 +73,7 @@ test("summarizes desktop changes, including merged pull requests, for Opus", asy
   f.git("checkout", "-b", "feature");
   f.commit(
     {
-      "apps/native/workbench/src/table_view.rs": "COPY-AS-CSV",
+      "apps/native/gtk/src/table.rs": "COPY-AS-CSV",
       "apps/native/win32/app/src/view/table.rs": "COPY-AS-CSV",
       "crates/dbm-core/tests/fixtures.rs": "TEST-ONLY",
       "apps/native/android/app/src/main/java/Main.kt": "MOBILE-ONLY",
@@ -114,7 +116,7 @@ test("summarizes desktop changes, including merged pull requests, for Opus", asy
   assert.equal(source.commits.length, 1);
   assert.equal(source.commits[0].commit, after);
   assert.equal(source.commits[0].subject, "Copy rows as CSV");
-  assert.deepEqual(source.commits[0].apps, ["Windows", "Linux"]);
+  assert.deepEqual(source.commits[0].apps, ["Linux", "Windows"]);
   assert.match(source.commits[0].diff, /COPY-AS-CSV/u);
   assert.doesNotMatch(request.messages[0].content, /WEB-ONLY|DEPENDENCY|TEST-ONLY|MOBILE-ONLY|FUTURE-CHANGE/u);
 });

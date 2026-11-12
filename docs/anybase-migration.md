@@ -33,7 +33,7 @@ Everything users read now says Anybase; every identifier in
   before the rename keep their `DBM.app` folder (and the Finder and Dock name
   that comes from it) while showing Anybase inside. `DBM.app.tar.gz` keeps its
   `DBM.app` folder name for the Tauri updater.
-- Windows (Win32) and Linux (egui): window title, sidebar, dialogs, and tooltips.
+- Windows (Win32) and Linux (GTK): window title, sidebar, dialogs, and tooltips.
 - Windows installer: `Name`, the Start menu shortcut (`Anybase.lnk`, replacing
   `DBM.lnk`), and the uninstall `DisplayName`/`Publisher`. The native updater
   swaps only `dbm.exe`, so existing installs keep their DBM Start menu entry until
@@ -117,8 +117,9 @@ users' saved state or strands them on an old version.
 | `DBM-macOS.zip`, `DBM-Windows-x64.exe`, `DBM-Linux-x64`, `DBM.app.tar.gz`, `DBM-Windows-x64-setup.exe`, `DBM-Linux-x86_64.AppImage` | Release assets ([releases](releases.md)) | Break the updaters that download them |
 | `DBM.app` folder inside `DBM.app.tar.gz` | Release workflow (`tar -s`) | Break former Tauri installs' updates |
 | Windows `%LOCALAPPDATA%\DBM`, `dbm.exe`, uninstall key `...\Uninstall\DBM` | `apps/native/windows/installer.nsi` | Install a second copy beside the old one |
-| egui app name `"DBM"` in `eframe::run_native` | `apps/native/workbench/src/main.rs` | Reset saved window size and sidebar width |
+| egui app name `"DBM"` in `eframe::run_native`, and the same `DBM` settings path the GTK app reads | `apps/native/workbench/src/main.rs`, `apps/native/gtk/src/settings.rs` | Reset saved window size, sidebar state, and What's new history |
 | Win32 settings file `%APPDATA%\DBM\data\app.ron` and its `dbm.*` keys (eframe's file, shared with egui installs) | `apps/native/win32/app/src/store.rs` | Reset the sidebar and re-show What's new after the egui → Win32 update |
+| Linux binary name `dbm-workbench` inside the AppImage | `apps/native/gtk/appimage.sh` | Break the desktop entry of existing AppImage installs |
 | Window autosave name `DBMNativeMain` | `apps/native/macos/Sources/main.swift` | Reset the saved macOS window frame |
 | iPhone `Application Support/DBM/dbm.sqlite` | `apps/native/ios/Sources/DBM/Bridge.swift` | Lose iPhone profiles and history |
 | Android `dbm-mobile.sqlite3` | `apps/native/android/.../NativeBridge.kt` | Lose Android profiles and history |

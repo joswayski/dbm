@@ -444,10 +444,17 @@ impl App {
     }
 
     fn render_css(&self, state: &State) {
+        // Every palette swatch and the form's custom color need a class too.
         let colors: Vec<String> = state
             .profiles
             .iter()
             .map(|p| state.profile_color(p.id))
+            .chain(
+                crate::state::CONNECTION_COLORS
+                    .iter()
+                    .map(|c| (*c).to_owned()),
+            )
+            .chain(state.profile_form.as_ref().map(|f| f.color.clone()))
             .collect();
         let signature = colors.join(",");
         if *self.css_signature.borrow() != signature {

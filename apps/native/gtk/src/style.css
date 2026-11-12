@@ -177,7 +177,7 @@ menubutton.toolbar-button, menubutton.menu-trigger { padding: 0; min-height: 0; 
 dropdown > button:hover, menubutton > button:hover { background-color: @control_hover; }
 dropdown arrow, menubutton arrow { color: @muted; }
 
-checkbutton { color: @text; font-size: 12.5px; }
+checkbutton, checkbutton > label { color: @text; font-size: 12.5px; }
 checkbutton check { background-color: @control; border: 1px solid @border_strong; border-radius: 4px;
   min-width: 14px; min-height: 14px; background-image: none; }
 checkbutton check:checked { background-color: @accent_strong; border-color: @accent_strong; color: white; }

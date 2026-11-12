@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# Packages a release dbm-workbench binary as an AppImage.
-#   appimage.sh <dbm-workbench binary> <output .AppImage>
+# Packages a release dbm-gtk binary as an AppImage.
+#   appimage.sh <dbm-gtk binary> <output .AppImage>
 # Needs appimagetool on PATH (or APPIMAGETOOL); CI downloads it.
+# The binary keeps the egui app's name, dbm-workbench, inside the AppImage
+# so existing installs and their desktop entries update onto it. GTK 4
+# (4.12 or newer) comes from the host, as glibc does; it is not bundled.
 set -euo pipefail
 binary="$1"
 output="$2"
@@ -21,6 +24,7 @@ Exec=dbm-workbench
 Icon=dbm
 Categories=Development;Database;
 Terminal=false
+StartupWMClass=io.github.joswayski.dbm
 DESKTOP
 # Extract-and-run avoids needing FUSE on the build machine.
 APPIMAGE_EXTRACT_AND_RUN=1 ARCH=x86_64 "$tool" --no-appstream "$appdir" "$output"

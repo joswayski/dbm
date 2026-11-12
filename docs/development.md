@@ -6,8 +6,12 @@ Anybase's released desktop product is three native clients over one Rust core:
   through the C ABI bridge in `apps/native/bridge`.
 - **Windows:** a Rust Win32 app (Direct2D, DirectWrite, DirectComposition, UI
   Automation) in `apps/native/win32`, its own Cargo workspace.
-- **Linux:** a Rust egui app in `apps/native/workbench`, its own Cargo
-  workspace. (It also still builds and runs on Windows.)
+- **Linux:** a Rust GTK 4 (gtk4-rs) app in `apps/native/gtk`, its own Cargo
+  workspace.
+
+Both share the database worker and updater in `apps/native/desktop`
+(`dbm-desktop`) with the former egui app, `apps/native/workbench`, which no
+longer ships but still builds and runs `--demo` for comparisons.
 
 The database adapters, models, session state, credentials, and SQLite store
 live in `crates/dbm-core`; the updater lives in `crates/dbm-update`. See
@@ -24,15 +28,15 @@ Prerequisites:
 
 - Rust 1.94 with `rustfmt` and `clippy` (pinned in `rust-toolchain.toml`)
 - macOS: macOS 13+ with Xcode Command Line Tools
-- Linux: the packages CI installs for the native workbench:
+- Linux: GTK 4.12+ development files for the Linux app, as CI installs them:
 
   ```sh
-  sudo apt-get install -y build-essential libssl-dev pkg-config \
-    libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev libxi-dev \
-    libxrandr-dev libvulkan1 mesa-vulkan-drivers
+  sudo apt-get install -y build-essential libssl-dev pkg-config libgtk-4-dev
   ```
 
-  Running the app needs a display server and a Vulkan driver.
+  To also build the egui app on Linux, add `libxkbcommon-dev libwayland-dev
+  libx11-dev libxcursor-dev libxi-dev libxrandr-dev libvulkan1
+  mesa-vulkan-drivers`; it needs a Vulkan driver to run.
 - Node.js 24 and npm for the website and release-script tests.
 - [uv](https://docs.astral.sh/uv/getting-started/installation/) 0.12.23 for
   Python release scripts; CI uses Python 3.12 and uv can provision it. The
@@ -75,6 +79,17 @@ egui.
 On Linux:
 
 ```sh
+cargo run --manifest-path apps/native/gtk/Cargo.toml --locked --release
+# Isolated in-memory fixture:
+cargo run --manifest-path apps/native/gtk/Cargo.toml --locked --release -- --demo
+```
+
+`apps/native/gtk/bench.sh` compares release builds of the egui and GTK apps on
+the demo fixture (launch time, memory, idle and scrolling CPU); see its header.
+
+The former egui app (Windows or Linux):
+
+```sh
 cargo run --manifest-path apps/native/workbench/Cargo.toml --locked --release
 # Isolated in-memory fixture:
 cargo run --manifest-path apps/native/workbench/Cargo.toml --locked --release -- --demo
@@ -98,6 +113,9 @@ cargo clippy --manifest-path apps/native/workbench/Cargo.toml --locked --all-tar
 cargo fmt --manifest-path apps/native/win32/Cargo.toml --all -- --check
 cargo test --manifest-path apps/native/win32/Cargo.toml --locked
 cargo clippy --manifest-path apps/native/win32/Cargo.toml --locked --all-targets -- -D warnings
+cargo fmt --manifest-path apps/native/gtk/Cargo.toml --all -- --check
+cargo test --manifest-path apps/native/gtk/Cargo.toml --locked
+cargo clippy --manifest-path apps/native/gtk/Cargo.toml --locked --all-targets -- -D warnings
 npm --prefix apps/web ci
 npm --prefix apps/web run check
 npm --prefix apps/web run test:all
@@ -150,7 +168,8 @@ TLS database validation remains outstanding. Commands and prerequisites are in
 ## Amp orbs
 
 Amp orbs run [`.agents/setup`](../.agents/setup) to prepare a fresh machine: it
-installs the native workbench's Linux build dependencies, `redis-server` (the
+installs the native apps' Linux build dependencies (GTK 4 and egui), Xvfb and
+xdotool for running the GTK app headless, `redis-server` (the
 live Redis tests skip themselves without it), the Rust toolchain pinned in
 `rust-toolchain.toml`, the locked Cargo dependencies, and npm dependencies for
 the website and release tests (using the orb image's Node/npm). It also installs
@@ -166,7 +185,7 @@ Local builds are not installed automatically. On macOS, copy
 `target/native/Anybase.app` into `/Applications` yourself if you want to run it
 from there. On Windows, the release binary is
 `apps/native/win32/target/release/dbm-win32.exe`; on Linux,
-`apps/native/workbench/target/release/dbm-workbench`.
+`apps/native/gtk/target/release/dbm-gtk`.
 
 Development builds have no build number, so they never check for updates.
 

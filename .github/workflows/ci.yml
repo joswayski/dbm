@@ -151,11 +151,12 @@ jobs:
 
   native-workbench:
     needs: route
+    # egui no longer ships (Win32 on Windows, GTK on Linux); this keeps it
+    # building and tested while it stays in the repository.
     name: Native workbench (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
-        # Windows ships the Win32 app (native-win32); egui ships on Linux only.
         os: [ubuntu-24.04]
     runs-on: ${{ needs.route.outputs.linux == 'true' && fromJSON('["self-hosted","joselinux"]') || matrix.os }}
     timeout-minutes: 30
@@ -165,7 +166,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Native Linux dependencies
-        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libssl-dev pkg-config libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev libxi-dev libxrandr-dev libvulkan1 mesa-vulkan-drivers
@@ -181,13 +181,6 @@ jobs:
       - run: cargo test --manifest-path apps/native/workbench/Cargo.toml --locked
       - run: cargo clippy --manifest-path apps/native/workbench/Cargo.toml --locked --all-targets -- -D warnings
       - run: cargo build --manifest-path apps/native/workbench/Cargo.toml --locked --release
-      - name: Archive Linux native development binary
-        if: runner.os == 'Linux'
-        run: tar -czf DBM-linux.tar.gz -C apps/native/workbench/target/release dbm-workbench
-      - uses: actions/upload-artifact@v4
-        with:
-          name: DBM-${{ runner.os }}-development
-          path: DBM-*.*
 
   native-win32:
     needs: route
@@ -241,3 +234,11 @@ jobs:
       - run: cargo test --manifest-path apps/native/gtk/Cargo.toml --locked
       - run: cargo clippy --manifest-path apps/native/gtk/Cargo.toml --locked --all-targets -- -D warnings
       - run: cargo build --manifest-path apps/native/gtk/Cargo.toml --locked --release
+      - name: Archive Linux native development binary
+        run: |
+          cp apps/native/gtk/target/release/dbm-gtk dbm-workbench
+          tar -czf DBM-linux.tar.gz dbm-workbench
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DBM-Linux-development
+          path: DBM-linux.tar.gz

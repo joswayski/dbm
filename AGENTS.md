@@ -3,7 +3,7 @@
 ## Product
 
 - Anybase (formerly DBM) is a database client. AppKit macOS, Win32 Windows, and
-  egui Linux are released desktop apps; Compose Android and UIKit iPhone are development
+  GTK 4 Linux are released desktop apps; Compose Android and UIKit iPhone are development
   clients, not store releases or desktop-parity products.
 - The current milestone is PostgreSQL, MySQL, and Redis: saved connections, schema or keyspace exploration, paginated table and key browsing, SQL/Redis workbench tabs, PK-backed or key-backed edits, and safe local profile storage.
 - Clearly separate current features from roadmap ideas. Do not present Redis Sentinel/Cluster, SSH jump hosts, encrypted profile sync, or other follow-ups as shipped unless the repository already implements them.
@@ -14,7 +14,8 @@
 
 - `apps/native/macos` is the macOS app (Swift/AppKit), built by `build.sh`; it calls Rust through the C ABI in `apps/native/bridge`.
 - `apps/native/win32` is the Windows app (Rust Win32: Direct2D/DirectWrite, DirectComposition, UI Automation) with its own Cargo workspace (`dbm-ui` toolkit + `dbm-win32` app); `apps/native/windows` holds its installer, `apps/native/icons` the app icons. It can't run on Linux: cross-lint with `cargo xwin`, preview with its `raster` feature or the `Win32 preview` workflow.
-- `apps/native/workbench` is the Linux app (Rust egui/wgpu) with its own Cargo workspace. `apps/native/desktop` (`dbm-desktop`) is the UI-free worker and updater both use.
+- `apps/native/gtk` is the Linux app (Rust gtk4-rs, GTK 4.12+ from the host) with its own Cargo workspace. It ships under the egui app's Linux names (`DBM-Linux-x64`, the AppImage's `dbm-workbench`) and settings file so installs update onto it.
+- `apps/native/workbench` is the former egui app (Rust egui/wgpu, its own Cargo workspace). It no longer ships; it still builds and runs `--demo` for comparisons such as `apps/native/gtk/bench.sh`. `apps/native/desktop` (`dbm-desktop`) is the UI-free worker and updater the Win32, GTK and egui apps share.
 - `apps/native/android` and `apps/native/ios` are development clients. Both call
   the mobile C ABI in-process; there is no hosted proxy. Their contract and
   validation status live in `docs/mobile.md`.
@@ -73,13 +74,13 @@
 
 ## Validation
 
-- For Rust changes, run `cargo fmt --all -- --check`, `cargo test --workspace`, and `cargo clippy --workspace --all-targets -- -D warnings`, and the same three with `--manifest-path apps/native/workbench/Cargo.toml` for the egui app and `--manifest-path apps/native/win32/Cargo.toml` for the Win32 app.
+- For Rust changes, run `cargo fmt --all -- --check`, `cargo test --workspace`, and `cargo clippy --workspace --all-targets -- -D warnings`, and the same three with `--manifest-path apps/native/win32/Cargo.toml` for the Win32 app, `--manifest-path apps/native/gtk/Cargo.toml` for the GTK app, and `--manifest-path apps/native/workbench/Cargo.toml` for the egui app.
 - Common local commands:
 
   ```sh
   cargo test --workspace
   cargo run --manifest-path apps/native/win32/Cargo.toml --release -- --demo       # Windows app, fixture data
-  cargo run --manifest-path apps/native/workbench/Cargo.toml --release -- --demo   # Linux app, fixture data
+  cargo run --manifest-path apps/native/gtk/Cargo.toml --release -- --demo         # Linux app, fixture data
   bash apps/native/macos/build.sh && open target/native/Anybase.app                # macOS app
   npm --prefix apps/web ci && npm --prefix apps/web run check
   npm --prefix apps/web run test:all                                               # website and release versioning

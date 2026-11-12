@@ -21,10 +21,10 @@ paths or diffs. Summarize only implemented user-visible changes to the desktop
 apps supported by the supplied evidence. Long diffs may be cut short
 (diffTruncated); commit subjects and bodies provide context, not proof of
 unshown implementation.
-Each commit lists the desktop apps its files belong to: the macOS app, and the
-Windows and Linux app. Shared code alone does not prove both apps expose a
-feature. Say "on macOS" or "on Windows and Linux" when a change is specific to
-one of them. The mobile apps are not part of this release.
+Each commit lists the desktop apps its files belong to: the macOS app, the
+Windows app, and the Linux app. Shared code alone does not prove every app
+exposes a feature. Say "on macOS", "on Windows" or "on Linux" (or name two of
+them) when a change is specific to some of them. The mobile apps are not part of this release.
 Connections, query history and data stay on the device. Never suggest cloud
 sync, accounts, telemetry, SSH jump hosts, or Redis Sentinel or Cluster support
 unless the evidence implements it.
@@ -75,8 +75,8 @@ const MAX_RESPONSE = 128 * 1024;
 const ROOTS = [
   ["apps/native/macos/", ["macOS"]],
   ["apps/native/bridge/", ["macOS"]],
-  ["apps/native/workbench/", ["Linux"]],
   ["apps/native/win32/", ["Windows"]],
+  ["apps/native/gtk/", ["Linux"]],
   ["apps/native/desktop/", ["Windows", "Linux"]],
   ["apps/native/windows/", ["Windows"]],
   ["crates/", ["macOS", "Windows", "Linux"]],

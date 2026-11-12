@@ -37,7 +37,8 @@ What the app does today, what is deliberately not built yet, and what it stores 
   read-only profile setting is not a URL option; use a restricted database user
   when connecting from another app.
 - Native apps: AppKit on macOS (Apple Silicon and Intel), Win32 (Direct2D,
-  DirectWrite, UI Automation) on Windows, and egui on Linux.
+  DirectWrite, UI Automation) on Windows, and GTK 4 on Linux (GTK 4.12 or newer
+  from the distribution).
 - Windows and Linux start at 1280 × 800 logical pixels and remember normal
   window sizes between launches. A startup window below the 900 × 600 minimum
   recovers to the default size, capped to the display size; maximized and
@@ -45,7 +46,7 @@ What the app does today, what is deliberately not built yet, and what it stores 
 - Signed in-app updates from the GitHub Release published for each merge to
   `main`. The update review lists the highlights of every release being
   installed, and **What's new** (Anybase menu on macOS, Help menu on
-  Windows/Linux) shows recent releases grouped by day; it opens once after an
+  Windows and Linux) shows recent releases grouped by day; it opens once after an
   update with highlights you haven't seen.
 - Database list, schemas, tables/views, a sidebar filter for tables and keys,
   configurable previews up to 200 rows,

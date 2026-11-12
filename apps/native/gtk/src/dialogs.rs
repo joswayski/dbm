@@ -76,7 +76,7 @@ pub fn build(app: &App, state: &State) -> Option<gtk::Widget> {
     let (content, width) = if let Some(id) = state.confirm_delete {
         (delete_dialog(app, state, id), 420)
     } else if let Some(form) = &state.profile_form {
-        (form_dialog(app, state, form), 600)
+        (form_dialog(app, state, form), 640)
     } else if let Some(confirm) = &state.confirm_query {
         (query_dialog(app, &confirm.sql), 480)
     } else if let Some(update) = &state.confirm_update {
@@ -96,12 +96,18 @@ pub fn build(app: &App, state: &State) -> Option<gtk::Widget> {
     let dialog = ui::vbox(0);
     dialog.add_css_class("dialog");
     dialog.set_size_request(width, -1);
+    // Fixed width, centered: expanding entries inside would otherwise
+    // stretch the card across the window.
+    dialog.set_hexpand(false);
+    dialog.set_halign(gtk::Align::Center);
     let scroller = gtk::ScrolledWindow::new();
     scroller.set_hscrollbar_policy(gtk::PolicyType::Never);
     scroller.set_propagate_natural_height(true);
     scroller.set_max_content_height(
         (app.window.height().max(app.window.default_height()) - 120).max(200),
     );
+    // Room for the overlay scrollbar, so it never covers the fields.
+    content.set_margin_end(10);
     scroller.set_child(Some(&content));
     dialog.append(&scroller);
     let backdrop = gtk::CenterBox::new();
@@ -109,6 +115,7 @@ pub fn build(app: &App, state: &State) -> Option<gtk::Widget> {
     backdrop.set_hexpand(true);
     let column = ui::vbox(0);
     column.set_valign(gtk::Align::Center);
+    column.set_hexpand(false);
     column.append(&dialog);
     backdrop.set_center_widget(Some(&column));
     // A click on the backdrop, not the dialog, closes it.

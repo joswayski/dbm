@@ -2,12 +2,13 @@
 
 Graphite is Anybase's visual language: neutral graphite surfaces, a system-blue
 accent, dense but readable data, and native desktop idioms (source-list
-sidebar, segmented controls, a row inspector). It is the reference for both
-native apps. The tokens are defined in `enum Graphite` in
+sidebar, segmented controls, a row inspector). It is the reference for every
+desktop app. The tokens are defined in `enum Graphite` in
 `apps/native/macos/Sources/Theme.swift` (AppKit),
-`apps/native/win32/ui/src/theme.rs` (Win32), and
-`apps/native/workbench/src/theme.rs` (egui). When a token changes, update this
-file and every theme file.
+`apps/native/win32/ui/src/theme.rs` (Win32),
+`apps/native/workbench/src/theme.rs` (egui), and as `@define-color` tokens and
+rules in `apps/native/gtk/src/style.css` (GTK). When a token changes, update
+this file and every theme file.
 
 ## Principles
 
@@ -81,7 +82,7 @@ Connection palette offered in the profile editor: `#4c9aff`, `#ff9f43`,
 | Column type, metadata | 11 mono |
 
 System monospace fonts are failure fallbacks only; missing glyphs may use
-platform, DirectWrite, or egui fallback fonts.
+platform, DirectWrite, fontconfig, or egui fallback fonts.
 
 ## Spacing, radius, elevation
 

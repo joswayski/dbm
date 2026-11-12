@@ -1,7 +1,7 @@
 name: Release
 
 # Every merge to main that touches the app builds the native apps (AppKit on
-# macOS, Win32 on Windows, egui on Linux), signs them, and publishes them as the
+# macOS, Win32 on Windows, GTK 4 on Linux), signs them, and publishes them as the
 # latest GitHub release. Installed copies read two manifests from
 # releases/latest/download and update in place:
 #
@@ -275,15 +275,16 @@ jobs:
       fail-fast: true
       matrix:
         include:
-          # Windows ships the native Win32 app, Linux the egui app.
+          # Windows ships the native Win32 app and Linux the GTK 4 app, both
+          # under the egui app's former asset names so installs update onto them.
           - os: windows-2025
             app: apps/native/win32
             binary: dbm-win32.exe
             asset: DBM-Windows-x64.exe
             signer: target/release/dbm-sign.exe
           - os: ubuntu-24.04
-            app: apps/native/workbench
-            binary: dbm-workbench
+            app: apps/native/gtk
+            binary: dbm-gtk
             asset: DBM-Linux-x64
             signer: target/release/dbm-sign
     runs-on: ${{ matrix.os }}
@@ -301,7 +302,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libssl-dev pkg-config libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev libxi-dev libxrandr-dev
+          sudo apt-get install -y libssl-dev pkg-config libgtk-4-dev
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.94.0

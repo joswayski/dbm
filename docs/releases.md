@@ -4,7 +4,9 @@ Anybase distributes the native apps directly through GitHub Releases:
 
 - macOS: the AppKit app as a DMG (Apple Silicon and Intel in one app);
 - Windows: the native Win32 app as an NSIS `.exe` installer; and
-- Linux: the egui app as an AppImage.
+- Linux: the GTK 4 app as an AppImage (it needs GTK 4.12 or newer from the
+  host; Ubuntu 24.04, Fedora 40 and other distributions new enough for the
+  build's glibc 2.39 ship it).
 
 Mobile distribution uses a separate, manually approved Caper-style workflow:
 signed Android APK/AAB builds and iPhone TestFlight uploads. Its `mobile-latest`
@@ -34,8 +36,11 @@ promoted to a wider audience.
    runtime, notarizes and staples it, and packages it three ways. The DMG is
    signed, notarized, and stapled too.
 3. **workbench** builds the Win32 app (`apps/native/win32`) on Windows and the
-   egui app (`apps/native/workbench`) on Linux. Linux is also packaged as an
-   AppImage (`apps/native/gtk/appimage.sh`).
+   GTK app (`apps/native/gtk`) on Linux. Linux is also packaged as an AppImage
+   (`apps/native/gtk/appimage.sh`). Both replaced egui under its asset names
+   (and, on Linux, the same `dbm-workbench` binary name inside the AppImage)
+   and read its settings file, so installed copies update onto them with their
+   profiles, passwords, window state and What's new history.
 4. **windows-installer** wraps the Windows executable in an NSIS installer
    (`apps/native/windows/installer.nsi`).
 5. Each build job signs its updater artifacts with the release updater key
@@ -101,7 +106,7 @@ Release builds check
 `https://github.com/joswayski/dbm/releases/latest/download/native-latest.json`
 five seconds after launch and every 30 minutes. **Check for updates…** checks
 on demand from the Anybase menu on macOS or the top bar's Help menu on
-Windows/Linux. The top bar normally shows a small, non-clickable **Version
+Windows and Linux. The top bar normally shows a small, non-clickable **Version
 <version>** label; manual checks show non-clickable status text above it.
 When the manifest lists a higher build number, an **Update to v<version>**
 button appears above the installed version. Failed manual checks offer
@@ -136,12 +141,12 @@ release newer than the installed build, newest first, with a title an older
 release repeats kept once. If the offered release has no highlights listed, it
 shows the plain notes instead.
 
-**What's new** (Anybase menu on macOS, Help menu on Windows/Linux) shows the
+**What's new** (Anybase menu on macOS, Help menu on Windows and Linux) shows the
 listed releases up to the installed build, grouped under their UTC publication
 day so every copy dates them alike, each version linking to its commit. The
 newest build whose highlights a copy has shown is stored locally (UserDefaults
-on macOS, the egui settings file `app.ron` on Windows/Linux, which the Win32
-app reads and writes in place). A first launch only records
+on macOS, the egui settings file `app.ron` on Windows and Linux, which the
+Win32 and GTK apps read and write in place). A first launch only records
 the installed build; a later launch opens What's new once for highlights it
 has not shown. Installing from the update review marks its highlights read, so
 the restarted app doesn't repeat them.
@@ -152,10 +157,11 @@ the restarted app doesn't repeat them.
 user-facing highlights, using Caper's and Captures' editorial prompt and Opus
 request configuration. It reads the first-parent commits since the previous
 release tag, keeping only desktop app sources (`apps/native/macos`,
-`apps/native/bridge`, `apps/native/workbench`, `apps/native/windows`, and
-`crates/`; tests, fixtures, mobile, website, docs, and secret-looking paths are
-excluded), and tells the model which app each change reaches so it can say "on
-macOS" or "on Windows and Linux". The last three releases' highlights are
+`apps/native/bridge`, `apps/native/workbench`, `apps/native/gtk`,
+`apps/native/desktop`, `apps/native/windows`, and `crates/`; tests, fixtures,
+mobile, website, docs, and secret-looking paths are excluded), and tells the
+model which app each change reaches so it can say "on macOS", "on Windows" or
+"on Linux". The last three releases' highlights are
 included so they are not repeated. Requests are capped at 400,000 characters by
 shortening diffs evenly and marking them truncated; commit metadata is always
 kept. Every highlight must cite commits in the range and pass plain-text,
