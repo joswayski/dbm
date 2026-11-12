@@ -94,6 +94,13 @@ const STEPS: &[(&str, fn(&mut Workbench))] = &[
             commit: Some("2937930046c2f0e986a1b71dc2faf2fbda55e4ba".into()),
         });
     }),
+    ("12-update-failed", |app| {
+        app.confirm_update = None;
+        app.updates.state = dbm_desktop::updates::State::Failed(
+            "Couldn't install the update: Access is denied. (os error 5)".into(),
+        );
+        app.updates.failure_open = true;
+    }),
 ];
 
 /// Seconds a step waits after its work finishes, for fades and layout.

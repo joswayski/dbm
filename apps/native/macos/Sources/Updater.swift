@@ -19,6 +19,10 @@ final class Updater {
     var onChange: (() -> Void)?
     /// Opens What's new with highlights this install has not shown yet.
     var onWhatsNew: (([[String: Any]]) -> Void)?
+    /// An install failed; the app shows the error with the download fallback.
+    var onInstallFailed: ((String) -> Void)?
+    /// Where to download Anybase by hand when an update can't install itself.
+    static let downloadPage = URL(string: "https://anyba.se")!
     /// The newest build whose release highlights this install has shown.
     private static let acknowledgedKey = "DBMWhatsNewAcknowledgedBuild"
     let currentBuild: Int?
@@ -75,7 +79,9 @@ final class Updater {
     func install(_ update: [String: Any]) {
         let current = Bundle.main.bundleURL
         guard FileManager.default.isWritableFile(atPath: current.deletingLastPathComponent().path) else {
-            state = .failed("Move Anybase into a folder you can write to, such as Applications, to update it.")
+            let message = "Move Anybase into a folder you can write to, such as Applications, to update it."
+            state = .failed(message)
+            onInstallFailed?(message)
             return
         }
         // The review just showed these highlights; the restarted build should
@@ -93,6 +99,7 @@ final class Updater {
             DispatchQueue.main.async { [weak self] in
                 if let failure {
                     self?.state = .failed(failure.localizedDescription)
+                    self?.onInstallFailed?(failure.localizedDescription)
                 } else {
                     // The user confirmed that unsaved work is discarded.
                     exit(0)

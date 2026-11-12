@@ -137,6 +137,47 @@ fn confirm_buttons(
 }
 
 impl Workbench {
+    /// Captures' fallback: the install error, Try again, and a link to
+    /// download the latest release by hand.
+    fn update_failed_dialog(&mut self, ui: &mut Ui) {
+        let updates::State::Failed(error) = &self.updates.state else {
+            return;
+        };
+        if !self.updates.failure_open {
+            return;
+        }
+        let error = error.clone();
+        let out = modal(ui, "Update failed", 440.0, |ui| {
+            dialog_title(ui, None, "The update couldn’t install");
+            ui.label_wrapped(&error, theme::ui(12.5), theme::SECONDARY, false);
+            ui.add_space(12.0);
+            ui.label_wrapped(
+                "Try again, or download the latest version from anyba.se and install it over this one. Your connections and history stay.",
+                theme::ui(12.0),
+                theme::MUTED,
+                false,
+            );
+            ui.add_space(14.0);
+            confirm_buttons(
+                ui,
+                primary_button("Download from anyba.se"),
+                "Try again",
+                true,
+            )
+        });
+        match out.inner.flatten() {
+            Some(true) => {
+                ui.ctx.open_url(updates::DOWNLOAD_PAGE_URL);
+                self.updates.failure_open = false;
+            }
+            Some(false) => self.updates.check(false),
+            None if out.backdrop_clicked || ui.ctx.key_pressed(Key::Escape) => {
+                self.updates.failure_open = false;
+            }
+            None => {}
+        }
+    }
+
     pub(super) fn dialogs(&mut self, ui: &mut Ui) {
         self.profile_dialog(ui);
         if let Some(id) = self.confirm_delete {
@@ -261,6 +302,7 @@ impl Workbench {
                 }
             }
         }
+        self.update_failed_dialog(ui);
         self.whats_new_dialog(ui);
         if let Some(tab_id) = self.confirm_export {
             let total = self

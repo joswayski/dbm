@@ -574,7 +574,10 @@ impl App {
                 let button = ui::button("secondary-button", None, &label, &detail);
                 button.add_css_class("small");
                 let app = self.clone();
-                button.connect_clicked(move |_| app.update(|state| state.updates.check(false)));
+                // Shows the error with Try again and the download fallback.
+                button.connect_clicked(move |_| {
+                    app.update(|state| state.updates.failure_open = true)
+                });
                 column.append(&button);
             }
             Update::Idle => {}
@@ -607,6 +610,12 @@ impl App {
                         Box::new(move || check.update(|state| state.updates.check(false))),
                     ));
                 }
+                let download = app.clone();
+                items.push((
+                    "Download the latest version…".into(),
+                    false,
+                    Box::new(move || crate::dialogs::open_download_page(&download)),
+                ));
                 items
             },
             200,

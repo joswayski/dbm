@@ -5,7 +5,7 @@
 
 use dbm_core::connection_url::display_connection_url;
 use dbm_core::models::{DatabaseEngine, TlsMode};
-use dbm_desktop::updates::WhatsNew;
+use dbm_desktop::updates::{DOWNLOAD_PAGE_URL, State as Update, WhatsNew};
 use gtk::glib;
 use gtk::prelude::*;
 
@@ -37,6 +37,9 @@ pub fn signature(state: &State) -> String {
     if let Some(update) = &state.confirm_update {
         return format!("update|{}", update.build);
     }
+    if let Some(error) = update_failure(state) {
+        return format!("update-failed|{error}");
+    }
     match &state.updates.whats_new {
         WhatsNew::Closed => {}
         WhatsNew::Loading => return "whatsnew|loading".into(),
@@ -61,6 +64,9 @@ pub fn dismiss(state: &mut State) {
     if state.confirm_query.take().is_some() || state.confirm_update.take().is_some() {
         return;
     }
+    if std::mem::take(&mut state.updates.failure_open) {
+        return;
+    }
     if !matches!(state.updates.whats_new, WhatsNew::Closed) {
         state.updates.close_whats_new();
         return;
@@ -81,6 +87,8 @@ pub fn build(app: &App, state: &State) -> Option<gtk::Widget> {
         (query_dialog(app, &confirm.sql), 480)
     } else if let Some(update) = &state.confirm_update {
         (update_dialog(app, update), 460)
+    } else if let Some(error) = update_failure(state) {
+        (update_failed_dialog(app, error), 440)
     } else if !matches!(state.updates.whats_new, WhatsNew::Closed) {
         (whats_new_dialog(app, &state.updates.whats_new), 460)
     } else if let Some(tab) = state.confirm_export {
@@ -299,6 +307,48 @@ fn highlights(content: &gtk::Box, items: &[dbm_update::Highlight]) {
         text.set_margin_bottom(8);
         content.append(&text);
     }
+}
+
+/// The install error to show, while the failure dialog is open.
+fn update_failure(state: &State) -> Option<&str> {
+    match &state.updates.state {
+        Update::Failed(error) if state.updates.failure_open => Some(error),
+        _ => None,
+    }
+}
+
+/// Captures' fallback: the error, Try again, and a link to download the
+/// latest release by hand when the in-place update can't finish.
+fn update_failed_dialog(app: &App, error: &str) -> gtk::Box {
+    let content = ui::vbox(2);
+    content.append(&title("The update couldn’t install", None));
+    content.append(&body(error, &["secondary"]));
+    let hint = body(
+        "Try again, or download the latest version from anyba.se and install it over this one. Your connections and history stay.",
+        &["size-12", "muted"],
+    );
+    hint.set_margin_top(12);
+    content.append(&hint);
+    let retry = ui::button("secondary-button", None, "Try again", "");
+    let handle = app.clone();
+    retry.connect_clicked(move |_| handle.update(|state| state.updates.check(false)));
+    let download = ui::button("primary", None, "Download from anyba.se", DOWNLOAD_PAGE_URL);
+    let handle = app.clone();
+    download.connect_clicked(move |_| {
+        open_download_page(&handle);
+        handle.update(|state| state.updates.failure_open = false);
+    });
+    content.append(&buttons(vec![retry, download]));
+    content
+}
+
+/// Opens the download page in the browser.
+pub fn open_download_page(app: &App) {
+    gtk::UriLauncher::new(DOWNLOAD_PAGE_URL).launch(
+        Some(&app.window),
+        None::<&gtk::gio::Cancellable>,
+        |_| {},
+    );
 }
 
 fn update_dialog(app: &App, update: &dbm_update::Available) -> gtk::Box {

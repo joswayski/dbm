@@ -1664,6 +1664,7 @@ impl State {
             || self.confirm_delete.is_some()
             || self.confirm_query.is_some()
             || self.confirm_update.is_some()
+            || self.updates.failure_open
             || !matches!(self.updates.whats_new, updates::WhatsNew::Closed)
             || self.confirm_export.is_some()
     }

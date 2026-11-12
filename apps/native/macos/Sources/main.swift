@@ -55,6 +55,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, NS
         loadProfiles(openOnStartup: true)
         updater.onChange = { [weak self] in self?.updateChanged() }
         updater.onWhatsNew = { [weak self] days in self?.showWhatsNew(days) }
+        updater.onInstallFailed = { [weak self] message in self?.showUpdateFailed(message) }
         topBar.updateButton.handler = { [weak self] in self?.updateClicked() }
         topBar.showUpdate(updater)
         if !demo {
@@ -75,6 +76,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, NS
     /// Checks on demand, or installs a found build after confirming that
     /// unsaved query text and staged edits will be discarded.
     private func updateClicked() {
+        if case .failed(let message) = updater.state {
+            showUpdateFailed(message)
+            return
+        }
         guard case .available(let update) = updater.state else {
             updater.check()
             return
@@ -87,6 +92,25 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, NS
         alert.addButton(withTitle: "Later")
         alert.beginSheetModal(for: window) { [weak self] response in
             if response == .alertFirstButtonReturn { self?.updater.install(update) }
+        }
+    }
+
+    /// Captures' fallback: the install error, Try Again, and a link to
+    /// download the latest release by hand.
+    private func showUpdateFailed(_ message: String) {
+        guard window.attachedSheet == nil else { return }
+        let alert = NSAlert()
+        alert.messageText = "The update couldn’t install"
+        alert.informativeText = "\(message)\n\nTry again, or download the latest version from anyba.se and install it over this one. Your connections and history stay."
+        alert.addButton(withTitle: "Download from anyba.se")
+        alert.addButton(withTitle: "Try Again")
+        alert.addButton(withTitle: "Close")
+        alert.beginSheetModal(for: window) { [weak self] response in
+            switch response {
+            case .alertFirstButtonReturn: NSWorkspace.shared.open(Updater.downloadPage)
+            case .alertSecondButtonReturn: self?.updater.check()
+            default: break
+            }
         }
     }
 
@@ -837,6 +861,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, NS
     @objc private func menuNewQuery() { if let id = activeProfileID, workspaces[id] != nil { openQuery(id) } }
     @objc private func menuCloseTab() { if let activeTab { closeTab(activeTab) } else { window.performClose(nil) } }
     @objc private func menuCheckUpdates() { updater.check() }
+    @objc private func menuDownloadLatest() { NSWorkspace.shared.open(Updater.downloadPage) }
 
     @objc private func menuWhatsNew() {
         updater.loadWhatsNew(after: 0) { [weak self] result in
@@ -876,6 +901,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, NS
         appMenu.addItem(withTitle: "About Anybase", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         appMenu.addItem(withTitle: "What’s new", action: #selector(menuWhatsNew), keyEquivalent: "").target = self
         appMenu.addItem(withTitle: "Check for updates…", action: #selector(menuCheckUpdates), keyEquivalent: "").target = self
+        appMenu.addItem(withTitle: "Download the latest version…", action: #selector(menuDownloadLatest), keyEquivalent: "").target = self
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Hide Anybase", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         appMenu.addItem(withTitle: "Quit Anybase", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")

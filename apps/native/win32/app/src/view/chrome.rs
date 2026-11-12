@@ -116,7 +116,8 @@ impl Workbench {
         }
         let mut open = false;
         let mut check = false;
-        widgets::menu(ui, &r, 200.0, |ui| {
+        let mut download = false;
+        widgets::menu(ui, &r, 220.0, |ui| {
             if widgets::menu_item(ui, "What’s new", false).clicked {
                 open = true;
                 return true;
@@ -125,8 +126,15 @@ impl Workbench {
                 check = true;
                 return true;
             }
+            if widgets::menu_item(ui, "Download the latest version…", false).clicked {
+                download = true;
+                return true;
+            }
             false
         });
+        if download {
+            ui.ctx.open_url(updates::DOWNLOAD_PAGE_URL);
+        }
         if open {
             self.updates.open_whats_new();
         }
@@ -170,7 +178,8 @@ impl Workbench {
                     if let updates::State::Available(update) = &self.updates.state {
                         self.confirm_update = Some(update.clone());
                     } else {
-                        self.updates.check(false);
+                        // Shows the error with Try again and the download fallback.
+                        self.updates.failure_open = true;
                     }
                 }
             }

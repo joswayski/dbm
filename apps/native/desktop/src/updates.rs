@@ -11,6 +11,9 @@ use std::sync::mpsc::{self, Receiver, Sender};
 
 use dbm_update::{Available, Day, Release};
 
+/// Where to download Anybase by hand when an update can't install itself.
+pub const DOWNLOAD_PAGE_URL: &str = "https://anyba.se";
+
 const FIRST_CHECK_AFTER: f64 = 5.0;
 const CHECK_EVERY: f64 = 30.0 * 60.0;
 
@@ -47,6 +50,10 @@ pub enum WhatsNew {
 pub struct Updates {
     pub state: State,
     pub whats_new: WhatsNew,
+    /// Shows the update failure dialog (the error, Try again, and Download
+    /// from anyba.se). Opens on its own when an install fails, so a failure
+    /// is never only a tooltip.
+    pub failure_open: bool,
     current: Option<u64>,
     /// The newest build whose highlights this install has shown or skipped.
     acknowledged: Option<u64>,
@@ -64,6 +71,7 @@ impl Updates {
         Self {
             state: State::Idle,
             whats_new: WhatsNew::Closed,
+            failure_open: false,
             current: dbm_update::current_build(),
             acknowledged: None,
             acknowledged_changed: false,
@@ -100,11 +108,20 @@ impl Updates {
                 Event::Downloaded(Ok(path)) => {
                     if let Err(error) = replace_and_restart(&path) {
                         self.state = State::Failed(error);
+                        self.failure_open = true;
                     }
                 }
-                Event::Downloaded(Err(error)) => self.state = State::Failed(error),
+                Event::Downloaded(Err(error)) => {
+                    self.state = State::Failed(error);
+                    self.failure_open = true;
+                }
                 Event::History { result, unread } => self.history_loaded(result, unread),
             }
+        }
+        // The dialog only describes a failure; a later check that finds an
+        // update closes it.
+        if !matches!(self.state, State::Failed(_)) {
+            self.failure_open = false;
         }
         if !self.enabled() {
             return None;
@@ -125,6 +142,7 @@ impl Updates {
         }
         if !quiet {
             self.state = State::Checking;
+            self.failure_open = false;
         }
         let sender = self.sender.clone();
         let wake = self.wake.clone();
@@ -373,6 +391,34 @@ mod tests {
                 body: String::new(),
             }],
         }
+    }
+
+    #[test]
+    fn a_failed_install_opens_the_failure_dialog_until_a_retry() {
+        let mut updates = Updates::new(std::sync::Arc::new(|| {}));
+        updates.current = Some(30);
+        updates.state = State::Installing;
+        updates
+            .sender
+            .send(Event::Downloaded(Err("signature mismatch".into())))
+            .unwrap();
+        updates.poll(0.0);
+        assert!(matches!(&updates.state, State::Failed(m) if m == "signature mismatch"));
+        assert!(updates.failure_open);
+        // Trying again closes it; a failed quiet check never opens it.
+        updates.check(false);
+        assert!(!updates.failure_open);
+        updates.state = State::Idle;
+        updates
+            .sender
+            .send(Event::Checked {
+                result: Err("offline".into()),
+                quiet: true,
+            })
+            .unwrap();
+        updates.poll(1.0);
+        assert!(!updates.failure_open);
+        assert!(matches!(updates.state, State::Idle | State::Checking));
     }
 
     #[test]

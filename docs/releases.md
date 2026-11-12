@@ -110,12 +110,19 @@ Windows and Linux. The top bar normally shows a small, non-clickable **Version
 <version>** label; manual checks show non-clickable status text above it.
 When the manifest lists a higher build number, an **Update to v<version>**
 button appears above the installed version. Failed manual checks offer
-**Retry update**, with the error in its tooltip. Installing asks for
+**Retry update**. Installing asks for
 confirmation, because unsaved query text and staged edits are discarded. It
 then downloads the platform's artifact, verifies its minisign signature
 against the public key in `crates/dbm-update` (including that the signed
 `file:` name in the trusted comment matches the artifact's URL, so release
 assets must keep the name they were signed under), swaps it in, and restarts.
+
+If an install fails, Anybase opens a dialog with the error, **Try again**,
+and **Download from anyba.se**, the same fallback Captures uses: the user can
+install the latest release over the old one, and profiles and history stay.
+Clicking a later **Retry update** button, or failed manual checks, reopen it.
+**Download the latest version…** sits beside **Check for updates…** in the
+same menu.
 
 - **macOS:** the new bundle must also pass `codesign --verify`, and is swapped
   in after Anybase quits. The restart launches a fresh instance and activates
