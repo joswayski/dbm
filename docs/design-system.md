@@ -4,9 +4,10 @@ Graphite is Anybase's visual language: neutral graphite surfaces, a system-blue
 accent, dense but readable data, and native desktop idioms (source-list
 sidebar, segmented controls, a row inspector). It is the reference for both
 native apps. The tokens are defined in `enum Graphite` in
-`apps/native/macos/Sources/Theme.swift` (AppKit) and in
+`apps/native/macos/Sources/Theme.swift` (AppKit),
+`apps/native/win32/ui/src/theme.rs` (Win32), and
 `apps/native/workbench/src/theme.rs` (egui). When a token changes, update this
-file and both theme files.
+file and every theme file.
 
 ## Principles
 
@@ -64,7 +65,8 @@ Connection palette offered in the profile editor: `#4c9aff`, `#ff9f43`,
 - Use the real regular (400) and bold (700) faces: former medium roles use
   regular, and semibold roles use bold. Keep the existing size scale.
 - Desktop font files live in `apps/native/workbench/assets`; macOS `build.sh`
-  copies them into its bundle. Android and iPhone bundle the same TTFs in their
+  copies them into its bundle, and the Win32 app embeds them and loads them
+  into DirectWrite as an in-memory font collection. Android and iPhone bundle the same TTFs in their
   resources, and the website bundles WOFF2 faces from `@fontsource/space-mono`.
   No client fetches fonts from an external service at runtime.
 - Native system dialogs, menus, and SF Symbol icons retain platform rendering.
@@ -79,7 +81,7 @@ Connection palette offered in the profile editor: `#4c9aff`, `#ff9f43`,
 | Column type, metadata | 11 mono |
 
 System monospace fonts are failure fallbacks only; missing glyphs may use
-platform or egui fallback fonts.
+platform, DirectWrite, or egui fallback fonts.
 
 ## Spacing, radius, elevation
 

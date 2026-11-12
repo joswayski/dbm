@@ -1,7 +1,7 @@
 name: Release
 
 # Every merge to main that touches the app builds the native apps (AppKit on
-# macOS, egui on Windows and Linux), signs them, and publishes them as the
+# macOS, Win32 on Windows, egui on Linux), signs them, and publishes them as the
 # latest GitHub release. Installed copies read two manifests from
 # releases/latest/download and update in place:
 #
@@ -275,11 +275,14 @@ jobs:
       fail-fast: true
       matrix:
         include:
+          # Windows ships the native Win32 app, Linux the egui app.
           - os: windows-2025
-            binary: dbm-workbench.exe
+            app: apps/native/win32
+            binary: dbm-win32.exe
             asset: DBM-Windows-x64.exe
             signer: target/release/dbm-sign.exe
           - os: ubuntu-24.04
+            app: apps/native/workbench
             binary: dbm-workbench
             asset: DBM-Linux-x64
             signer: target/release/dbm-sign
@@ -309,16 +312,16 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
-            apps/native/workbench -> target
+            ${{ matrix.app }} -> target
             . -> target
-      - run: cargo build --manifest-path apps/native/workbench/Cargo.toml --locked --release
+      - run: cargo build --manifest-path ${{ matrix.app }}/Cargo.toml --locked --release
       - run: cargo build --locked --release -p dbm-sign
       - name: Stage and sign the executable
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p release
-          cp "apps/native/workbench/target/release/${{ matrix.binary }}" "release/${{ matrix.asset }}"
+          cp "${{ matrix.app }}/target/release/${{ matrix.binary }}" "release/${{ matrix.asset }}"
           "${{ matrix.signer }}" "release/${{ matrix.asset }}"
       - name: Package and sign the AppImage
         if: runner.os == 'Linux'
@@ -329,7 +332,7 @@ jobs:
             https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
           chmod +x "$RUNNER_TEMP/appimagetool"
           APPIMAGETOOL="$RUNNER_TEMP/appimagetool" bash apps/native/gtk/appimage.sh \
-            "apps/native/workbench/target/release/${{ matrix.binary }}" release/DBM-Linux-x86_64.AppImage
+            "${{ matrix.app }}/target/release/${{ matrix.binary }}" release/DBM-Linux-x86_64.AppImage
           "${{ matrix.signer }}" release/DBM-Linux-x86_64.AppImage
       - uses: actions/upload-artifact@v4
         with:

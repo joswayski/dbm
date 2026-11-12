@@ -47,7 +47,8 @@ const highlight = (commit) => ({
 
 test("only desktop app sources count, each tagged with the apps it reaches", () => {
   assert.deepEqual(pathApps("apps/native/macos/Sources/Grid.swift"), ["macOS"]);
-  assert.deepEqual(pathApps("apps/native/workbench/src/workbench.rs"), ["Windows", "Linux"]);
+  assert.deepEqual(pathApps("apps/native/workbench/src/workbench.rs"), ["Linux"]);
+  assert.deepEqual(pathApps("apps/native/win32/app/src/view/table.rs"), ["Windows"]);
   assert.deepEqual(pathApps("apps/native/desktop/src/updates.rs"), ["Windows", "Linux"]);
   assert.deepEqual(pathApps("crates/dbm-core/src/lib.rs"), ["macOS", "Windows", "Linux"]);
   for (const path of [
@@ -71,6 +72,7 @@ test("summarizes desktop changes, including merged pull requests, for Opus", asy
   f.commit(
     {
       "apps/native/workbench/src/table_view.rs": "COPY-AS-CSV",
+      "apps/native/win32/app/src/view/table.rs": "COPY-AS-CSV",
       "crates/dbm-core/tests/fixtures.rs": "TEST-ONLY",
       "apps/native/android/app/src/main/java/Main.kt": "MOBILE-ONLY",
     },

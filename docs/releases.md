@@ -3,7 +3,7 @@
 Anybase distributes the native apps directly through GitHub Releases:
 
 - macOS: the AppKit app as a DMG (Apple Silicon and Intel in one app);
-- Windows: the egui app as an NSIS `.exe` installer; and
+- Windows: the native Win32 app as an NSIS `.exe` installer; and
 - Linux: the egui app as an AppImage.
 
 Mobile distribution uses a separate, manually approved Caper-style workflow:
@@ -33,8 +33,9 @@ promoted to a wider audience.
    (`DBM_UNIVERSAL=1`), signs it with the Developer ID and the hardened
    runtime, notarizes and staples it, and packages it three ways. The DMG is
    signed, notarized, and stapled too.
-3. **workbench** builds the egui app on Windows and Linux. Linux is also
-   packaged as an AppImage (`apps/native/workbench/appimage.sh`).
+3. **workbench** builds the Win32 app (`apps/native/win32`) on Windows and the
+   egui app (`apps/native/workbench`) on Linux. Linux is also packaged as an
+   AppImage (`apps/native/gtk/appimage.sh`).
 4. **windows-installer** wraps the Windows executable in an NSIS installer
    (`apps/native/windows/installer.nsi`).
 5. Each build job signs its updater artifacts with the release updater key
@@ -139,7 +140,8 @@ shows the plain notes instead.
 listed releases up to the installed build, grouped under their UTC publication
 day so every copy dates them alike, each version linking to its commit. The
 newest build whose highlights a copy has shown is stored locally (UserDefaults
-on macOS, the egui settings file on Windows/Linux). A first launch only records
+on macOS, the egui settings file `app.ron` on Windows/Linux, which the Win32
+app reads and writes in place). A first launch only records
 the installed build; a later launch opens What's new once for highlights it
 has not shown. Installing from the update review marks its highlights read, so
 the restarted app doesn't repeat them.

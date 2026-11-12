@@ -1,11 +1,13 @@
 # Developing Anybase
 
-Anybase's released desktop product is two native clients over one Rust core:
+Anybase's released desktop product is three native clients over one Rust core:
 
 - **macOS:** a Swift/AppKit app in `apps/native/macos`, calling the Rust core
   through the C ABI bridge in `apps/native/bridge`.
-- **Windows and Linux:** a Rust egui app in `apps/native/workbench`, its own
-  Cargo workspace.
+- **Windows:** a Rust Win32 app (Direct2D, DirectWrite, DirectComposition, UI
+  Automation) in `apps/native/win32`, its own Cargo workspace.
+- **Linux:** a Rust egui app in `apps/native/workbench`, its own Cargo
+  workspace. (It also still builds and runs on Windows.)
 
 The database adapters, models, session state, credentials, and SQLite store
 live in `crates/dbm-core`; the updater lives in `crates/dbm-update`. See
@@ -52,7 +54,25 @@ target/native/Anybase.app/Contents/MacOS/dbm --demo
 `DBM_SIGNING_IDENTITY` signs with a Developer ID and the hardened runtime
 instead, as the release workflow does.
 
-On Windows or Linux:
+On Windows:
+
+```sh
+cargo run --manifest-path apps/native/win32/Cargo.toml --locked --release
+# Isolated in-memory fixture:
+cargo run --manifest-path apps/native/win32/Cargo.toml --locked --release -- --demo
+# Walk the demo's main screens into PNGs, then quit:
+cargo run --manifest-path apps/native/win32/Cargo.toml --locked --release -- --demo --snapshot-dir shots
+```
+
+The Win32 app only runs on Windows. From Linux, `cargo xwin` cross-compiles
+and lints it (`cargo xwin clippy --all-targets --target
+x86_64-pc-windows-msvc` in `apps/native/win32`), and the `raster` feature
+renders the same snapshot walk in software: `cargo run -p dbm-win32 --features
+raster -- --snapshot-dir shots`. The `Win32 preview` workflow (Run workflow)
+snapshots the real app on a hosted Windows runner and benchmarks it against
+egui.
+
+On Linux:
 
 ```sh
 cargo run --manifest-path apps/native/workbench/Cargo.toml --locked --release
@@ -75,6 +95,9 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --manifest-path apps/native/workbench/Cargo.toml --all -- --check
 cargo test --manifest-path apps/native/workbench/Cargo.toml --locked
 cargo clippy --manifest-path apps/native/workbench/Cargo.toml --locked --all-targets -- -D warnings
+cargo fmt --manifest-path apps/native/win32/Cargo.toml --all -- --check
+cargo test --manifest-path apps/native/win32/Cargo.toml --locked
+cargo clippy --manifest-path apps/native/win32/Cargo.toml --locked --all-targets -- -D warnings
 npm --prefix apps/web ci
 npm --prefix apps/web run check
 npm --prefix apps/web run test:all
@@ -141,8 +164,9 @@ intact when an orb wakes. No long-running services are declared in
 
 Local builds are not installed automatically. On macOS, copy
 `target/native/Anybase.app` into `/Applications` yourself if you want to run it
-from there. On Windows and Linux, the release binary is
-`apps/native/workbench/target/release/dbm-workbench` (`.exe` on Windows).
+from there. On Windows, the release binary is
+`apps/native/win32/target/release/dbm-win32.exe`; on Linux,
+`apps/native/workbench/target/release/dbm-workbench`.
 
 Development builds have no build number, so they never check for updates.
 
@@ -197,7 +221,7 @@ in [the rename plan](anybase-migration.md#website).
 
 ## Screenshots
 
-The README screenshots in `docs/screenshots/` show the Windows/Linux app
+The README screenshots in `docs/screenshots/` show the egui app
 connected to real local PostgreSQL, MySQL, and Redis servers loaded with sample
 data, captured at 2× in a 1472×920-point window (2944×1840 pixels). The
 connection dialog needs that height to fit without scrolling.

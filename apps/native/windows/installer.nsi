@@ -3,7 +3,7 @@
 ; needed. The folder, executable, and uninstall key keep their DBM names so
 ; installs from before the Anybase rename update in place.
 ;
-;   makensis -DVERSION=2026.9.2802 -DEXE=path\to\dbm-workbench.exe \
+;   makensis -DVERSION=2026.9.2802 -DEXE=path\to\dbm-win32.exe \
 ;            -DICON=path\to\icon.ico -DOUTFILE=DBM-Windows-x64-setup.exe installer.nsi
 ;
 ; The former Tauri app installed the same way (same folder, executable name,

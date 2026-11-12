@@ -27,8 +27,9 @@ DBM name while [the rename](docs/anybase-migration.md) rolls out.
 
 ## Features
 
-- Released desktop apps use AppKit on macOS and egui on Windows/Linux, with
-  bundled Space Mono typography for UI, SQL, and data.
+- Released desktop apps are native: AppKit on macOS, Win32 (Direct2D) on
+  Windows, and egui on Linux, with bundled Space Mono typography for UI, SQL,
+  and data.
 - Browse databases, schemas, tables, and Redis keys, with filters, sorting, and
   CSV export.
 - Edit rows safely: changes are staged, previewed, and saved together.

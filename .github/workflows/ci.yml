@@ -155,8 +155,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-2025, ubuntu-24.04]
-    runs-on: ${{ needs.route.outputs.windows == 'true' && startsWith(matrix.os, 'windows') && fromJSON('["self-hosted","josewin"]') || needs.route.outputs.linux == 'true' && startsWith(matrix.os, 'ubuntu') && fromJSON('["self-hosted","joselinux"]') || matrix.os }}
+        # Windows ships the Win32 app (native-win32); egui ships on Linux only.
+        os: [ubuntu-24.04]
+    runs-on: ${{ needs.route.outputs.linux == 'true' && fromJSON('["self-hosted","joselinux"]') || matrix.os }}
     timeout-minutes: 30
     env:
       # CI-only, as in the Rust job; the release build below is unaffected.
@@ -183,9 +184,6 @@ jobs:
       - name: Archive Linux native development binary
         if: runner.os == 'Linux'
         run: tar -czf DBM-linux.tar.gz -C apps/native/workbench/target/release dbm-workbench
-      - name: Archive Windows native development binary
-        if: runner.os == 'Windows'
-        run: Compress-Archive apps/native/workbench/target/release/dbm-workbench.exe DBM-windows.zip
       - uses: actions/upload-artifact@v4
         with:
           name: DBM-${{ runner.os }}-development
@@ -212,11 +210,11 @@ jobs:
       - run: cargo test --manifest-path apps/native/win32/Cargo.toml --locked
       - run: cargo clippy --manifest-path apps/native/win32/Cargo.toml --locked --all-targets -- -D warnings
       - run: cargo build --manifest-path apps/native/win32/Cargo.toml --locked --release
-      - run: Compress-Archive apps/native/win32/target/release/dbm-win32.exe Anybase-Win32-windows.zip
+      - run: Compress-Archive apps/native/win32/target/release/dbm-win32.exe DBM-windows.zip
       - uses: actions/upload-artifact@v4
         with:
-          name: Anybase-Win32-development
-          path: Anybase-Win32-windows.zip
+          name: DBM-Windows-development
+          path: DBM-windows.zip
 
   native-gtk:
     needs: route

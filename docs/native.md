@@ -1,7 +1,7 @@
 # Native architecture
 
 Anybase ships browser-free desktop apps on **macOS, Windows, and Linux**: AppKit on
-macOS and egui on Windows and Linux, over one shared Rust core. Android Compose
+macOS, a native Win32 app on Windows, and egui on Linux, over one shared Rust core. Android Compose
 and iPhone UIKit clients are in development and are not desktop-parity or
 store releases. None uses Electron, JavaScript, or a WebView. See
 [development](development.md) for desktop commands, [mobile](mobile.md) for the
@@ -19,13 +19,14 @@ mobile contract, and [releases](releases.md) for desktop packaging and updates.
   calls, and disposal; Rust owns response allocations and exposes their free
   function. Requests/results use JSON across this boundary (including profile
   passwords when saving), not a subprocess or a network service.
-- `apps/native/workbench` uses Rust with egui/wgpu on Windows and Linux, calling
+- `apps/native/workbench` uses Rust with egui/wgpu on Linux (it also still runs on Windows), calling
   the core directly on a serialized worker with a two-thread Tokio runtime.
   Rendering uses native graphics backends and bundled Space Mono fonts. **egui draws
   its own controls, not Windows/GTK system widgets.** It is a separate Cargo
   workspace, so egui's dependency graph stays out of the root workspace.
-- `apps/native/win32` is a native Windows app being built to replace egui on
-  Windows (not shipped yet). It is its own Cargo workspace: `dbm-ui`, a small
+- `apps/native/win32` is the Windows app, which replaced egui there. It ships
+  under the same executable, installer, settings file, and credential names,
+  so egui installs update onto it. It is its own Cargo workspace: `dbm-ui`, a small
   immediate-mode toolkit rendering with Direct2D/DirectWrite into a
   DirectComposition swap chain and exposing UI Automation, and `dbm-win32`,
   the app on `dbm-desktop`. `--demo` uses the same fixture as egui. The
@@ -65,18 +66,22 @@ discarded with that session.
   and the hardened runtime. It bundles the bridge dylib, the icon, and the
   Space Mono fonts, and records `DBM_NATIVE_BUILD`, `DBM_APP_VERSION`, and
   `DBM_NATIVE_VERSION` in `Info.plist` when they are set.
+- `cargo build --manifest-path apps/native/win32/Cargo.toml --locked --release`
+  produces `apps/native/win32/target/release/dbm-win32.exe` with the icon
+  embedded. Release packaging renames it `DBM-Windows-x64.exe` and installs it
+  as `dbm.exe`, the name egui installs used.
 - `cargo build --manifest-path apps/native/workbench/Cargo.toml --locked --release`
-  produces `apps/native/workbench/target/release/dbm-workbench` (`.exe` on
-  Windows). Release packaging renames it and, on Linux, wraps it with
-  `apps/native/workbench/appimage.sh`.
+  produces `apps/native/workbench/target/release/dbm-workbench`. Release
+  packaging wraps it with `apps/native/gtk/appimage.sh` on Linux.
 - `bash apps/native/android/build.sh` builds the two Rust static archives before
   Gradle builds/tests the Android development APK. iPhone simulator/device build
   commands and platform constraints are documented in [mobile](mobile.md).
 
-Both apps accept `--demo`, an isolated in-memory fixture that loads no local
-profiles and connects to no database. The AppKit app also accepts
+Every desktop app accepts `--demo`, an isolated in-memory fixture that loads no local
+profiles and connects to no database. The AppKit and Win32 apps also accept
 `--demo --snapshot-dir DIR`, which walks the fixture through its main states
-and writes a PNG of each; CI uses it to review the macOS UI.
+and writes a PNG of each; CI uses it to review the macOS UI, and the
+`Win32 preview` workflow the Windows UI.
 
 **Use disposable databases or read-only profiles when testing.** Outside
 `--demo`, every build uses the real saved profiles and writes query history to
@@ -107,35 +112,39 @@ never wait behind a running query.
 
 ## Feature coverage
 
-Both hosts implement the same feature set, listed in [features](features.md).
+All hosts implement the same feature set, listed in [features](features.md).
 "Done" on egui means exercised by hand on Linux against disposable PostgreSQL
 and Redis servers. On AppKit it means implemented and captured in the macOS CI
-snapshots (`--demo --snapshot-dir`).
+snapshots (`--demo --snapshot-dir`). On Win32 it means implemented, ported
+from the egui app's state and rules, and its screens captured on a hosted
+Windows runner (welcome, query results, table, inspector, staged edits,
+connection dialog, collapsed sidebar, Redis); it has not been driven by hand
+on a physical Windows machine or against live servers yet.
 
-| Area | egui (Windows/Linux) | AppKit (macOS) |
-| --- | --- | --- |
-| Graphite layout: sidebar, top bar, connection-colored tab strip, toolbars, cards, Space Mono fonts | Done | Done |
-| Welcome screen, sidebar collapse and resize (persisted) | Done | Done |
-| Profiles: engine picker, URL import, colors, TLS/CA, read-only, test before save | Done | Done |
-| Sidebar: connection subtitles, database picker, filterable schema/keyspace tree, refresh summary toast | Done | Done |
-| Query: statement under cursor or selection, Redis line mode, Cmd/Ctrl+Enter | Done | Done |
-| Query: SQL/Redis highlighting, active-statement outline, line numbers | Done | Done |
-| Query: keyword and Redis command completion | Done (shared keyword list, not schema-aware) | Done (same list) |
-| Query: confirmation before destructive statements | Done | Done |
-| Query: per-profile+database history, refresh, `SELECT *` opens the editable viewer | Done | Done |
-| Table: all filter operators, multiple filters, sort, preview limit with stepper, paging | Done | Done |
-| Table: CSV copy (visible page, selection) and full filtered export with progress and Open / Show in folder | Done | Done |
-| Table: multi-row selection, inline and inspector edits, typed/NULL parsing | Done | Done |
-| Table: staged deletes, hover change preview, pending bar, conflict reload | Done | Done |
-| Table: column resize, collapse, Reset columns; delayed Refreshing overlay | Done | Done |
-| Messages: app error strip, inline query/table errors and notices, export result, toast | Done | Done |
-| Redis: typed key views and edits (strings, hashes, lists, sets, sorted sets), key index | Done through the shared table view | Done through the shared table view |
-| Tabs: rename, collapse, close guards for staged edits | Done | Done |
-| Keyboard: Delete stages deletion, Escape clears/reverts, Enter commits edits | Done | Done |
-| Keyboard: new connection, new query, close tab (⌘N/⌘T/⌘W, Ctrl+N/T/W) | Done | Done |
-| Updates: Check for updates / Update to …, signed download, in-place swap | Done | Done |
-| Accessibility | AccessKit enabled; screen readers not yet validated | Native AppKit controls; not yet validated |
-| Light theme | Not implemented | Not implemented |
+| Area | egui (Linux) | Win32 (Windows) | AppKit (macOS) |
+| --- | --- | --- | --- |
+| Graphite layout: sidebar, top bar, connection-colored tab strip, toolbars, cards, Space Mono fonts | Done | Done | Done |
+| Welcome screen, sidebar collapse and resize (persisted) | Done | Done | Done |
+| Profiles: engine picker, URL import, colors, TLS/CA, read-only, test before save | Done | Done | Done |
+| Sidebar: connection subtitles, database picker, filterable schema/keyspace tree, refresh summary toast | Done | Done | Done |
+| Query: statement under cursor or selection, Redis line mode, Cmd/Ctrl+Enter | Done | Done | Done |
+| Query: SQL/Redis highlighting, active-statement outline, line numbers | Done | Done | Done |
+| Query: keyword and Redis command completion | Done (shared keyword list, not schema-aware) | Done (same list) | Done (same list) |
+| Query: confirmation before destructive statements | Done | Done | Done |
+| Query: per-profile+database history, refresh, `SELECT *` opens the editable viewer | Done | Done | Done |
+| Table: all filter operators, multiple filters, sort, preview limit with stepper, paging | Done | Done | Done |
+| Table: CSV copy (visible page, selection) and full filtered export with progress and Open / Show in folder | Done | Done | Done |
+| Table: multi-row selection, inline and inspector edits, typed/NULL parsing | Done | Done | Done |
+| Table: staged deletes, hover change preview, pending bar, conflict reload | Done | Done | Done |
+| Table: column resize, collapse, Reset columns; delayed Refreshing overlay | Done | Done | Done |
+| Messages: app error strip, inline query/table errors and notices, export result, toast | Done | Done | Done |
+| Redis: typed key views and edits (strings, hashes, lists, sets, sorted sets), key index | Done through the shared table view | Done through the shared table view | Done through the shared table view |
+| Tabs: rename, collapse, close guards for staged edits | Done | Done | Done |
+| Keyboard: Delete stages deletion, Escape clears/reverts, Enter commits edits | Done | Done | Done |
+| Keyboard: new connection, new query, close tab (⌘N/⌘T/⌘W, Ctrl+N/T/W) | Done | Done | Done |
+| Updates: Check for updates / Update to …, signed download, in-place swap | Done | Done | Done |
+| Accessibility | AccessKit enabled; screen readers not yet validated | UI Automation provider (names, roles, value, invoke, toggle, focus); screen readers not yet validated | Native AppKit controls; not yet validated |
+| Light theme | Not implemented | Not implemented | Not implemented |
 
 Still open on every host:
 
@@ -149,6 +158,27 @@ writes (the egui demo applies text filters and ordering only so the controls
 can be exercised). Automated fixtures and Linux screenshots are not a
 substitute for macOS/Windows hardware validation.
 
+### Measurements (Windows, 2026-11-12)
+
+egui vs the Win32 app, release builds, both `--demo`, run one after the other
+on the same hosted `windows-2025` runner (4 vCPUs) by the `Win32 preview`
+workflow (`apps/native/win32/bench/bench.ps1`), median of 3 runs each. The
+runner has no GPU, so both render in software through WARP; treat the numbers
+as relative. Memory is read after opening the demo `public.users` table tab;
+scrolling sends a wheel notch every 16 ms over the grid for 15 s.
+
+| | egui (wgpu) | Win32 (Direct2D) |
+| --- | ---: | ---: |
+| Time to first window | 129 ms | 58 ms |
+| Working set, table open | 65.2 MB | 43.6 MB |
+| Private bytes, table open | 410.5 MB | 15.1 MB |
+| Idle CPU over 60 s (% of one core) | 0% | 0% |
+| CPU while wheel-scrolling the grid (% of one core) | 344% | 41% |
+| Frames presented while scrolling | not measurable | 38 fps |
+
+egui has no frame counter to read from outside; the Win32 app writes one when
+`DBM_FRAME_LOG` is set.
+
 ### Measurements (Linux, 2026-09-25)
 
 Release builds of the egui workbench and the former Tauri app, same VM, same
@@ -157,7 +187,7 @@ Vulkan, WebKitGTK without compositing), so treat these as relative numbers
 only.
 
 | | egui workbench | Tauri |
-| --- | --- | --- |
+| --- | --- | --- | --- |
 | Resident memory, idle (all processes) | 145 MB (3 processes) | 380 MB (5 processes) |
 | Idle CPU over 20 s | ~0% | ~0.05% |
 | Warm launch to window | under 0.5 s | under 0.5 s |
@@ -188,6 +218,9 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --manifest-path apps/native/workbench/Cargo.toml --all -- --check
 cargo test --manifest-path apps/native/workbench/Cargo.toml --locked
 cargo clippy --manifest-path apps/native/workbench/Cargo.toml --locked --all-targets -- -D warnings
+cargo fmt --manifest-path apps/native/win32/Cargo.toml --all -- --check
+cargo test --manifest-path apps/native/win32/Cargo.toml --locked
+cargo clippy --manifest-path apps/native/win32/Cargo.toml --locked --all-targets -- -D warnings
 ```
 
 The Linux C ABI integration tests isolate XDG storage and exercise session

@@ -36,8 +36,8 @@ What the app does today, what is deliberately not built yet, and what it stores 
   Redis Preferred TLS exports as `rediss://` (no plaintext fallback). Anybase's
   read-only profile setting is not a URL option; use a restricted database user
   when connecting from another app.
-- Native apps: AppKit on macOS (Apple Silicon and Intel), egui on Windows and
-  Linux.
+- Native apps: AppKit on macOS (Apple Silicon and Intel), Win32 (Direct2D,
+  DirectWrite, UI Automation) on Windows, and egui on Linux.
 - Windows and Linux start at 1280 × 800 logical pixels and remember normal
   window sizes between launches. A startup window below the 900 × 600 minimum
   recovers to the default size, capped to the display size; maximized and
