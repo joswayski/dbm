@@ -25,30 +25,18 @@ pub struct Cell {
 }
 
 impl Cell {
-    pub fn new(window: impl Fn() -> Option<gtk::Widget> + 'static) -> Self {
+    pub fn new() -> Self {
         let root = ui::hbox(0);
         root.add_css_class("cell");
-        let label = gtk::Label::new(None);
-        label.set_xalign(0.0);
-        label.set_hexpand(true);
-        label.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        label.set_single_line_mode(true);
-        label.set_margin_start(10);
-        label.add_css_class("cell-text");
-        let copy = ui::button("toolbar-button", Some(Icon::Copy), "", "Copy value");
-        copy.add_css_class("cell-copy");
-        copy.set_focus_on_click(false);
+        let label = cell_label();
+        root.append(&label);
         let value = Rc::new(RefCell::new(Value::Null));
         let shared = value.clone();
-        copy.connect_clicked(move |_| {
-            if let Some(widget) = window() {
-                widget
-                    .clipboard()
-                    .set_text(&display_value(&shared.borrow()));
-            }
-        });
-        root.append(&label);
-        root.append(&copy);
+        HoverCopy::attach(
+            &root,
+            || true,
+            move || Some(display_value(&shared.borrow())),
+        );
         Self { root, label, value }
     }
 
@@ -67,6 +55,75 @@ impl Cell {
         let tooltip = (text.chars().count() > 24).then(|| display_prefix(value, 2000));
         self.label.set_tooltip_text(tooltip.as_deref());
         *self.value.borrow_mut() = value.clone();
+    }
+}
+
+/// A cell's value label.
+pub fn cell_label() -> gtk::Label {
+    let label = gtk::Label::new(None);
+    label.set_xalign(0.0);
+    label.set_hexpand(true);
+    label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    label.set_single_line_mode(true);
+    label.set_margin_start(10);
+    label.add_css_class("cell-text");
+    label
+}
+
+/// A cell's copy button, built only while the pointer is over the cell: a
+/// button in every cell costs a few widgets, an icon render and accessible
+/// objects each, for a control only one cell shows at a time.
+#[derive(Clone, Default)]
+pub struct HoverCopy(Rc<RefCell<Option<gtk::Button>>>);
+
+impl HoverCopy {
+    /// Shows the button on `root` on hover when `allowed()`; it copies `text()`.
+    pub fn attach(
+        root: &gtk::Box,
+        allowed: impl Fn() -> bool + 'static,
+        text: impl Fn() -> Option<String> + 'static,
+    ) -> Self {
+        let copy = Self::default();
+        let text = Rc::new(text);
+        let motion = gtk::EventControllerMotion::new();
+        let (slot, weak) = (copy.clone(), root.downgrade());
+        motion.connect_enter(move |_, _, _| {
+            if let Some(root) = weak.upgrade()
+                && allowed()
+            {
+                slot.show(&root, text.clone());
+            }
+        });
+        let (slot, weak) = (copy.clone(), root.downgrade());
+        motion.connect_leave(move |_| {
+            if let Some(root) = weak.upgrade() {
+                slot.hide(&root);
+            }
+        });
+        root.add_controller(motion);
+        copy
+    }
+
+    fn show(&self, root: &gtk::Box, text: Rc<impl Fn() -> Option<String> + 'static>) {
+        if self.0.borrow().is_some() {
+            return;
+        }
+        let button = ui::button("toolbar-button", Some(Icon::Copy), "", "Copy value");
+        button.add_css_class("cell-copy");
+        button.set_focus_on_click(false);
+        button.connect_clicked(move |button| {
+            if let Some(text) = text() {
+                button.clipboard().set_text(&text);
+            }
+        });
+        root.append(&button);
+        *self.0.borrow_mut() = Some(button);
+    }
+
+    pub fn hide(&self, root: &gtk::Box) {
+        if let Some(button) = self.0.borrow_mut().take() {
+            root.remove(&button);
+        }
     }
 }
 
@@ -154,12 +211,10 @@ impl ResultGrid {
         for (index, column) in columns.iter().enumerate() {
             let numeric = numeric_column(&column.data_type);
             let factory = gtk::SignalListItemFactory::new();
-            let view = self.view.downgrade();
             let cells = self.cells.clone();
             factory.connect_setup(move |_, item| {
                 let item = item.downcast_ref::<gtk::ListItem>().expect("list item");
-                let view = view.clone();
-                let cell = Cell::new(move || view.upgrade().map(|v| v.upcast()));
+                let cell = Cell::new();
                 item.set_child(Some(&cell.root));
                 cells
                     .borrow_mut()

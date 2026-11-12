@@ -15,7 +15,7 @@ use gtk::prelude::*;
 use serde_json::Value;
 
 use crate::app::{App, set_text};
-use crate::grid::{Cells, default_column_width, fill, row_of};
+use crate::grid::{Cells, HoverCopy, cell_label, default_column_width, fill, row_of};
 use crate::icons::{self, Icon};
 use crate::messages::Slot;
 use crate::state::{
@@ -30,10 +30,12 @@ const COLLAPSED_COLUMN_WIDTH: i32 = 76;
 /// One grid cell, reused by GTK for whichever row scrolls into view.
 struct TableCell {
     root: gtk::Box,
-    stack: gtk::Stack,
     label: gtk::Label,
-    entry: gtk::Entry,
-    copy: gtk::Button,
+    /// The in-grid editor, built when the cell starts editing and dropped
+    /// when it stops, so idle cells carry only their label.
+    entry: RefCell<Option<gtk::Entry>>,
+    new_entry: Box<dyn Fn() -> gtk::Entry>,
+    copy: HoverCopy,
     /// The (row, column) it shows while bound.
     pos: Rc<Cell<Option<(usize, usize)>>>,
     editing: Cell<bool>,
@@ -1217,54 +1219,43 @@ impl TableView {
     fn new_cell(self: &Rc<Self>, app: &App) -> TableCell {
         let root = ui::hbox(0);
         root.add_css_class("cell");
-        let label = gtk::Label::new(None);
-        label.set_xalign(0.0);
-        label.set_hexpand(true);
-        label.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        label.set_single_line_mode(true);
-        label.set_margin_start(10);
-        label.add_css_class("cell-text");
-        let entry = gtk::Entry::new();
-        entry.add_css_class("cell-editor");
-        entry.set_hexpand(true);
-        // Keep the editor from widening its fixed-width column.
-        entry.set_width_chars(1);
-        let stack = gtk::Stack::new();
-        stack.set_hexpand(true);
-        stack.set_hhomogeneous(false);
-        stack.set_interpolate_size(false);
-        stack.add_named(&label, Some("label"));
-        stack.add_named(&entry, Some("entry"));
-        let copy = ui::button("toolbar-button", Some(Icon::Copy), "", "Copy value");
-        copy.add_css_class("cell-copy");
-        copy.set_focus_on_click(false);
-        root.append(&stack);
-        root.append(&copy);
+        let label = cell_label();
+        root.append(&label);
+        let tab = self.tab_id;
+        let pos: Rc<Cell<Option<(usize, usize)>>> = Rc::default();
+        // Copy the full value; not while editing or on a collapsed column.
+        let handle = app.clone();
+        let at = pos.clone();
+        let weak = root.downgrade();
+        let copy = HoverCopy::attach(
+            &root,
+            move || {
+                weak.upgrade().is_some_and(|root| {
+                    !root.has_css_class("editing") && !root.has_css_class("collapsed")
+                })
+            },
+            move || {
+                let (row, column) = at.get()?;
+                let state = handle.state.borrow();
+                state
+                    .tables
+                    .get(&tab)
+                    .and_then(|t| t.values(row))
+                    .and_then(|v| v.get(column))
+                    .map(display_value)
+            },
+        );
+        let handle = app.clone();
+        let at = pos.clone();
         let cell = TableCell {
             root,
-            stack,
             label,
-            entry,
+            entry: RefCell::new(None),
+            new_entry: Box::new(move || new_editor(&handle, tab, at.clone())),
             copy,
-            pos: Rc::default(),
+            pos,
             editing: Cell::new(false),
         };
-        let tab = self.tab_id;
-        // Copy the full value.
-        let handle = app.clone();
-        let pos = cell_pos(&cell);
-        cell.copy.connect_clicked(move |button| {
-            let Some((row, column)) = pos() else { return };
-            let state = handle.state.borrow();
-            if let Some(value) = state
-                .tables
-                .get(&tab)
-                .and_then(|t| t.values(row))
-                .and_then(|v| v.get(column))
-            {
-                button.clipboard().set_text(&display_value(value));
-            }
-        });
         // Double-click edits; right-click opens the row menu.
         let click = gtk::GestureClick::new();
         click.set_button(0);
@@ -1304,44 +1295,6 @@ impl TableView {
             }
         });
         cell.root.add_controller(motion);
-        // The in-grid editor: Enter or leaving stages, Escape reverts.
-        let handle = app.clone();
-        let pos = cell_pos(&cell);
-        cell.entry.connect_activate(move |entry| {
-            let Some((row, column)) = pos() else { return };
-            let text = entry.text().to_string();
-            handle.update(|state| commit_edit(state, tab, row, column, &text));
-        });
-        let keys = gtk::EventControllerKey::new();
-        let handle = app.clone();
-        keys.connect_key_pressed(move |_, key, _, _| {
-            if key == gtk::gdk::Key::Escape {
-                handle.update(|state| {
-                    if let Some(table) = state.tables.get_mut(&tab) {
-                        table.editing = None;
-                    }
-                });
-                return glib::Propagation::Stop;
-            }
-            glib::Propagation::Proceed
-        });
-        cell.entry.add_controller(keys);
-        let focus = gtk::EventControllerFocus::new();
-        let handle = app.clone();
-        let pos = cell_pos(&cell);
-        let entry = cell.entry.downgrade();
-        focus.connect_leave(move |_| {
-            let (Some((row, column)), Some(entry)) = (pos(), entry.upgrade()) else {
-                return;
-            };
-            let text = entry.text().to_string();
-            handle.update(|state| {
-                if state.tables.get(&tab).and_then(|t| t.editing) == Some((row, column)) {
-                    commit_edit(state, tab, row, column, &text);
-                }
-            });
-        });
-        cell.entry.add_controller(focus);
         cell
     }
 
@@ -1905,6 +1858,55 @@ fn change_diff(name: &str, before: &str, after: &str) -> gtk::Box {
     block
 }
 
+/// The in-grid editor for the cell at `pos`: Enter or leaving stages,
+/// Escape reverts.
+fn new_editor(app: &App, tab: u64, pos: Rc<Cell<Option<(usize, usize)>>>) -> gtk::Entry {
+    let entry = gtk::Entry::new();
+    entry.add_css_class("cell-editor");
+    entry.set_hexpand(true);
+    // Keep the editor from widening its fixed-width column.
+    entry.set_width_chars(1);
+    let handle = app.clone();
+    let at = pos.clone();
+    entry.connect_activate(move |entry| {
+        let Some((row, column)) = at.get() else {
+            return;
+        };
+        let text = entry.text().to_string();
+        handle.update(|state| commit_edit(state, tab, row, column, &text));
+    });
+    let keys = gtk::EventControllerKey::new();
+    let handle = app.clone();
+    keys.connect_key_pressed(move |_, key, _, _| {
+        if key == gtk::gdk::Key::Escape {
+            handle.update(|state| {
+                if let Some(table) = state.tables.get_mut(&tab) {
+                    table.editing = None;
+                }
+            });
+            return glib::Propagation::Stop;
+        }
+        glib::Propagation::Proceed
+    });
+    entry.add_controller(keys);
+    let focus = gtk::EventControllerFocus::new();
+    let handle = app.clone();
+    let weak = entry.downgrade();
+    focus.connect_leave(move |_| {
+        let (Some((row, column)), Some(entry)) = (pos.get(), weak.upgrade()) else {
+            return;
+        };
+        let text = entry.text().to_string();
+        handle.update(|state| {
+            if state.tables.get(&tab).and_then(|t| t.editing) == Some((row, column)) {
+                commit_edit(state, tab, row, column, &text);
+            }
+        });
+    });
+    entry.add_controller(focus);
+    entry
+}
+
 fn cell_pos(cell: &TableCell) -> impl Fn() -> Option<(usize, usize)> + 'static {
     let pos = cell.pos.clone();
     move || pos.get()
@@ -1947,9 +1949,13 @@ fn style_cell(cell: &TableCell, table: &TableState, page: &TablePage) {
     let editing = table.editing == Some((row, column));
     if editing {
         if !cell.editing.replace(true) {
-            cell.entry.set_text(&editable_text(value));
-            cell.stack.set_visible_child_name("entry");
-            let entry = cell.entry.downgrade();
+            let entry = (cell.new_entry)();
+            entry.set_text(&editable_text(value));
+            cell.copy.hide(&cell.root);
+            cell.label.set_visible(false);
+            cell.root.prepend(&entry);
+            *cell.entry.borrow_mut() = Some(entry.clone());
+            let entry = entry.downgrade();
             glib::idle_add_local_once(move || {
                 if let Some(entry) = entry.upgrade() {
                     // Focusing a cell makes ColumnView scroll it into view
@@ -1966,14 +1972,18 @@ fn style_cell(cell: &TableCell, table: &TableState, page: &TablePage) {
             });
         }
         cell.root.add_css_class("editing");
-        cell.copy.set_visible(false);
         return;
     }
-    if cell.editing.replace(false) {
-        cell.stack.set_visible_child_name("label");
+    if cell.editing.replace(false)
+        && let Some(entry) = cell.entry.borrow_mut().take()
+    {
+        cell.root.remove(&entry);
+        cell.label.set_visible(true);
     }
     cell.root.remove_css_class("editing");
-    cell.copy.set_visible(!collapsed);
+    if collapsed {
+        cell.copy.hide(&cell.root);
+    }
     let numeric = page
         .metadata
         .columns
