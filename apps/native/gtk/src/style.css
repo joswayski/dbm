@@ -335,6 +335,9 @@ columnview listview row:selected { background-color: alpha(@accent, 0.14); color
 columnview listview row > cell { padding: 0; min-height: 32px; border-right: 1px solid @hairline; }
 .cell { min-height: 32px; font-size: 12px; }
 .cell .cell-copy { min-height: 24px; }
+/* Keep values where they sit beside the copy button, so it doesn't push them on hover. */
+.cell .cell-text { margin-right: 30px; }
+.cell.copying .cell-text { margin-right: 0; }
 .cell.row-modified { background-color: rgba(240,177,76,0.05); }
 .cell.cell-changed { background-color: rgba(240,177,76,0.12); }
 .cell.row-deleted { background-color: rgba(255,138,128,0.09); }

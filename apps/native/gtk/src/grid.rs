@@ -116,6 +116,7 @@ impl HoverCopy {
                 button.clipboard().set_text(&text);
             }
         });
+        root.add_css_class("copying");
         root.append(&button);
         *self.0.borrow_mut() = Some(button);
     }
@@ -123,6 +124,7 @@ impl HoverCopy {
     pub fn hide(&self, root: &gtk::Box) {
         if let Some(button) = self.0.borrow_mut().take() {
             root.remove(&button);
+            root.remove_css_class("copying");
         }
     }
 }
