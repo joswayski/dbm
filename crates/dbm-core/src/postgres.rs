@@ -15,7 +15,7 @@ use futures_util::TryStreamExt;
 use serde_json::Value;
 use tokio_postgres::config::SslMode;
 use tokio_postgres::error::SqlState;
-use tokio_postgres::types::{FromSql, Type};
+use tokio_postgres::types::{Date, FromSql, Timestamp, Type};
 use tokio_postgres::{Client, Config, NoTls, Row, SimpleQueryMessage};
 
 const MAX_PAGE_SIZE: u32 = 1_000;
@@ -87,7 +87,7 @@ impl PgSession {
             self.client.query(
                 "SELECT schema_name
                  FROM information_schema.schemata
-                 WHERE schema_name NOT LIKE 'pg_%'
+                 WHERE schema_name NOT LIKE 'pg\\_%'
                    AND schema_name <> 'information_schema'
                  ORDER BY schema_name",
                 &[],
@@ -95,7 +95,7 @@ impl PgSession {
             self.client.query(
                 "SELECT table_schema, table_name, table_type
                  FROM information_schema.tables
-                 WHERE table_schema NOT LIKE 'pg_%'
+                 WHERE table_schema NOT LIKE 'pg\\_%'
                    AND table_schema <> 'information_schema'
                  ORDER BY table_schema, table_name",
                 &[],
@@ -588,13 +588,15 @@ struct SimpleResult {
 }
 
 fn returns_rows(sql: &str) -> bool {
-    let keyword = sql
-        .split_whitespace()
-        .next()
-        .unwrap_or_default()
-        .to_ascii_lowercase();
+    // Read the keyword past leading comments and parentheses.
+    let statements = sql_statement_words(DatabaseEngine::Postgres, sql);
+    let keyword = statements
+        .first()
+        .and_then(|words| words.first())
+        .map(String::as_str)
+        .unwrap_or_default();
     matches!(
-        keyword.as_str(),
+        keyword,
         "select" | "with" | "show" | "values" | "explain" | "table"
     ) || sql.to_ascii_lowercase().contains("returning")
 }
@@ -640,6 +642,7 @@ fn value_from_text(text: Option<&str>, ty: Option<&Type>) -> Value {
         Some(ty) if [Type::INT2, Type::INT4, Type::INT8, Type::OID].contains(ty) => text
             .parse::<i64>()
             .map_or_else(|_| text_value(), json_integer),
+        // NaN and the infinities stay as the server's text.
         Some(ty) if [Type::FLOAT4, Type::FLOAT8].contains(ty) => text
             .parse::<f64>()
             .ok()
@@ -1043,19 +1046,17 @@ fn value_from_row(row: &Row, index: usize) -> Value {
             .unwrap_or(Value::Null);
     }
     if *ty == Type::FLOAT4 {
+        // Widen through the shortest f32 text so 0.1 does not become
+        // 0.10000000149011612.
         return row
             .try_get::<_, f32>(index)
-            .ok()
-            .and_then(|value| serde_json::Number::from_f64(f64::from(value)))
-            .map(Value::Number)
+            .map(|value| float_value(value.to_string().parse().unwrap_or(f64::from(value))))
             .unwrap_or(Value::Null);
     }
     if *ty == Type::FLOAT8 {
         return row
             .try_get::<_, f64>(index)
-            .ok()
-            .and_then(serde_json::Number::from_f64)
-            .map(Value::Number)
+            .map(float_value)
             .unwrap_or(Value::Null);
     }
     if [Type::JSON, Type::JSONB].contains(ty) {
@@ -1063,8 +1064,12 @@ fn value_from_row(row: &Row, index: usize) -> Value {
     }
     if *ty == Type::DATE {
         return row
-            .try_get::<_, NaiveDate>(index)
-            .map(|value| Value::String(value.to_string()))
+            .try_get::<_, Date<NaiveDate>>(index)
+            .map(|value| match value {
+                Date::Value(value) => Value::String(value.to_string()),
+                Date::PosInfinity => Value::String("infinity".into()),
+                Date::NegInfinity => Value::String("-infinity".into()),
+            })
             .unwrap_or(Value::Null);
     }
     if *ty == Type::TIME {
@@ -1075,14 +1080,14 @@ fn value_from_row(row: &Row, index: usize) -> Value {
     }
     if *ty == Type::TIMESTAMP {
         return row
-            .try_get::<_, NaiveDateTime>(index)
-            .map(|value| Value::String(value.to_string()))
+            .try_get::<_, Timestamp<NaiveDateTime>>(index)
+            .map(|value| infinite_or(value, |value| value.to_string()))
             .unwrap_or(Value::Null);
     }
     if *ty == Type::TIMESTAMPTZ {
         return row
-            .try_get::<_, DateTime<Utc>>(index)
-            .map(|value| Value::String(value.to_rfc3339()))
+            .try_get::<_, Timestamp<DateTime<Utc>>>(index)
+            .map(|value| infinite_or(value, |value| value.to_rfc3339()))
             .unwrap_or(Value::Null);
     }
     row.try_get::<_, Option<String>>(index)
@@ -1090,6 +1095,35 @@ fn value_from_row(row: &Row, index: usize) -> Value {
         .flatten()
         .map(Value::String)
         .unwrap_or(Value::Null)
+}
+
+/// A float as JSON; NaN and the infinities, which JSON numbers cannot hold,
+/// use PostgreSQL's spelling so they read and write back unchanged.
+fn float_value(value: f64) -> Value {
+    serde_json::Number::from_f64(value).map_or_else(
+        || {
+            Value::String(
+                if value.is_nan() {
+                    "NaN"
+                } else if value > 0.0 {
+                    "Infinity"
+                } else {
+                    "-Infinity"
+                }
+                .into(),
+            )
+        },
+        Value::Number,
+    )
+}
+
+/// A timestamp as text, with PostgreSQL's spelling for its infinite values.
+fn infinite_or<T>(value: Timestamp<T>, text: impl FnOnce(T) -> String) -> Value {
+    Value::String(match value {
+        Timestamp::Value(value) => text(value),
+        Timestamp::PosInfinity => "infinity".into(),
+        Timestamp::NegInfinity => "-infinity".into(),
+    })
 }
 
 #[cfg(test)]
@@ -1807,6 +1841,94 @@ mod tests {
             writer
                 .client
                 .batch_execute(&format!("DROP TABLE {table}"))
+                .await
+                .expect("cleanup");
+        }
+
+        #[tokio::test]
+        async fn pg_prefixed_schemas_and_special_values_are_shown() {
+            let Some(profile) = profile(false) else {
+                return;
+            };
+            let session = PgSession::connect(profile, None).await.expect("connect");
+            let schema = format!("pgdbm{}", Uuid::new_v4().simple());
+            session
+                .client
+                .batch_execute(&format!(
+                    "CREATE SCHEMA {schema};
+                     CREATE TABLE {schema}.vals (
+                         id int PRIMARY KEY, r real, f float8, d date, ts timestamp, tz timestamptz
+                     );
+                     INSERT INTO {schema}.vals VALUES
+                         (1, 0.1, 'NaN', 'infinity', '-infinity', 'infinity'),
+                         (2, 2.5, '-Infinity', '2024-01-02', '2024-01-02 03:04:05', NULL)"
+                ))
+                .await
+                .expect("fixture");
+            let tree = session.schema_tree().await.expect("tree");
+            assert!(
+                tree.iter().any(|node| node.name == schema),
+                "a schema whose name starts with pg but not pg_ is listed"
+            );
+            assert!(!tree.iter().any(|node| node.name == "pg_catalog"));
+
+            let mut request = page_request(&schema, "vals", Vec::new());
+            request.order_by = None;
+            let page = session.table_page(&request).await.expect("page");
+            let text = |value: &str| Value::String(value.into());
+            assert_eq!(
+                page.rows[0][1..6],
+                [
+                    serde_json::json!(0.1),
+                    text("NaN"),
+                    text("infinity"),
+                    text("-infinity"),
+                    text("infinity")
+                ]
+            );
+            assert_eq!(
+                page.rows[1][1..6],
+                [
+                    serde_json::json!(2.5),
+                    text("-Infinity"),
+                    text("2024-01-02"),
+                    text("2024-01-02 03:04:05"),
+                    Value::Null
+                ]
+            );
+            // The special values write back as they are shown.
+            let mut changes = page.rows[1].clone();
+            changes[2] = text("NaN");
+            changes[4] = text("infinity");
+            let result = session
+                .apply_mutations(&MutationBatch {
+                    profile_id: Uuid::nil(),
+                    database: "postgres".into(),
+                    schema: schema.clone(),
+                    table: "vals".into(),
+                    mutations: vec![RowMutation {
+                        original: page.rows[1].clone(),
+                        changes,
+                        primary_key: vec![page.rows[1][0].clone()],
+                        xmin: None,
+                        deleted: false,
+                    }],
+                })
+                .await
+                .expect("mutation");
+            assert_eq!(result.applied, 1);
+
+            // A leading comment or parenthesis does not turn results into text.
+            for sql in [
+                format!("-- note\nSELECT id FROM {schema}.vals WHERE id = 1"),
+                format!("/* note */ (SELECT id FROM {schema}.vals WHERE id = 1)"),
+            ] {
+                let response = session.run_query(&sql, None).await.expect("select");
+                assert_eq!(response.rows, vec![vec![Value::from(1)]], "{sql}");
+            }
+            session
+                .client
+                .batch_execute(&format!("DROP SCHEMA {schema} CASCADE"))
                 .await
                 .expect("cleanup");
         }

@@ -492,6 +492,9 @@ fn base_opts(
         .pass(password.map(ToOwned::to_owned))
         .db_name(Some(profile.default_database.clone()))
         .prefer_socket(false)
+        // Report rows matched, not rows changed: saving an edit that leaves
+        // the stored value as it was (1.50 to 1.5) is not a conflict.
+        .client_found_rows(true)
         .tcp_keepalive(Some(Duration::from_secs(60)))
         .setup(setup)
         .pool_opts(PoolOpts::default().with_constraints(constraints))
@@ -814,6 +817,7 @@ fn is_integer_type(data_type: &str) -> bool {
             "int",
             "bigint",
             "integer",
+            "bit",
         ],
     )
 }
@@ -846,9 +850,33 @@ fn has_type_name(data_type: &str, names: &[&str]) -> bool {
 fn json_row(row: Row) -> Vec<JsonValue> {
     (0..row.len())
         .map(|index| {
-            let binary = row.columns_ref().get(index).is_some_and(is_binary_column);
-            row.as_ref(index)
-                .map_or(JsonValue::Null, |value| json_cell(value, binary))
+            let column = row.columns_ref().get(index);
+            let binary = column.is_some_and(is_binary_column);
+            let column_type = column.map(mysql_async::Column::column_type);
+            let Some(value) = row.as_ref(index) else {
+                return JsonValue::Null;
+            };
+            match (value, column_type) {
+                // BIT arrives as big-endian bytes; show the number it holds.
+                (Value::Bytes(bytes), Some(ColumnType::MYSQL_TYPE_BIT)) if bytes.len() <= 8 => {
+                    json_unsigned(
+                        bytes
+                            .iter()
+                            .fold(0, |number, byte| number << 8 | u64::from(*byte)),
+                    )
+                }
+                // Only DATE drops the time: a DATETIME or TIMESTAMP at midnight
+                // reads like its neighbours.
+                (Value::Date(year, month, day, 0, 0, 0, 0), Some(column_type))
+                    if !matches!(
+                        column_type,
+                        ColumnType::MYSQL_TYPE_DATE | ColumnType::MYSQL_TYPE_NEWDATE
+                    ) =>
+                {
+                    JsonValue::String(format!("{year:04}-{month:02}-{day:02} 00:00:00"))
+                }
+                _ => json_cell(value, binary),
+            }
         })
         .collect()
 }
@@ -1740,6 +1768,122 @@ mod tests {
                 .expect_err("read-only profiles cannot switch the session to read-write");
             assert!(error.to_string().contains("read-only"), "{error}");
             reader.close().await;
+
+            session.close().await;
+            admin
+                .run_query(&format!("DROP DATABASE {database}"), None)
+                .await
+                .expect("cleanup");
+            admin.close().await;
+        }
+
+        #[tokio::test]
+        async fn unchanged_edits_are_not_conflicts_and_bit_and_midnight_values_read_back() {
+            let Some(admin) = profile("mysql", false) else {
+                return;
+            };
+            let database = format!("dbm_test_{}", Uuid::new_v4().simple());
+            let admin = MysqlSession::connect(admin, None).await.expect("connect");
+            admin
+                .run_query(&format!("CREATE DATABASE {database}"), None)
+                .await
+                .expect("create database");
+            let session = MysqlSession::connect(profile(&database, false).expect("profile"), None)
+                .await
+                .expect("connect to test database");
+            session
+                .run_query(
+                    "CREATE TABLE prices (
+                         id INT PRIMARY KEY,
+                         price DECIMAL(10,2),
+                         flags BIT(8),
+                         day DATE,
+                         seen DATETIME
+                     )",
+                    None,
+                )
+                .await
+                .expect("create table");
+            session
+                .run_query(
+                    "INSERT INTO prices VALUES
+                         (1, 1.50, b'01000001', '2024-01-01', '2024-01-01 00:00:00')",
+                    None,
+                )
+                .await
+                .expect("insert");
+            let request = TablePageRequest {
+                profile_id: Uuid::nil(),
+                schema: database.clone(),
+                table: "prices".into(),
+                offset: 0,
+                limit: 10,
+                filters: Vec::new(),
+                order_by: None,
+                include_total: Some(false),
+            };
+            let page = session.table_page(&request).await.expect("page");
+            let row = page.rows[0].clone();
+            assert_eq!(row[2], serde_json::json!(65), "BIT shows its number");
+            assert_eq!(row[3], JsonValue::String("2024-01-01".into()));
+            assert_eq!(
+                row[4],
+                JsonValue::String("2024-01-01 00:00:00".into()),
+                "a DATETIME at midnight keeps its time"
+            );
+            let workbench = session
+                .run_query("SELECT flags, seen FROM prices", None)
+                .await
+                .expect("select");
+            assert_eq!(workbench.rows[0][0], serde_json::json!(65));
+
+            // 1.5 is what the column already holds, so the server changes
+            // nothing; the row still matched and is not a conflict.
+            let mut changes = row.clone();
+            changes[1] = JsonValue::String("1.5".into());
+            let result = session
+                .apply_mutations(&MutationBatch {
+                    profile_id: Uuid::nil(),
+                    database: database.clone(),
+                    schema: database.clone(),
+                    table: "prices".into(),
+                    mutations: vec![RowMutation {
+                        original: row.clone(),
+                        changes,
+                        primary_key: vec![row[0].clone()],
+                        xmin: None,
+                        deleted: false,
+                    }],
+                })
+                .await
+                .expect("mutation");
+            assert_eq!((result.applied, result.conflicts.len()), (1, 0));
+            let page = session.table_page(&request).await.expect("page");
+            let mut flagged = page.rows[0].clone();
+            flagged[2] = JsonValue::String("66".into());
+            let result = session
+                .apply_mutations(&MutationBatch {
+                    profile_id: Uuid::nil(),
+                    database: database.clone(),
+                    schema: database.clone(),
+                    table: "prices".into(),
+                    mutations: vec![RowMutation {
+                        original: page.rows[0].clone(),
+                        changes: flagged,
+                        primary_key: vec![row[0].clone()],
+                        xmin: None,
+                        deleted: false,
+                    }],
+                })
+                .await
+                .expect("mutation");
+            assert_eq!((result.applied, result.conflicts.len()), (1, 0));
+            let page = session.table_page(&request).await.expect("page");
+            assert_eq!(
+                page.rows[0][2],
+                serde_json::json!(66),
+                "BIT saves as a number"
+            );
 
             session.close().await;
             admin

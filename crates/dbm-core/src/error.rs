@@ -48,12 +48,13 @@ impl AppError {
         // conversion add the CONNECTION_LOST prefix, and SQLSTATE codes are
         // stable: class 08 (connection exception), 57P01/57P02 (server shut
         // down), 57P05 (idle session timeout), 25P03 (idle-in-transaction
-        // timeout). The English phrases remain as a fallback.
-        if ["08", "57P01", "57P02", "57P05", "25P03"]
-            .iter()
-            .any(|code| message.contains(&format!("(SQLSTATE {code}")))
-        {
-            return true;
+        // timeout). The English phrases are a fallback for errors without a
+        // code only: a server error that merely quotes such a phrase (a RAISE
+        // message, a foreign server's failure) leaves the session usable.
+        if let Some((_, code)) = message.rsplit_once("(SQLSTATE ") {
+            return ["08", "57P01", "57P02", "57P05", "25P03"]
+                .iter()
+                .any(|lost| code.starts_with(lost));
         }
         let message = message.to_ascii_lowercase();
         [
@@ -214,6 +215,11 @@ mod tests {
             .is_connection_lost()
         );
         assert!(AppError::Database("Lost connection (SQLSTATE 08S01)".into()).is_connection_lost());
+        // A server error that quotes a connection phrase is not a lost session.
+        assert!(
+            !AppError::Database("connection closed by peer (SQLSTATE P0001)".into())
+                .is_connection_lost()
+        );
         assert!(
             !AppError::Database("Syntaxfehler bei SELECT (SQLSTATE 42601)".into())
                 .is_connection_lost()
