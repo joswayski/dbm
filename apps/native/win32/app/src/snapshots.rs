@@ -79,6 +79,21 @@ const STEPS: &[(&str, fn(&mut Workbench))] = &[
             app.open_table(id, schema, key);
         }
     }),
+    ("11-update-confirm", |app| {
+        app.confirm_update = Some(dbm_update::Available {
+            build: 2026111110,
+            version: "2026.11.11.10".into(),
+            notes: String::new(),
+            url: String::new(),
+            signature: String::new(),
+            highlights: Some(vec![dbm_update::Highlight {
+                title: "Faster Windows app".into(),
+                body: "Anybase now draws with Direct2D instead of egui.".into(),
+            }]),
+            released: Some("2026-11-12T03:15:58Z".into()),
+            commit: Some("2937930046c2f0e986a1b71dc2faf2fbda55e4ba".into()),
+        });
+    }),
 ];
 
 /// Seconds a step waits after its work finishes, for fades and layout.
