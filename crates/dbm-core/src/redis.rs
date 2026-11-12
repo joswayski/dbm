@@ -2084,34 +2084,59 @@ mod tests {
             .map(|addr| addr.port())
     }
 
+    /// Starts a private redis-server. The free port is only free when picked:
+    /// another test's server can take it first, ours then exits, and a session
+    /// on that port would share the other test's server and lose its
+    /// connection when that test kills it. So a session counts only when its
+    /// server is our own child; otherwise retry on a new port.
     async fn start_test_redis() -> Option<(TestRedis, RedisSession)> {
-        let port = unused_port()?;
-        let child = Command::new("redis-server")
-            .args([
-                "--port",
-                &port.to_string(),
-                "--bind",
-                "127.0.0.1",
-                "--save",
-                "",
-                "--appendonly",
-                "no",
-                "--protected-mode",
-                "no",
-            ])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .ok()?;
-        let server = TestRedis { child };
-        let profile = test_profile(port, false);
-        for _ in 0..80 {
-            if let Ok(session) = RedisSession::connect(profile.clone(), None).await {
-                return Some((server, session));
+        for _ in 0..5 {
+            let port = unused_port()?;
+            let child = Command::new("redis-server")
+                .args([
+                    "--port",
+                    &port.to_string(),
+                    "--bind",
+                    "127.0.0.1",
+                    "--save",
+                    "",
+                    "--appendonly",
+                    "no",
+                    "--protected-mode",
+                    "no",
+                ])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .ok()?;
+            let mut server = TestRedis { child };
+            let pid = server.child.id();
+            let profile = test_profile(port, false);
+            for _ in 0..80 {
+                if !matches!(server.child.try_wait(), Ok(None)) {
+                    break;
+                }
+                if let Ok(session) = RedisSession::connect(profile.clone(), None).await {
+                    if server_pid(&session).await == Some(pid) {
+                        return Some((server, session));
+                    }
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
             }
-            tokio::time::sleep(Duration::from_millis(50)).await;
         }
         None
+    }
+
+    /// The `process_id` the session's server reports in `INFO server`.
+    async fn server_pid(session: &RedisSession) -> Option<u32> {
+        let info = session.run_query("INFO server", None).await.ok()?;
+        let text = serde_json::to_string(&info.rows).ok()?;
+        let digits = text.split("process_id:").nth(1)?;
+        let end = digits
+            .find(|c: char| !c.is_ascii_digit())
+            .unwrap_or(digits.len());
+        digits[..end].parse().ok()
     }
 
     fn test_profile(port: u16, read_only: bool) -> ConnectionProfile {
