@@ -230,10 +230,15 @@ in [the rename plan](anybase-migration.md#website).
 
 ## Screenshots
 
-The README screenshots in `docs/screenshots/` show the egui app
+The README screenshots in `docs/screenshots/` show the GTK Linux app
 connected to real local PostgreSQL, MySQL, and Redis servers loaded with sample
 data, captured at 2× in a 1472×920-point window (2944×1840 pixels). The
 connection dialog needs that height to fit without scrolling.
+
+On a machine without a desktop, run the app with `GDK_SCALE=2` on an Xvfb
+screen of 2944×1840 with a compositor such as `xcompmgr` (without one, popovers
+such as the change preview draw on a black box), size its window to the whole
+screen, and capture with `import -window root`.
 
 The AppKit app can also render the demo fixture's main states to PNG files
 without interaction:
