@@ -173,8 +173,11 @@ before patch support ignore the field.
 
 - **Windows and bare Linux executables:** the patch starts from the running
   executable and rebuilds `DBM-Windows-x64.exe` or `DBM-Linux-x64`.
-- **AppImage:** it starts from `$APPIMAGE` and rebuilds the AppImage. The
-  image is compressed, so its patches are often dropped as too large.
+- **AppImage:** it starts from `$APPIMAGE` and rebuilds the AppImage. Its
+  squashfs is uncompressed (`apps/native/gtk/appimage.sh`), because compressed
+  blocks all change with a new binary; the image is larger (about the size of
+  the bare executable) but its patches are as small as the executable's.
+  Installs of a compressed image get one full download first.
 - **macOS:** zip entries are compressed, so patches target
   `DBM-macOS.app.tar` instead: a deterministic, uncompressed tar of the
   notarized bundle (`dbm_update::bundle_tar`: sorted entries, links kept,

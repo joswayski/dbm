@@ -26,6 +26,11 @@ Categories=Development;Database;
 Terminal=false
 StartupWMClass=io.github.joswayski.dbm
 DESKTOP
-# Extract-and-run avoids needing FUSE on the build machine.
-APPIMAGE_EXTRACT_AND_RUN=1 ARCH=x86_64 "$tool" --no-appstream "$appdir" "$output"
+# Extract-and-run avoids needing FUSE on the build machine. The squashfs is
+# uncompressed: compressed blocks change throughout with every new binary, so
+# patch updates between images were nearly full size; uncompressed, they are
+# about as small as the bare binary's (docs/releases.md#patch-updates).
+APPIMAGE_EXTRACT_AND_RUN=1 ARCH=x86_64 "$tool" --no-appstream \
+  --mksquashfs-opt -noI --mksquashfs-opt -noD --mksquashfs-opt -noF --mksquashfs-opt -noX \
+  "$appdir" "$output"
 chmod 0755 "$output"
