@@ -28,6 +28,24 @@ public static class Native {
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
     [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr h, int x, int y, int w, int hh, bool repaint);
+    delegate bool EnumProc(IntPtr h, IntPtr l);
+    [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc f, IntPtr l);
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr h, System.Text.StringBuilder s, int n);
+    // The process's visible top-level window with this title (winit also
+    // creates other windows, so MainWindowHandle can be the wrong one).
+    public static IntPtr FindAppWindow(int pid, string title) {
+        IntPtr found = IntPtr.Zero;
+        EnumWindows((h, l) => {
+            uint p; GetWindowThreadProcessId(h, out p);
+            if (p != pid || !IsWindowVisible(h)) return true;
+            var sb = new System.Text.StringBuilder(256);
+            GetWindowText(h, sb, 256);
+            if (sb.ToString() == title) { found = h; return false; }
+            return true;
+        }, IntPtr.Zero);
+        return found;
+    }
 }
 "@
 
@@ -97,9 +115,10 @@ function Measure-App([string]$label, [string]$exe, [int]$run) {
     $p = Start-Process -FilePath $exe -ArgumentList '--demo' -PassThru
     $hwnd = [IntPtr]::Zero
     while ($sw.Elapsed.TotalSeconds -lt 60) {
+        $hwnd = [Native]::FindAppWindow($p.Id, "Anybase $([char]0x2014) DEMO")
+        if ($hwnd -ne [IntPtr]::Zero) { break }
         $p.Refresh()
-        $hwnd = $p.MainWindowHandle
-        if ($hwnd -ne [IntPtr]::Zero -and [Native]::IsWindowVisible($hwnd)) { break }
+        if ($p.HasExited) { break }
         Start-Sleep -Milliseconds 5
     }
     $firstWindowMs = $sw.Elapsed.TotalMilliseconds
@@ -123,15 +142,17 @@ function Measure-App([string]$label, [string]$exe, [int]$run) {
         $p.Refresh()
         $workingSet = $p.WorkingSet64
         $private = $p.PrivateMemorySize64
-        # Park the pointer off the window so hover doesn't count as work.
-        [Native]::SetCursorPos(1600, 900) | Out-Null
+        $wr = New-Object Native+RECT
+        [Native]::GetWindowRect($hwnd, [ref]$wr) | Out-Null
+        # Park the pointer on the title bar so hover doesn't count as work.
+        [Native]::SetCursorPos($wr.Left + 640, $wr.Top + 12) | Out-Null
         Start-Sleep -Seconds 1
         $c0 = Cpu-Time $p
         $t0 = [Diagnostics.Stopwatch]::StartNew()
         Start-Sleep -Seconds $IdleSeconds
         $idleCpu = ((Cpu-Time $p) - $c0) / $t0.Elapsed.TotalMilliseconds * 100
         # Scroll over the grid: one wheel notch every ~16 ms, reversing every 15.
-        [Native]::SetCursorPos(760, 520) | Out-Null
+        [Native]::SetCursorPos($wr.Left + 760, $wr.Top + 520) | Out-Null
         Start-Sleep -Milliseconds 300
         $f0 = if (Test-Path $frameLog) { [int](Get-Content $frameLog) } else { 0 }
         $c0 = Cpu-Time $p
@@ -164,6 +185,8 @@ function Measure-App([string]$label, [string]$exe, [int]$run) {
     }
 }
 
+Add-Type -AssemblyName System.Windows.Forms
+Write-Host "Screen: $([Windows.Forms.Screen]::PrimaryScreen.Bounds)"
 $results = @()
 $errors = @()
 for ($run = 1; $run -le $Runs; $run++) {
