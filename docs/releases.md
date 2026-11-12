@@ -120,7 +120,7 @@ assets must keep the name they were signed under), swaps it in, and restarts.
 If an install fails, Anybase opens a dialog with the error, **Try again**,
 and **Download from anyba.se**, the same fallback Captures uses: the user can
 install the latest release over the old one, and profiles and history stay.
-Clicking a later **Retry update** button, or failed manual checks, reopen it.
+Clicking the **Retry update** button it leaves behind reopens it.
 **Download the latest version…** sits beside **Check for updates…** in the
 same menu.
 
