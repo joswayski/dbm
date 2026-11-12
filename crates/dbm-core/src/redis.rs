@@ -1408,13 +1408,26 @@ fn tokenize_redis_cli(input: &str) -> AppResult<Vec<String>> {
     let mut chars = input.chars().peekable();
     let mut in_single = false;
     let mut in_double = false;
+    // Set once an argument has begun, so `""` is an empty argument, not none.
+    let mut started = false;
+    let mut line_ended = false;
     while let Some(character) = chars.next() {
+        let quoted = in_single || in_double;
+        if line_ended && !character.is_whitespace() {
+            // Joining the lines would send the second command's words as
+            // arguments of the first.
+            return Err(AppError::InvalidInput(
+                "Run one Redis command at a time: select a single line".into(),
+            ));
+        }
         match character {
             '\'' if !in_double => {
                 in_single = !in_single;
+                started = true;
             }
             '"' if !in_single => {
                 in_double = !in_double;
+                started = true;
             }
             '\\' if in_double => match chars.next() {
                 Some('n') => current.push('\n'),
@@ -1427,12 +1440,16 @@ fn tokenize_redis_cli(input: &str) -> AppResult<Vec<String>> {
                     ));
                 }
             },
-            character if character.is_whitespace() && !in_single && !in_double => {
-                if !current.is_empty() {
+            character if character.is_whitespace() && !quoted => {
+                if std::mem::take(&mut started) {
                     args.push(std::mem::take(&mut current));
                 }
+                line_ended |= character == '\n' && !args.is_empty();
             }
-            character => current.push(character),
+            character => {
+                current.push(character);
+                started = true;
+            }
         }
     }
     if in_single || in_double {
@@ -1440,7 +1457,7 @@ fn tokenize_redis_cli(input: &str) -> AppResult<Vec<String>> {
             "Redis command has an unterminated quote".into(),
         ));
     }
-    if !current.is_empty() {
+    if started {
         args.push(current);
     }
     if args.is_empty() {
@@ -1488,6 +1505,11 @@ fn connection_state_command_error(command: &str, argv: &[String]) -> Option<&'st
         {
             Some("CLIENT REPLY is not supported in the Redis workbench")
         }
+        // The connection is shared with the sidebar and the key views, whose
+        // commands would be queued into the transaction.
+        "multi" | "exec" | "discard" | "watch" | "unwatch" => {
+            Some("Transactions are not supported in the Redis workbench")
+        }
         _ => None,
     }
 }
@@ -1497,10 +1519,16 @@ fn is_read_command(argv: &[String]) -> bool {
     let sub = argv.get(1).map(|value| value.to_ascii_lowercase());
     match command.as_str() {
         "config" => sub.as_deref() == Some("get"),
-        "acl" => matches!(
-            sub.as_deref(),
-            Some("cat" | "genpass" | "getuser" | "help" | "list" | "log" | "whoami")
-        ),
+        "acl" => {
+            matches!(
+                sub.as_deref(),
+                Some("cat" | "genpass" | "getuser" | "help" | "list" | "log" | "whoami")
+            ) && !(sub.as_deref() == Some("log")
+                && argv
+                    .get(2)
+                    .is_some_and(|arg| arg.eq_ignore_ascii_case("reset")))
+        }
+        "pubsub" => true,
         "client" => matches!(sub.as_deref(), Some("getname" | "id" | "info" | "list")),
         "memory" => matches!(
             sub.as_deref(),
@@ -1522,7 +1550,16 @@ fn is_read_command(argv: &[String]) -> bool {
                 | "getrange"
                 | "substr"
                 | "strlen"
+                | "lcs"
+                | "getbit"
+                | "bitcount"
+                | "bitpos"
+                | "bitfield_ro"
+                | "pfcount"
                 | "exists"
+                | "expiretime"
+                | "pexpiretime"
+                | "sort_ro"
                 | "type"
                 | "ttl"
                 | "pttl"
@@ -1537,13 +1574,18 @@ fn is_read_command(argv: &[String]) -> bool {
                 | "hvals"
                 | "hexists"
                 | "hlen"
+                | "hstrlen"
+                | "hrandfield"
                 | "hscan"
                 | "lrange"
                 | "lindex"
                 | "llen"
+                | "lpos"
                 | "smembers"
                 | "scard"
                 | "sismember"
+                | "smismember"
+                | "sintercard"
                 | "srandmember"
                 | "sinter"
                 | "sunion"
@@ -1554,6 +1596,14 @@ fn is_read_command(argv: &[String]) -> bool {
                 | "zrangebyscore"
                 | "zrevrangebyscore"
                 | "zscore"
+                | "zmscore"
+                | "zrandmember"
+                | "zrangebylex"
+                | "zrevrangebylex"
+                | "zlexcount"
+                | "zinter"
+                | "zunion"
+                | "zdiff"
                 | "zcard"
                 | "zcount"
                 | "zrank"
@@ -1562,6 +1612,11 @@ fn is_read_command(argv: &[String]) -> bool {
                 | "xrange"
                 | "xrevrange"
                 | "xlen"
+                | "xpending"
+                | "geopos"
+                | "geodist"
+                | "geohash"
+                | "geosearch"
                 | "dump"
                 | "randomkey"
                 | "time"
@@ -1596,8 +1651,13 @@ fn value_to_query_response(
             notices: Vec::new(),
         };
     }
-    if value.looks_like_cursor() {
-        return cursor_query_response(value, max_rows, duration_ms);
+    // Only the SCAN family replies with a cursor; other replies of the same
+    // shape (LMPOP, ZMPOP) are plain arrays.
+    if matches!(command.as_str(), "scan" | "sscan" | "hscan" | "zscan") && value.looks_like_cursor()
+    {
+        let pairs = command == "zscan"
+            || command == "hscan" && !argv.iter().any(|arg| arg.eq_ignore_ascii_case("novalues"));
+        return cursor_query_response(value, pairs, max_rows, duration_ms);
     }
     if is_pair_command(&command, argv)
         && let Some(rows) = pair_rows(&value)
@@ -1631,7 +1691,10 @@ fn value_to_query_response(
             truncated: false,
             notices: Vec::new(),
         },
-        Value::Array(items) if items.iter().all(|item| matches!(item, Value::Array(_))) => {
+        // An empty array is an empty list of values, not a missing result.
+        Value::Array(items)
+            if !items.is_empty() && items.iter().all(|item| matches!(item, Value::Array(_))) =>
+        {
             let rows = items
                 .into_iter()
                 .filter_map(|item| {
@@ -1694,7 +1757,8 @@ fn value_to_query_response(
             }],
             rows: vec![vec![JsonValue::Number(number.into())]],
             row_count: 1,
-            affected_rows: Some(u64::try_from(number).unwrap_or(0)),
+            // The integer is the reply (DBSIZE, LLEN, TTL), not a change count.
+            affected_rows: None,
             duration_ms,
             truncated: false,
             notices: Vec::new(),
@@ -1714,7 +1778,12 @@ fn value_to_query_response(
     }
 }
 
-fn cursor_query_response(value: Value, max_rows: usize, duration_ms: u128) -> QueryResponse {
+fn cursor_query_response(
+    value: Value,
+    pairs: bool,
+    max_rows: usize,
+    duration_ms: u128,
+) -> QueryResponse {
     let Value::Array(mut parts) = value else {
         return QueryResponse {
             columns: Vec::new(),
@@ -1731,12 +1800,18 @@ fn cursor_query_response(value: Value, max_rows: usize, duration_ms: u128) -> Qu
         .cloned()
         .map(json_from_redis)
         .unwrap_or(JsonValue::String("0".into()));
+    // Shown as the argument for the next call: `cursor 17`, not `cursor "17"`.
+    let cursor = match cursor {
+        JsonValue::String(text) => text,
+        other => other.to_string(),
+    };
     let items = if parts.len() > 1 {
         parts.swap_remove(1)
     } else {
         Value::Nil
     };
-    let rows = if let Some(pairs) = pair_rows(&items) {
+    // Keys and set members are single values even when the batch is even.
+    let rows = if let Some(pairs) = pair_rows(&items).filter(|_| pairs) {
         let mut response = capped_query_response(
             vec![
                 QueryColumn {
@@ -1950,6 +2025,29 @@ mod tests {
     }
 
     #[test]
+    fn scan_replies_list_keys_and_integer_replies_are_results() {
+        let bulk = |text: &str| Value::BulkString(text.as_bytes().to_vec());
+        let argv = |text: &str| text.split(' ').map(str::to_owned).collect::<Vec<_>>();
+        // An even batch of keys is still one key per row.
+        let reply = Value::Array(vec![bulk("17"), Value::Array(vec![bulk("a"), bulk("b")])]);
+        let response = value_to_query_response(&argv("SCAN 0"), reply.clone(), 100, 0);
+        assert_eq!((response.columns.len(), response.row_count), (1, 2));
+        assert_eq!(response.notices, ["cursor 17"]);
+        let response = value_to_query_response(&argv("HSCAN h 0"), reply, 100, 0);
+        assert_eq!((response.columns.len(), response.row_count), (2, 1));
+        // The integer is the answer, not a number of changed rows.
+        let response = value_to_query_response(&argv("DBSIZE"), Value::Int(1_000_000), 100, 0);
+        assert_eq!(response.affected_rows, None);
+        assert_eq!(response.rows, vec![vec![serde_json::json!(1_000_000)]]);
+        // No members is an empty result, not a missing one.
+        let response = value_to_query_response(&argv("SMEMBERS s"), Value::Array(vec![]), 100, 0);
+        assert_eq!((response.columns.len(), response.row_count), (1, 0));
+        assert!(connection_state_command_error("multi", &argv("MULTI")).is_some());
+        assert!(is_read_command(&argv("ZMSCORE z a")));
+        assert!(!is_read_command(&argv("ACL LOG RESET")));
+    }
+
+    #[test]
     fn tokenizes_quoted_redis_cli_arguments() {
         assert_eq!(
             tokenize_redis_cli(r#"SET greeting "hello world""#).expect("tokens"),
@@ -1960,6 +2058,16 @@ mod tests {
             ["HSET", "user:1", "name", "Ada Lovelace"]
         );
         assert!(tokenize_redis_cli(r#"SET broken "unterminated"#).is_err());
+        // Empty quotes are an argument; a second line is a second command.
+        assert_eq!(
+            tokenize_redis_cli(r#"SET k """#).expect("tokens"),
+            ["SET", "k", ""]
+        );
+        assert_eq!(
+            tokenize_redis_cli("SET k \"a\nb\"\n").expect("tokens"),
+            ["SET", "k", "a\nb"]
+        );
+        assert!(tokenize_redis_cli("LPUSH jobs a\nLPUSH jobs b").is_err());
     }
 
     #[test]

@@ -459,8 +459,8 @@ final class QueryPane: NSView, NSTextViewDelegate, NSSplitViewDelegate {
         editor.updateActiveStatement()
 
         hint.stringValue = engine == .redis
-            ? "The outlined command or selection will run · Command/Ctrl+Enter · Preview limit: 10,000 rows"
-            : "The outlined statement or selected SQL will run · Command/Ctrl+Enter · Preview limit: 10,000 rows"
+            ? "The outlined command or selection will run · Command+Enter · Preview limit: 10,000 rows"
+            : "The outlined statement or selected SQL will run · Command+Enter · Preview limit: 10,000 rows"
         let editorCard = PanelView(fill: Graphite.bg)
         editorCard.radius = 10
         editorCard.outline = Graphite.border
@@ -476,7 +476,7 @@ final class QueryPane: NSView, NSTextViewDelegate, NSSplitViewDelegate {
         selectionRunButton.minHeight = 26
         selectionRunButton.labelFont = Graphite.ui(12, .semibold)
         selectionRunButton.toolTip = engine == .redis
-            ? "Run the selected command (Command/Ctrl+Enter)" : "Run the selected SQL (Command/Ctrl+Enter)"
+            ? "Run the selected command (Command+Enter)" : "Run the selected SQL (Command+Enter)"
         let lift = NSShadow()
         lift.shadowColor = NSColor(white: 0, alpha: 0.35)
         lift.shadowOffset = NSSize(width: 0, height: -6)
@@ -681,7 +681,9 @@ final class QueryPane: NSView, NSTextViewDelegate, NSSplitViewDelegate {
         let columns = array(result["columns"])
         let rows = result["rows"] as? [[Any]] ?? []
         let affected = optionalInt(result["affectedRows"]).map { " · \($0) affected" } ?? ""
-        queryStatus.stringValue += " · \(int(result["rowCount"])) rows\(affected)"
+        // Server notices, such as the next SCAN cursor.
+        let notices = (result["notices"] as? [String] ?? []).map { " · \($0)" }.joined()
+        queryStatus.stringValue += " · \(int(result["rowCount"])) rows\(affected)\(notices)"
         queryStatus.toolTip = queryStatus.stringValue
         exportHint.stringValue = "Showing first \(rows.count.formatted()) rows."
         exportHint.isHidden = !bool(result["truncated"])

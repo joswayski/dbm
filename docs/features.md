@@ -36,7 +36,8 @@ What the app does today, what is deliberately not built yet, and what it stores 
   managers and OS clipboard sync may retain or share it. URLs encode credentials,
   database names, ports, and TLS settings. MySQL TLS option names vary by client;
   Redis CA certificates must be configured separately in the destination app.
-  Redis Preferred TLS exports as `rediss://` (no plaintext fallback). Anybase's
+  Redis Preferred TLS exports as `rediss://` (no plaintext fallback), and a
+  plain `redis://` or `valkey://` URL imports with TLS disabled. Anybase's
   read-only profile setting is not a URL option; use a restricted database user
   when connecting from another app.
 - Native apps: AppKit on macOS (Apple Silicon and Intel), Win32 (Direct2D,
@@ -120,8 +121,10 @@ What the app does today, what is deliberately not built yet, and what it stores 
 - SQL tabs with syntax highlighting and keyword completion, query result
   grids, a 10,000-row safety cap, and per-profile history. Connecting a profile opens a query tab so you can run
   SQL immediately. Redis connections open a command workbench (`PING` by
-  default) instead of SQL. Scripts with several statements show the last
-  result set. The MySQL workbench keeps one connection, so `USE`, session
+  default) instead of SQL, running the command on the cursor's line, one
+  command per run; `MULTI`/`EXEC`/`WATCH` are refused because the connection
+  is shared with the sidebar and key views. Scripts with several statements
+  show the last result set. The MySQL workbench keeps one connection, so `USE`, session
   variables, and explicit transactions carry over between runs.
   Drag the horizontal grip between the editor/history and results to resize
   their heights, including when results open in the editable table viewer.

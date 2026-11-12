@@ -182,6 +182,9 @@ fn tls_mode(url: &Url) -> TlsMode {
             | "verify-identity" | "verify-full",
         ) => TlsMode::Required,
         _ if param("ssl").as_deref() == Some("true") => TlsMode::Required,
+        // redis:// is the plaintext scheme, and what a TLS-disabled profile
+        // copies as; rediss:// asks for TLS.
+        _ if matches!(url.scheme(), "redis" | "valkey") => TlsMode::Disabled,
         _ => TlsMode::Preferred,
     }
 }
@@ -331,6 +334,19 @@ mod tests {
             (redis.default_database.as_str(), redis.tls_mode),
             ("3", TlsMode::Required)
         );
+        // The plaintext scheme is what a TLS-disabled profile copies as.
+        for (url, expected) in [
+            ("redis://cache.local/3", TlsMode::Disabled),
+            ("valkey://cache.local", TlsMode::Disabled),
+            ("redis://cache.local/3?ssl=true", TlsMode::Required),
+            ("postgres://me@db.example.com/app", TlsMode::Preferred),
+        ] {
+            assert_eq!(
+                parse_connection_url(url).unwrap().tls_mode,
+                expected,
+                "{url}"
+            );
+        }
     }
 
     #[test]

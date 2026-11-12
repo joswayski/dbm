@@ -47,12 +47,12 @@ pub fn execution_target(
         )
     } else if engine == DatabaseEngine::Redis {
         (
-            range_at_cursor(text, from, &line_ranges(text), b'\n'),
+            range_at_cursor(text, from, &line_ranges(text), true),
             ExecutionKind::Statement,
         )
     } else {
         (
-            range_at_cursor(text, from, &statement_ranges(engine, text), b';'),
+            range_at_cursor(text, from, &statement_ranges(engine, text), false),
             ExecutionKind::Statement,
         )
     };
@@ -73,14 +73,15 @@ fn floor_char_boundary(text: &str, index: usize) -> usize {
     index
 }
 
-fn range_at_cursor(text: &str, cursor: usize, ranges: &[Range], separator: u8) -> Option<Range> {
-    let bytes = text.as_bytes();
+fn range_at_cursor(text: &str, cursor: usize, ranges: &[Range], lines: bool) -> Option<Range> {
     let mut index = ranges
         .iter()
-        .position(|range| cursor < range.to)
+        // A line owns both of its ends; a statement ends before the next begins.
+        .position(|range| cursor < range.to || (lines && cursor == range.to))
         .unwrap_or(ranges.len() - 1);
-    // A cursor right after a separator belongs to the statement it ends.
-    if cursor > 0 && bytes[cursor - 1] == separator && index > 0 {
+    // A cursor right after a `;` belongs to the statement it ends. Only a real
+    // separator starts a range, so a `;` inside a string does not count.
+    if !lines && index > 0 && ranges[index].from == cursor {
         index -= 1;
     }
     trim_range(text, ranges[index])
@@ -1350,6 +1351,21 @@ mod tests {
         let target = execution_target(redis, text, get, get).unwrap();
         assert_eq!((target.from, target.to), (6, text.len()));
         assert_eq!(target.sql, "GET greeting");
+        // Either end of a line runs that line, never its neighbour.
+        let text = "DEL foo\nGET foo";
+        assert_eq!(execution_target(redis, text, 7, 7).unwrap().sql, "DEL foo");
+        assert_eq!(execution_target(redis, text, 8, 8).unwrap().sql, "GET foo");
+    }
+
+    #[test]
+    fn a_semicolon_inside_a_string_does_not_end_the_statement() {
+        let text = "DELETE FROM a WHERE id = 1;\nSELECT ';' AS s";
+        let inside = text.find("';'").unwrap() + 2;
+        let target = execution_target(PG, text, inside, inside).unwrap();
+        assert_eq!(target.sql, "SELECT ';' AS s");
+        let after = text.find(';').unwrap() + 1;
+        let target = execution_target(PG, text, after, after).unwrap();
+        assert_eq!(target.sql, "DELETE FROM a WHERE id = 1;");
     }
 
     #[test]
