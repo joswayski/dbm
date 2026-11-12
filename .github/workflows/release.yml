@@ -328,7 +328,7 @@ jobs:
           curl -fsSL -o "$RUNNER_TEMP/appimagetool" \
             https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
           chmod +x "$RUNNER_TEMP/appimagetool"
-          APPIMAGETOOL="$RUNNER_TEMP/appimagetool" bash apps/native/workbench/appimage.sh \
+          APPIMAGETOOL="$RUNNER_TEMP/appimagetool" bash apps/native/gtk/appimage.sh \
             "apps/native/workbench/target/release/${{ matrix.binary }}" release/DBM-Linux-x86_64.AppImage
           "${{ matrix.signer }}" release/DBM-Linux-x86_64.AppImage
       - uses: actions/upload-artifact@v4
