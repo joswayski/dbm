@@ -1,0 +1,32 @@
+[package]
+name = "dbm-win32"
+description = "Anybase for Windows: a native Win32 app (Direct2D, DirectWrite, DirectComposition, UI Automation)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[features]
+# Renders frames with the software rasterizer (tiny-skia) so the UI can be
+# previewed and snapshot-tested off Windows.
+raster = ["dbm-ui/raster"]
+
+[dependencies]
+chrono = "0.4"
+dbm-core = { path = "../../../../crates/dbm-core" }
+dbm-desktop = { path = "../../desktop" }
+dbm-update = { path = "../../../../crates/dbm-update" }
+dbm-ui = { path = "../ui" }
+ron = "0.10"
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
+
+[target.'cfg(windows)'.dependencies]
+rfd = { version = "0.17", default-features = false }
+
+[build-dependencies]
+winresource = "0.1"
+
+[lints]
+workspace = true

@@ -1,0 +1,27 @@
+[workspace]
+# The Windows app: `ui` is the toolkit (an immediate-mode layer whose Win32
+# backend renders with Direct2D/DirectWrite into a DirectComposition swap
+# chain and exposes UI Automation), `app` is Anybase on top of it. A separate
+# workspace, like apps/native/workbench, so the root workspace stays lean.
+members = ["ui", "app"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.94"
+license = "Apache-2.0"
+publish = false
+
+[workspace.lints.rust]
+# Win32, COM and Direct2D calls are unsafe; everything else stays safe.
+unsafe_op_in_unsafe_fn = "deny"
+
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "allow", priority = -1 }
+too_many_arguments = "allow"
+type_complexity = "allow"
+
+[profile.release]
+codegen-units = 4

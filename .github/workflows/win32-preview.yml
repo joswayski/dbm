@@ -1,0 +1,74 @@
+name: Win32 preview
+
+# Builds the native Win32 app (apps/native/win32) on a hosted Windows runner,
+# walks its --demo screens into PNG snapshots, and benchmarks it against the
+# egui app (time to first window, memory, idle and scrolling CPU). Hosted
+# runners have no GPU, so both apps render in software (WARP). Nothing here
+# publishes anything.
+on:
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: Benchmark runs per app (the summary reports medians)
+        default: "5"
+      benchmark:
+        description: Run the benchmark (off for snapshots only)
+        type: boolean
+        default: true
+  push:
+    branches: [win32-preview]
+
+permissions:
+  contents: read
+
+jobs:
+  preview:
+    runs-on: windows-2025
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.94.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            apps/native/win32 -> target
+            apps/native/workbench -> target
+      - name: Screen large enough for a 1280×800 window
+        shell: pwsh
+        continue-on-error: true
+        run: Set-DisplayResolution -Width 1920 -Height 1080 -Force
+      - name: Build the Win32 app
+        run: cargo build --manifest-path apps/native/win32/Cargo.toml --locked --release -p dbm-win32
+      - name: Test the Win32 crates
+        run: cargo test --manifest-path apps/native/win32/Cargo.toml --locked
+      - name: Snapshot the demo
+        shell: pwsh
+        run: |
+          $dir = Join-Path $PWD 'snapshots'
+          $p = Start-Process apps/native/win32/target/release/dbm-win32.exe -ArgumentList '--demo', '--snapshot-dir', $dir -PassThru
+          if (-not $p.WaitForExit(180000)) { $p.Kill(); Write-Warning 'snapshot walk timed out' }
+          Get-ChildItem $dir | Format-Table Name, Length
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: win32-snapshots
+          path: snapshots/
+      - name: Build the egui app
+        if: github.event_name == 'push' || inputs.benchmark
+        run: cargo build --manifest-path apps/native/workbench/Cargo.toml --locked --release
+      - name: Benchmark egui vs Win32
+        if: github.event_name == 'push' || inputs.benchmark
+        shell: pwsh
+        run: >
+          apps/native/win32/bench/bench.ps1
+          -Egui apps/native/workbench/target/release/dbm-workbench.exe
+          -Win32 apps/native/win32/target/release/dbm-win32.exe
+          -Runs ${{ inputs.runs || '3' }}
+          -Out bench-results
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: win32-benchmark
+          path: bench-results/
