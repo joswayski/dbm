@@ -4,10 +4,12 @@
 
 use std::path::PathBuf;
 
+use dbm_core::models::{DatabaseEngine, SchemaNode};
 use dbm_desktop::worker::Command;
 use dbm_ui::Ui;
 
 use crate::state::{ProfileForm, Workbench};
+use crate::table::{stage_cell, stage_delete};
 
 /// Each step's name and what it does to the app before its snapshot.
 const STEPS: &[(&str, fn(&mut Workbench))] = &[
@@ -40,6 +42,42 @@ const STEPS: &[(&str, fn(&mut Workbench))] = &[
     ("06-sidebar-collapsed", |app| {
         app.profile_form = None;
         app.sidebar_collapsed = true;
+    }),
+    ("07-row-inspector", |app| {
+        app.sidebar_collapsed = false;
+        if let Some(state) = app.active_tab.and_then(|t| app.tables.get_mut(&t)) {
+            state.click_row(2, false, false);
+            state.inspector_open = true;
+        }
+    }),
+    ("08-staged-edits", |app| {
+        if let Some(state) = app.active_tab.and_then(|t| app.tables.get_mut(&t)) {
+            stage_cell(state, 1, 2, "Liam B.");
+            stage_delete(state, &[4], true);
+        }
+    }),
+    ("09-redis-connected", |app| {
+        let redis = app
+            .profiles
+            .iter()
+            .find(|p| p.engine == DatabaseEngine::Redis);
+        if let Some(id) = redis.map(|p| p.id) {
+            app.active_profile = Some(id);
+            app.send(Command::Connect(id), "Connecting", Some(id));
+        }
+    }),
+    ("10-redis-key", |app| {
+        fn first_leaf(nodes: &[SchemaNode]) -> Option<(String, String)> {
+            nodes.iter().find_map(|n| match (&n.schema, &n.table) {
+                (Some(s), Some(t)) => Some((s.clone(), t.clone())),
+                _ => first_leaf(&n.children),
+            })
+        }
+        if let Some(id) = app.active_profile
+            && let Some((schema, key)) = app.schemas.get(&id).and_then(|n| first_leaf(n))
+        {
+            app.open_table(id, schema, key);
+        }
     }),
 ];
 
