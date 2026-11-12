@@ -201,14 +201,17 @@ numbers; rerun the script on real hardware.
 
 | | egui | GTK 4 |
 | --- | --- | --- |
-| Launch to first window | 0.129 s | 0.165 s |
-| Resident memory, `public.users` table open | 122.8 MB | 212.8 MB |
-| Idle CPU over 60 s, table open | 0.00% | 0.00% |
-| CPU while wheel-scrolling the grid for 10 s | 152% | 60% |
+| Launch to first window | 0.143 s | 0.170 s |
+| Resident memory, `public.users` table open | 122.8 MB | 199.9 MB |
+| Idle CPU over 60 s, table open | 0.02% | 0.00% |
+| CPU while wheel-scrolling the grid for 10 s | 149% | 48% |
 
-GTK's memory here is mostly the software GL driver: with
-`GSK_RENDERER=cairo` it was 140.7 MB (and 81% CPU scrolling). A hardware
-GPU driver replaces llvmpipe on a real desktop.
+GTK's memory here is mostly the software GL driver. With the table open,
+heaptrack attributes 138 MB of the 153 MB heap peak to llvmpipe (libgallium)
+and about 2 MB to the app's grid widgets; with `GSK_RENDERER=cairo` resident
+memory is 142 MB. A hardware GPU driver replaces llvmpipe on a real desktop.
+Grid cells build their in-grid editor only while editing and their copy button
+only while hovered, which took 13 MB off the first GTK measurement (212.8 MB).
 
 ### Measurements: egui vs Tauri (Linux, 2026-09-25)
 
