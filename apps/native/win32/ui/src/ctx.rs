@@ -416,11 +416,12 @@ impl Context {
             .filter(|h| h.rect.contains(p))
             .map(|h| h.layer)
             .max();
+        // The last widget registered at the pointer is drawn on top, so it
+        // wins: a dialog's buttons over its full-screen backdrop.
         let hovered = hits
             .iter()
             .rev()
-            .filter(|h| Some(h.layer) == top && h.sense.interactive() && h.rect.contains(p))
-            .max_by_key(|h| h.layer)
+            .find(|h| Some(h.layer) == top && h.sense.interactive() && h.rect.contains(p))
             .map(|h| h.id);
         (hovered, top)
     }
@@ -1067,6 +1068,25 @@ mod tests {
         let q = pos2(70.0, 10.0);
         let r = frame(&mut c, vec![Event::PointerMoved(q), press(q, false)], both);
         assert!(!r.clicked);
+    }
+
+    #[test]
+    fn a_button_on_a_modal_wins_over_the_backdrop_behind_it() {
+        let mut c = ctx();
+        let screen = Rect::from_ltrb(0.0, 0.0, 400.0, 400.0);
+        let card = Rect::from_ltrb(100.0, 100.0, 300.0, 300.0);
+        let ok = Rect::from_ltrb(200.0, 250.0, 280.0, 280.0);
+        // Registered in the modal's order: backdrop, card, then its button.
+        let f = |c: &mut Context| {
+            let _ = button(c, "backdrop", screen, Layer::Modal);
+            let _ = button(c, "card", card, Layer::Modal);
+            button(c, "ok", ok, Layer::Modal)
+        };
+        let p = pos2(240.0, 265.0);
+        frame(&mut c, vec![Event::PointerMoved(p)], f);
+        frame(&mut c, vec![press(p, true)], f);
+        let ok = frame(&mut c, vec![press(p, false)], f);
+        assert!(ok.clicked, "the button under the pointer clicks");
     }
 
     #[test]
