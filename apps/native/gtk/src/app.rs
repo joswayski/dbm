@@ -583,6 +583,8 @@ impl App {
         let version = ui::label(&updates.version_label(), &["update-version"]);
         version.set_xalign(1.0);
         version.set_tooltip_text(Some(&detail));
+        // Selectable, so the version can be copied into bug reports.
+        version.set_selectable(true);
         column.append(&version);
         let busy = matches!(updates.state, Update::Checking | Update::Installing);
         let app = self.clone();

@@ -221,14 +221,17 @@ impl TabStrip {
         click.set_button(0);
         let handle = app.clone();
         let query = tab.kind == TabKind::Query;
-        click.connect_pressed(
-            move |gesture, presses, _, _| match gesture.current_button() {
+        click.connect_pressed(move |gesture, presses, x, y| {
+            if on_button(gesture, x, y) {
+                return;
+            }
+            match gesture.current_button() {
                 2 => handle.update(|state| state.close_tab(id)),
                 1 if presses == 2 && query => handle.update(|state| state.renaming = Some(id)),
                 1 => handle.update(|state| state.select_tab(id)),
                 _ => {}
-            },
-        );
+            }
+        });
         content.add_controller(click);
         let overlay = gtk::Overlay::new();
         overlay.set_child(Some(&content));
@@ -260,6 +263,9 @@ fn collapsed_tab(app: &App, tab: &Tab) -> gtk::Widget {
     column.append(&title);
     column.set_hexpand(true);
     content.append(&column);
+    // Keep the collapsed tab narrow; the column's hexpand would otherwise
+    // stretch it across the whole strip.
+    content.set_hexpand(false);
     let close = ui::button(
         "tab-close",
         Some(Icon::Close),
@@ -271,9 +277,36 @@ fn collapsed_tab(app: &App, tab: &Tab) -> gtk::Widget {
     content.append(&close);
     let click = gtk::GestureClick::new();
     let handle = app.clone();
-    click.connect_pressed(move |_, _, _, _| handle.update(|state| state.select_tab(id)));
+    click.connect_pressed(move |gesture, _, x, y| {
+        if !on_button(gesture, x, y) {
+            handle.update(|state| state.select_tab(id));
+        }
+    });
     content.add_controller(click);
     content.upcast()
+}
+
+/// Whether a press on a tab landed on one of its buttons (close, collapse,
+/// rename). The tab's own gesture sees the press first and would select the
+/// tab, re-rendering the strip and removing the button before it could
+/// receive its click. Hit-tests each button's own area: `Widget::pick`
+/// misses these buttons inside the padded tab.
+fn on_button(gesture: &gtk::GestureClick, x: f64, y: f64) -> bool {
+    let Some(widget) = gesture.widget() else {
+        return false;
+    };
+    let point = gtk::graphene::Point::new(x as f32, y as f32);
+    let mut child = widget.first_child();
+    while let Some(current) = child {
+        if current.is::<gtk::Button>()
+            && let Some(inner) = widget.compute_point(&current, &point)
+            && current.contains(f64::from(inner.x()), f64::from(inner.y()))
+        {
+            return true;
+        }
+        child = current.next_sibling();
+    }
+    false
 }
 
 pub struct Welcome {

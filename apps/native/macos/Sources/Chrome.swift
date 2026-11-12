@@ -473,6 +473,8 @@ final class TopBar: PanelView {
         updateButton.isHidden = true
         updateStatus.isHidden = true
         version.isHidden = true
+        // Selectable, so the version can be copied into bug reports.
+        version.isSelectable = true
         let updates = vstack([updateButton, updateStatus, version], alignment: .trailing)
         pin(hstack([dot, name, target, readOnly, empty, spacer(), demoChip, updates], spacing: 8), insets: NSEdgeInsets(top: 0, left: 16, bottom: 1, right: 14))
         heightAnchor.constraint(equalToConstant: 40).isActive = true

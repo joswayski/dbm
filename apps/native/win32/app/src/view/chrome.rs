@@ -190,7 +190,15 @@ impl Workbench {
         col.painter()
             .text(r.min, version.clone(), font, theme::MUTED);
         let id = col.make_id("version");
-        let _ = col.interact(r, id, Sense::HOVER).on_hover_text(detail);
+        // Click copies the version, for bug reports.
+        let response = col
+            .interact(r, id, Sense::CLICK)
+            .on_hover_text(format!("{detail}\nClick to copy the version"));
+        if response.clicked {
+            let text = version.trim_start_matches("Version ").to_string();
+            col.ctx.copy_text(&text);
+            self.show_toast(format!("Copied version {text}"), true);
+        }
     }
 
     pub(super) fn tab_strip(&mut self, ui: &mut Ui, strip: Rect) {
