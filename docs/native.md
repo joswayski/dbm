@@ -19,11 +19,9 @@ mobile contract, and [releases](releases.md) for desktop packaging and updates.
   calls, and disposal; Rust owns response allocations and exposes their free
   function. Requests/results use JSON across this boundary (including profile
   passwords when saving), not a subprocess or a network service.
-- `apps/native/workbench` is the former egui/wgpu app that shipped on Windows
-  and Linux, calling the core directly on a serialized worker with a
-  two-thread Tokio runtime. It no longer ships, but it still builds and runs
-  `--demo` on both, for the benchmarks below. It is a separate Cargo
-  workspace, so egui's dependency graph stays out of the root workspace.
+- The Windows and Linux apps replaced an egui/wgpu app that shipped on both
+  until v2026.11.11.5. It has been removed from the repository; the
+  benchmarks below compare against that last release.
 - `apps/native/win32` is the Windows app, which replaced egui there. It ships
   under the same executable, installer, settings file, and credential names,
   so egui installs update onto it. It is its own Cargo workspace: `dbm-ui`, a small
@@ -44,7 +42,7 @@ mobile contract, and [releases](releases.md) for desktop packaging and updates.
   profiles, passwords, window size, sidebar state, and What's new history.
 - `apps/native/desktop` (`dbm-desktop`) is the UI-free part of the Windows and
   Linux apps: the serialized database worker and the self-updater. A UI
-  toolkit passes it a wake callback that schedules its next frame; egui and
+  toolkit passes it a wake callback that schedules its next frame; Win32 and
   GTK both use it unchanged.
 - `apps/native/android` and `apps/native/ios` use Compose and UIKit. They call
   the mobile C ABI directly in-process (JNI on Android), not through a local or
@@ -57,7 +55,7 @@ mobile contract, and [releases](releases.md) for desktop packaging and updates.
   `tools/dbm-sign` produces the signatures in the release workflow.
 - `apps/native/icons` holds the app icon: `icon.icns` for the macOS bundle,
   `icon.ico` for the Windows executable and installer, and `icon.png` for the
-  egui and GTK windows and the AppImage. All three use the same isolated database artwork
+  GTK window and the AppImage. All three use the same isolated database artwork
   with a transparent background, rather than an opaque square behind the icon.
 
 Database I/O runs off the UI thread. Passwords remain in the OS credential store,
@@ -78,9 +76,6 @@ discarded with that session.
   produces `apps/native/win32/target/release/dbm-win32.exe` with the icon
   embedded. Release packaging renames it `DBM-Windows-x64.exe` and installs it
   as `dbm.exe`, the name egui installs used.
-- `cargo build --manifest-path apps/native/workbench/Cargo.toml --locked --release`
-  produces `apps/native/workbench/target/release/dbm-workbench` (the former
-  egui app; not shipped).
 - `cargo build --manifest-path apps/native/gtk/Cargo.toml --locked --release`
   produces `apps/native/gtk/target/release/dbm-gtk`. Release packaging ships it
   as `DBM-Linux-x64` and, with `apps/native/gtk/appimage.sh`, inside the
@@ -106,8 +101,7 @@ large individual cells.
 The Linux (GTK) app builds against `libgtk-4-dev` (4.12 or newer) and
 OpenSSL/pkg-config, and runs on X11 or Wayland with the host's GTK 4 runtime
 (`libgtk-4-1`). CSV export uses GTK's file dialog: the desktop portal's
-chooser where GTK uses one (`xdg-desktop-portal`), otherwise GTK's own. Building egui on Linux, for development only, needs the
-X11/Wayland development libraries and a Vulkan driver.
+chooser where GTK uses one (`xdg-desktop-portal`), otherwise GTK's own.
 
 ## Shared behavior
 
@@ -117,7 +111,7 @@ confirmation, `SELECT *` table resolution, SQL/Redis highlighting tokens,
 keyword/command completion, schema filtering, schema-refresh wording, inline
 change diffs, CSV encoding), `cell_values` (typed cell parsing; an empty field
 is NULL for nullable columns), `connection_url` (URL import), `export`
-(streaming full-table CSV), and `demo` (the `--demo` fixture). The egui and GTK
+(streaming full-table CSV), and `demo` (the `--demo` fixture). The Win32 and GTK
 clients call them directly; the AppKit client reaches them through bridge commands.
 Editor helpers run through `dbm_bridge_helper_call`, which needs no session and
 takes UTF-16 offsets as `NSString` does, so highlighting and export progress
@@ -126,8 +120,7 @@ never wait behind a running query.
 ## Feature coverage
 
 All hosts implement the same feature set, listed in [features](features.md).
-"Done" on egui means exercised by hand on Linux against disposable PostgreSQL
-and Redis servers. On AppKit it means implemented and captured in the macOS CI
+On AppKit it means implemented and captured in the macOS CI
 snapshots (`--demo --snapshot-dir`). On Win32 it means implemented, ported
 from the egui app's state and rules, and its screens captured on a hosted
 Windows runner (welcome, query results, table, inspector, staged edits,
@@ -140,30 +133,30 @@ password, window size and sidebar state opened in GTK; an inline edit saved to
 PostgreSQL; a Redis profile created in GTK, a command run, and typed keys
 browsed.
 
-| Area | egui (no longer shipped) | Win32 (Windows) | GTK 4 (Linux) | AppKit (macOS) |
-| --- | --- | --- | --- | --- |
-| Graphite layout: sidebar, top bar, connection-colored tab strip, toolbars, cards, Space Mono fonts | Done | Done | Done | Done |
-| Welcome screen, sidebar collapse and resize (persisted) | Done | Done | Done | Done |
-| Profiles: engine picker, URL import, colors, TLS/CA, read-only, test before save | Done | Done | Done | Done |
-| Sidebar: connection subtitles, database picker, filterable schema/keyspace tree, refresh summary toast | Done | Done | Done | Done |
-| Query: statement under cursor or selection, Redis line mode, Cmd/Ctrl+Enter | Done | Done | Done | Done |
-| Query: SQL/Redis highlighting, active-statement outline, line numbers | Done | Done | Done | Done |
-| Query: keyword and Redis command completion | Done (shared keyword list, not schema-aware) | Done (same list) | Done (same list) | Done (same list) |
-| Query: confirmation before destructive statements | Done | Done | Done | Done |
-| Query: per-profile+database history, refresh, `SELECT *` opens the editable viewer | Done | Done | Done | Done |
-| Table: all filter operators, multiple filters, sort, preview limit with stepper, paging | Done | Done | Done | Done |
-| Table: CSV copy (visible page, selection) and full filtered export with progress and Open / Show in folder | Done | Done | Done | Done |
-| Table: multi-row selection, inline and inspector edits, typed/NULL parsing | Done | Done | Done | Done |
-| Table: staged deletes, hover change preview, pending bar, conflict reload | Done | Done | Done | Done |
-| Table: column resize, collapse, Reset columns; delayed Refreshing overlay | Done | Done | Done | Done |
-| Messages: app error strip, inline query/table errors and notices, export result, toast | Done | Done | Done | Done |
-| Redis: typed key views and edits (strings, hashes, lists, sets, sorted sets), key index | Done through the shared table view | Done through the shared table view | Done through the shared table view | Done through the shared table view |
-| Tabs: rename, collapse, close guards for staged edits | Done | Done | Done | Done |
-| Keyboard: Delete stages deletion, Escape clears/reverts, Enter commits edits | Done | Done | Done | Done |
-| Keyboard: new connection, new query, close tab (⌘N/⌘T/⌘W, Ctrl+N/T/W) | Done | Done | Done | Done |
-| Updates: Check for updates / Update to …, signed download, in-place swap | Done | Done | Done | Done |
-| Accessibility | AccessKit enabled; screen readers not yet validated | UI Automation provider (names, roles, value, invoke, toggle, focus); screen readers not yet validated | GTK accessibility (AT-SPI) on standard widgets; screen readers not yet validated | Native AppKit controls; not yet validated |
-| Light theme | Not implemented | Not implemented | Not implemented | Not implemented |
+| Area | Win32 (Windows) | GTK 4 (Linux) | AppKit (macOS) |
+| --- | --- | --- | --- |
+| Graphite layout: sidebar, top bar, connection-colored tab strip, toolbars, cards, Space Mono fonts | Done | Done | Done |
+| Welcome screen, sidebar collapse and resize (persisted) | Done | Done | Done |
+| Profiles: engine picker, URL import, colors, TLS/CA, read-only, test before save | Done | Done | Done |
+| Sidebar: connection subtitles, database picker, filterable schema/keyspace tree, refresh summary toast | Done | Done | Done |
+| Query: statement under cursor or selection, Redis line mode, Cmd/Ctrl+Enter | Done | Done | Done |
+| Query: SQL/Redis highlighting, active-statement outline, line numbers | Done | Done | Done |
+| Query: keyword and Redis command completion | Done (same list) | Done (same list) | Done (same list) |
+| Query: confirmation before destructive statements | Done | Done | Done |
+| Query: per-profile+database history, refresh, `SELECT *` opens the editable viewer | Done | Done | Done |
+| Table: all filter operators, multiple filters, sort, preview limit with stepper, paging | Done | Done | Done |
+| Table: CSV copy (visible page, selection) and full filtered export with progress and Open / Show in folder | Done | Done | Done |
+| Table: multi-row selection, inline and inspector edits, typed/NULL parsing | Done | Done | Done |
+| Table: staged deletes, hover change preview, pending bar, conflict reload | Done | Done | Done |
+| Table: column resize, collapse, Reset columns; delayed Refreshing overlay | Done | Done | Done |
+| Messages: app error strip, inline query/table errors and notices, export result, toast | Done | Done | Done |
+| Redis: typed key views and edits (strings, hashes, lists, sets, sorted sets), key index | Done through the shared table view | Done through the shared table view | Done through the shared table view |
+| Tabs: rename, collapse, close guards for staged edits | Done | Done | Done |
+| Keyboard: Delete stages deletion, Escape clears/reverts, Enter commits edits | Done | Done | Done |
+| Keyboard: new connection, new query, close tab (⌘N/⌘T/⌘W, Ctrl+N/T/W) | Done | Done | Done |
+| Updates: Check for updates / Update to …, signed download, in-place swap | Done | Done | Done |
+| Accessibility | UI Automation provider (names, roles, value, invoke, toggle, focus); screen readers not yet validated | GTK accessibility (AT-SPI) on standard widgets; screen readers not yet validated | Native AppKit controls; not yet validated |
+| Light theme | Not implemented | Not implemented | Not implemented |
 
 Still open on every host:
 
@@ -173,7 +166,7 @@ Still open on every host:
   conflicting edits, and shutdown during active work.
 
 Demo results are synthetic; they do not validate SQL semantics or database
-writes (the egui demo applies text filters and ordering only so the controls
+writes (the demo applies text filters and ordering only so the controls
 can be exercised). Automated fixtures and Linux screenshots are not a
 substitute for macOS/Windows hardware validation.
 
@@ -253,9 +246,6 @@ egui workbench under load:
 cargo fmt --all -- --check
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
-cargo fmt --manifest-path apps/native/workbench/Cargo.toml --all -- --check
-cargo test --manifest-path apps/native/workbench/Cargo.toml --locked
-cargo clippy --manifest-path apps/native/workbench/Cargo.toml --locked --all-targets -- -D warnings
 cargo fmt --manifest-path apps/native/win32/Cargo.toml --all -- --check
 cargo test --manifest-path apps/native/win32/Cargo.toml --locked
 cargo clippy --manifest-path apps/native/win32/Cargo.toml --locked --all-targets -- -D warnings

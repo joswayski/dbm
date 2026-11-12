@@ -10,19 +10,19 @@ use std::path::{Path, PathBuf};
 const FONTS: [(&str, &[u8]); 4] = [
     (
         "SpaceMono-Regular.ttf",
-        include_bytes!("../../workbench/assets/SpaceMono-Regular.ttf"),
+        include_bytes!("../../fonts/SpaceMono-Regular.ttf"),
     ),
     (
         "SpaceMono-Bold.ttf",
-        include_bytes!("../../workbench/assets/SpaceMono-Bold.ttf"),
+        include_bytes!("../../fonts/SpaceMono-Bold.ttf"),
     ),
     (
         "SpaceMono-Italic.ttf",
-        include_bytes!("../../workbench/assets/SpaceMono-Italic.ttf"),
+        include_bytes!("../../fonts/SpaceMono-Italic.ttf"),
     ),
     (
         "SpaceMono-BoldItalic.ttf",
-        include_bytes!("../../workbench/assets/SpaceMono-BoldItalic.ttf"),
+        include_bytes!("../../fonts/SpaceMono-BoldItalic.ttf"),
     ),
 ];
 

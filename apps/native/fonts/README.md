@@ -11,7 +11,7 @@ To refresh the assets from the repository root:
 
 ```sh
 source=https://raw.githubusercontent.com/google/fonts/9710da1eacb3be272583c3224dcb70f9da6eadbb/ofl/spacemono
-assets=apps/native/workbench/assets
+assets=apps/native/fonts
 for face in Regular Bold Italic BoldItalic; do
   curl -fsSL "$source/SpaceMono-$face.ttf" -o "$assets/SpaceMono-$face.ttf"
   cp "$assets/SpaceMono-$face.ttf" "apps/native/ios/Resources/Fonts/SpaceMono-$face.ttf"

@@ -53,8 +53,6 @@ test("only desktop app sources count, each tagged with the apps it reaches", () 
   assert.deepEqual(pathApps("crates/dbm-core/src/lib.rs"), ["macOS", "Windows", "Linux"]);
   for (const path of [
     "apps/web/src/routes/index.tsx",
-    // egui no longer ships on any platform.
-    "apps/native/workbench/src/workbench.rs",
     "apps/native/android/app/src/main/java/com/dbm/nativeapp/MainActivity.kt",
     "apps/native/ios/Sources/App.swift",
     "crates/dbm-core/tests/postgres.rs",

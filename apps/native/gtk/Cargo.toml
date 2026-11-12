@@ -5,7 +5,7 @@ edition = "2024"
 rust-version = "1.94"
 publish = false
 
-# Its own workspace, like apps/native/workbench, so GTK's dependency graph
+# Its own workspace, like apps/native/win32, so GTK's dependency graph
 # stays out of the root workspace.
 [workspace]
 

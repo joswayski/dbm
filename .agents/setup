@@ -2,8 +2,8 @@
 #
 # Amp orb setup for DBM.
 #
-# Prepares a fresh orb to build and test the Rust workspace, the egui
-# workbench (apps/native/workbench) and the GTK app (apps/native/gtk):
+# Prepares a fresh orb to build and test the Rust workspace and the GTK app
+# (apps/native/gtk):
 #
 #   * the native apps' Linux build dependencies, Xvfb and xdotool for driving
 #     the GTK app headless (apps/native/gtk/bench.sh), and redis-server (the
@@ -36,8 +36,9 @@ timed() {
 }
 
 install_system_packages() {
-  # The Linux dependencies from .github/workflows/ci.yml's Rust, native
-  # workbench and native GTK jobs. Some are already in the orb image but stay listed so this
+  # The Linux dependencies from .github/workflows/ci.yml's Rust and native
+  # GTK jobs, plus the runtime libraries the released egui build needs for
+  # apps/native/gtk/bench.sh. Some are already in the orb image but stay listed so this
   # also works on a bare Debian machine.
   local packages=(
     build-essential
@@ -116,7 +117,6 @@ persist_toolchain_path() {
 
 fetch_rust_dependencies() {
   cargo fetch --locked
-  cargo fetch --locked --manifest-path apps/native/workbench/Cargo.toml
   cargo fetch --locked --manifest-path apps/native/gtk/Cargo.toml
 }
 

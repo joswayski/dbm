@@ -10,8 +10,8 @@ Anybase's released desktop product is three native clients over one Rust core:
   workspace.
 
 Both share the database worker and updater in `apps/native/desktop`
-(`dbm-desktop`) with the former egui app, `apps/native/workbench`, which no
-longer ships but still builds and runs `--demo` for comparisons.
+(`dbm-desktop`). They replaced an egui app, removed after its last release
+(v2026.11.11.5); the benchmarks compare against that release.
 
 The database adapters, models, session state, credentials, and SQLite store
 live in `crates/dbm-core`; the updater lives in `crates/dbm-update`. See
@@ -34,9 +34,6 @@ Prerequisites:
   sudo apt-get install -y build-essential libssl-dev pkg-config libgtk-4-dev
   ```
 
-  To also build the egui app on Linux, add `libxkbcommon-dev libwayland-dev
-  libx11-dev libxcursor-dev libxi-dev libxrandr-dev libvulkan1
-  mesa-vulkan-drivers`; it needs a Vulkan driver to run.
 - Node.js 24 and npm for the website and release-script tests.
 - [uv](https://docs.astral.sh/uv/getting-started/installation/) 0.12.23 for
   Python release scripts; CI uses Python 3.12 and uv can provision it. The
@@ -74,7 +71,7 @@ x86_64-pc-windows-msvc` in `apps/native/win32`), and the `raster` feature
 renders the same snapshot walk in software: `cargo run -p dbm-win32 --features
 raster -- --snapshot-dir shots`. The `Win32 preview` workflow (Run workflow)
 snapshots the real app on a hosted Windows runner and benchmarks it against
-egui.
+the last egui release.
 
 On Linux:
 
@@ -84,18 +81,9 @@ cargo run --manifest-path apps/native/gtk/Cargo.toml --locked --release
 cargo run --manifest-path apps/native/gtk/Cargo.toml --locked --release -- --demo
 ```
 
-`apps/native/gtk/bench.sh` compares release builds of the egui and GTK apps on
-the demo fixture (launch time, memory, idle and scrolling CPU); see its header.
-
-The former egui app (Windows or Linux):
-
-```sh
-cargo run --manifest-path apps/native/workbench/Cargo.toml --locked --release
-# Isolated in-memory fixture:
-cargo run --manifest-path apps/native/workbench/Cargo.toml --locked --release -- --demo
-```
-
-`bash apps/native/workbench/demo.sh` is a shortcut for the debug `--demo` build.
+`apps/native/gtk/bench.sh` compares a GTK release build with the last egui
+release (downloaded with `gh`) on the demo fixture (launch time, memory, idle
+and scrolling CPU); see its header.
 
 Outside `--demo`, development builds use the same saved profiles, passwords,
 and query history as an installed Anybase. Use disposable databases or read-only
@@ -107,9 +95,6 @@ profiles when testing writes.
 cargo fmt --all -- --check
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
-cargo fmt --manifest-path apps/native/workbench/Cargo.toml --all -- --check
-cargo test --manifest-path apps/native/workbench/Cargo.toml --locked
-cargo clippy --manifest-path apps/native/workbench/Cargo.toml --locked --all-targets -- -D warnings
 cargo fmt --manifest-path apps/native/win32/Cargo.toml --all -- --check
 cargo test --manifest-path apps/native/win32/Cargo.toml --locked
 cargo clippy --manifest-path apps/native/win32/Cargo.toml --locked --all-targets -- -D warnings
@@ -168,7 +153,8 @@ TLS database validation remains outstanding. Commands and prerequisites are in
 ## Amp orbs
 
 Amp orbs run [`.agents/setup`](../.agents/setup) to prepare a fresh machine: it
-installs the native apps' Linux build dependencies (GTK 4 and egui), Xvfb and
+installs the native apps' Linux build dependencies (GTK 4, plus the runtime libraries the last egui
+release needs for `bench.sh`), Xvfb and
 xdotool for running the GTK app headless, `redis-server` (the
 live Redis tests skip themselves without it), the Rust toolchain pinned in
 `rust-toolchain.toml`, the locked Cargo dependencies, and npm dependencies for

@@ -2,7 +2,7 @@
 # The Windows app: `ui` is the toolkit (an immediate-mode layer whose Win32
 # backend renders with Direct2D/DirectWrite into a DirectComposition swap
 # chain and exposes UI Automation), `app` is Anybase on top of it. A separate
-# workspace, like apps/native/workbench, so the root workspace stays lean.
+# workspace, like apps/native/gtk, so the root workspace stays lean.
 members = ["ui", "app"]
 resolver = "3"
 

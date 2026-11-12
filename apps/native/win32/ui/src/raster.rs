@@ -11,10 +11,10 @@ use crate::paint::{DisplayList, Shape};
 use crate::text::{ASCENT, Font, FontBackend};
 
 static FACES: [&[u8]; 4] = [
-    include_bytes!("../../../workbench/assets/SpaceMono-Regular.ttf"),
-    include_bytes!("../../../workbench/assets/SpaceMono-Bold.ttf"),
-    include_bytes!("../../../workbench/assets/SpaceMono-Italic.ttf"),
-    include_bytes!("../../../workbench/assets/SpaceMono-BoldItalic.ttf"),
+    include_bytes!("../../../fonts/SpaceMono-Regular.ttf"),
+    include_bytes!("../../../fonts/SpaceMono-Bold.ttf"),
+    include_bytes!("../../../fonts/SpaceMono-Italic.ttf"),
+    include_bytes!("../../../fonts/SpaceMono-BoldItalic.ttf"),
 ];
 
 fn face(font: Font) -> FontRef<'static> {

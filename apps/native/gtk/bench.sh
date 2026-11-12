@@ -6,8 +6,9 @@
 #   - CPU % while wheel-scrolling the users grid for SCROLL seconds
 # Each metric is the median of RUNS launches.
 #
-# Usage, from the repository root after release builds of both apps:
-#   cargo build --release --manifest-path apps/native/workbench/Cargo.toml
+# Usage, from the repository root after a release build of the GTK app. The
+# egui app was removed from the repository; EGUI defaults to its last release
+# (v2026.11.11.5's DBM-Linux-x64), downloaded once with gh:
 #   cargo build --release --manifest-path apps/native/gtk/Cargo.toml
 #   apps/native/gtk/bench.sh            # on the current X11 display
 #   BENCH_XVFB=1 apps/native/gtk/bench.sh  # on a private Xvfb (no GPU)
@@ -21,7 +22,12 @@
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
-EGUI=${EGUI:-$ROOT/apps/native/workbench/target/release/dbm-workbench}
+EGUI=${EGUI:-$ROOT/target/bench/dbm-egui-v2026.11.11.5}
+if [[ ! -x $EGUI && $EGUI == "$ROOT/target/bench/"* ]]; then
+  mkdir -p "$(dirname "$EGUI")"
+  gh release download v2026.11.11.5 --repo joswayski/dbm --pattern DBM-Linux-x64 --output "$EGUI"
+  chmod +x "$EGUI"
+fi
 GTK=${GTK:-$ROOT/apps/native/gtk/target/release/dbm-gtk}
 RUNS=${RUNS:-3}
 IDLE=${IDLE:-60}

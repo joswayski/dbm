@@ -29,10 +29,10 @@ use crate::paint::{DisplayList, Shape};
 use crate::text::{Font, FontBackend};
 
 const SPACE_MONO: [&[u8]; 4] = [
-    include_bytes!("../../../../workbench/assets/SpaceMono-Regular.ttf"),
-    include_bytes!("../../../../workbench/assets/SpaceMono-Bold.ttf"),
-    include_bytes!("../../../../workbench/assets/SpaceMono-Italic.ttf"),
-    include_bytes!("../../../../workbench/assets/SpaceMono-BoldItalic.ttf"),
+    include_bytes!("../../../../fonts/SpaceMono-Regular.ttf"),
+    include_bytes!("../../../../fonts/SpaceMono-Bold.ttf"),
+    include_bytes!("../../../../fonts/SpaceMono-Italic.ttf"),
+    include_bytes!("../../../../fonts/SpaceMono-BoldItalic.ttf"),
 ];
 
 fn color(c: Color32) -> D2D1_COLOR_F {

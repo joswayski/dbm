@@ -35,7 +35,6 @@ jobs:
           cache-on-failure: true
           workspaces: |
             apps/native/win32 -> target
-            apps/native/workbench -> target
       - name: Screen large enough for a 1280×800 window
         shell: pwsh
         continue-on-error: true
@@ -57,15 +56,19 @@ jobs:
         with:
           name: win32-snapshots
           path: snapshots/
-      - name: Build the egui app
+      # The egui app was removed from the repository; v2026.11.11.5 is its
+      # last release.
+      - name: Download the last egui release
         if: github.event_name == 'push' || inputs.benchmark
-        run: cargo build --manifest-path apps/native/workbench/Cargo.toml --locked --release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download v2026.11.11.5 --repo ${{ github.repository }} --pattern DBM-Windows-x64.exe --output egui.exe
       - name: Benchmark egui vs Win32
         if: github.event_name == 'push' || inputs.benchmark
         shell: pwsh
         run: >
           apps/native/win32/bench/bench.ps1
-          -Egui apps/native/workbench/target/release/dbm-workbench.exe
+          -Egui egui.exe
           -Win32 apps/native/win32/target/release/dbm-win32.exe
           -Runs ${{ inputs.runs || '3' }}
           -Out bench-results

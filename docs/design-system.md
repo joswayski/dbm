@@ -6,7 +6,7 @@ sidebar, segmented controls, a row inspector). It is the reference for every
 desktop app. The tokens are defined in `enum Graphite` in
 `apps/native/macos/Sources/Theme.swift` (AppKit),
 `apps/native/win32/ui/src/theme.rs` (Win32),
-`apps/native/workbench/src/theme.rs` (egui), and as `@define-color` tokens and
+and as `@define-color` tokens and
 rules in `apps/native/gtk/src/style.css` (GTK). When a token changes, update
 this file and every theme file.
 
@@ -65,8 +65,9 @@ Connection palette offered in the profile editor: `#4c9aff`, `#ff9f43`,
 - UI, data, and code: **Space Mono** (OFL 1.1), with monospaced numerals in grids.
 - Use the real regular (400) and bold (700) faces: former medium roles use
   regular, and semibold roles use bold. Keep the existing size scale.
-- Desktop font files live in `apps/native/workbench/assets`; macOS `build.sh`
-  copies them into its bundle, and the Win32 app embeds them and loads them
+- Desktop font files live in `apps/native/fonts`; macOS `build.sh`
+  copies them into its bundle, the GTK app embeds them and registers them
+  with fontconfig, and the Win32 app embeds them and loads them
   into DirectWrite as an in-memory font collection. Android and iPhone bundle the same TTFs in their
   resources, and the website bundles WOFF2 faces from `@fontsource/space-mono`.
   No client fetches fonts from an external service at runtime.
@@ -146,7 +147,7 @@ button hover wash, with a "Copy value" tooltip and accessible name.
   and Save changes (primary).
 - **Icons:** stroke glyphs on a 16-pt grid at a 1.5 pt line, drawn by
   `apps/native/macos/Sources/Icons.swift` and
-  `apps/native/workbench/src/icons.rs`.
+  the Win32 and GTK `icons.rs` files.
 
 ## Designed but not implemented yet
 

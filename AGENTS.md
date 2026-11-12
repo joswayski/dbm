@@ -15,7 +15,7 @@
 - `apps/native/macos` is the macOS app (Swift/AppKit), built by `build.sh`; it calls Rust through the C ABI in `apps/native/bridge`.
 - `apps/native/win32` is the Windows app (Rust Win32: Direct2D/DirectWrite, DirectComposition, UI Automation) with its own Cargo workspace (`dbm-ui` toolkit + `dbm-win32` app); `apps/native/windows` holds its installer, `apps/native/icons` the app icons. It can't run on Linux: cross-lint with `cargo xwin`, preview with its `raster` feature or the `Win32 preview` workflow.
 - `apps/native/gtk` is the Linux app (Rust gtk4-rs, GTK 4.12+ from the host) with its own Cargo workspace. It ships under the egui app's Linux names (`DBM-Linux-x64`, the AppImage's `dbm-workbench`) and settings file so installs update onto it.
-- `apps/native/workbench` is the former egui app (Rust egui/wgpu, its own Cargo workspace). It no longer ships; it still builds and runs `--demo` for comparisons such as `apps/native/gtk/bench.sh`. `apps/native/desktop` (`dbm-desktop`) is the UI-free worker and updater the Win32, GTK and egui apps share.
+- `apps/native/desktop` (`dbm-desktop`) is the UI-free worker and updater the Win32 and GTK apps share. They replaced an egui app, removed after its last release (v2026.11.11.5); benchmarks compare against that release. `apps/native/fonts` holds the bundled Space Mono files.
 - `apps/native/android` and `apps/native/ios` are development clients. Both call
   the mobile C ABI in-process; there is no hosted proxy. Their contract and
   validation status live in `docs/mobile.md`.
@@ -74,7 +74,7 @@
 
 ## Validation
 
-- For Rust changes, run `cargo fmt --all -- --check`, `cargo test --workspace`, and `cargo clippy --workspace --all-targets -- -D warnings`, and the same three with `--manifest-path apps/native/win32/Cargo.toml` for the Win32 app, `--manifest-path apps/native/gtk/Cargo.toml` for the GTK app, and `--manifest-path apps/native/workbench/Cargo.toml` for the egui app.
+- For Rust changes, run `cargo fmt --all -- --check`, `cargo test --workspace`, and `cargo clippy --workspace --all-targets -- -D warnings`, and the same three with `--manifest-path apps/native/win32/Cargo.toml` for the Win32 app and `--manifest-path apps/native/gtk/Cargo.toml` for the GTK app.
 - Common local commands:
 
   ```sh

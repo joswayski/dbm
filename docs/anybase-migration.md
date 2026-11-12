@@ -117,7 +117,7 @@ users' saved state or strands them on an old version.
 | `DBM-macOS.zip`, `DBM-Windows-x64.exe`, `DBM-Linux-x64`, `DBM.app.tar.gz`, `DBM-Windows-x64-setup.exe`, `DBM-Linux-x86_64.AppImage` | Release assets ([releases](releases.md)) | Break the updaters that download them |
 | `DBM.app` folder inside `DBM.app.tar.gz` | Release workflow (`tar -s`) | Break former Tauri installs' updates |
 | Windows `%LOCALAPPDATA%\DBM`, `dbm.exe`, uninstall key `...\Uninstall\DBM` | `apps/native/windows/installer.nsi` | Install a second copy beside the old one |
-| egui app name `"DBM"` in `eframe::run_native`, and the same `DBM` settings path the GTK app reads | `apps/native/workbench/src/main.rs`, `apps/native/gtk/src/settings.rs` | Reset saved window size, sidebar state, and What's new history |
+| The `DBM` settings path (eframe's app name in the removed egui app) that the GTK app reads | `apps/native/gtk/src/settings.rs` | Reset saved window size, sidebar state, and What's new history |
 | Win32 settings file `%APPDATA%\DBM\data\app.ron` and its `dbm.*` keys (eframe's file, shared with egui installs) | `apps/native/win32/app/src/store.rs` | Reset the sidebar and re-show What's new after the egui → Win32 update |
 | Linux binary name `dbm-workbench` inside the AppImage | `apps/native/gtk/appimage.sh` | Break the desktop entry of existing AppImage installs |
 | Window autosave name `DBMNativeMain` | `apps/native/macos/Sources/main.swift` | Reset the saved macOS window frame |

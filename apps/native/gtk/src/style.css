@@ -1,5 +1,5 @@
 /* Graphite (docs/design-system.md) for GTK 4. Tokens match
-   apps/native/workbench/src/theme.rs and the AppKit Theme.swift. */
+   apps/native/win32/ui/src/theme.rs and the AppKit Theme.swift. */
 
 @define-color bg #161618;
 @define-color chrome #1c1c1e;

@@ -157,7 +157,7 @@ the restarted app doesn't repeat them.
 user-facing highlights, using Caper's and Captures' editorial prompt and Opus
 request configuration. It reads the first-parent commits since the previous
 release tag, keeping only desktop app sources (`apps/native/macos`,
-`apps/native/bridge`, `apps/native/workbench`, `apps/native/gtk`,
+`apps/native/bridge`, `apps/native/win32`, `apps/native/gtk`,
 `apps/native/desktop`, `apps/native/windows`, and `crates/`; tests, fixtures,
 mobile, website, docs, and secret-looking paths are excluded), and tells the
 model which app each change reaches so it can say "on macOS", "on Windows" or
