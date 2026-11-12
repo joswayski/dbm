@@ -1052,6 +1052,15 @@ impl Workbench {
             self.tables.remove(tab);
         }
         self.tabs.retain(|t| !removed.contains(&t.id));
+        // Their loads would run against the new database and report an error
+        // for a tab that is gone.
+        for meta in self.pending_requests.values_mut() {
+            if meta.tab.is_some_and(|tab| removed.contains(&tab)) {
+                meta.stale = true;
+            }
+        }
+        self.queued
+            .retain(|q| q.meta.tab.is_none_or(|tab| !removed.contains(&tab)));
         for tab in self.tabs.iter_mut().filter(|t| t.profile_id == profile) {
             if tab.embedded.take().is_some() {
                 self.tables.remove(&tab.id);

@@ -98,9 +98,9 @@ impl Workbench {
         let embedded_dirty = self.tab_dirty(tab_id);
         let mut run: Option<(String, bool)> = None;
         let run_tip = if redis {
-            "Run the selected command (Command/Ctrl+Enter)"
+            "Run the selected command (Ctrl+Enter)"
         } else {
-            "Run the selected SQL (Command/Ctrl+Enter)"
+            "Run the selected SQL (Ctrl+Enter)"
         };
 
         // Toolbar.
@@ -244,9 +244,9 @@ impl Workbench {
                 Stroke::new(1.0, theme::HAIRLINE),
             );
             let text = if redis {
-                "The outlined command or selection will run · Command/Ctrl+Enter · Preview limit: 10,000 rows"
+                "The outlined command or selection will run · Ctrl+Enter · Preview limit: 10,000 rows"
             } else {
-                "The outlined statement or selected SQL will run · Command/Ctrl+Enter · Preview limit: 10,000 rows"
+                "The outlined statement or selected SQL will run · Ctrl+Enter · Preview limit: 10,000 rows"
             };
             p.text_truncated(
                 hint.left() + 10.0,
@@ -335,12 +335,12 @@ impl Workbench {
                     }
                     messages::Response::Open => {
                         if let Some((path, _)) = &error.export {
-                            crate::platform::open_path(path, false);
+                            c.ctx.open_url(&path.to_string_lossy());
                         }
                     }
                     messages::Response::Reveal => {
                         if let Some((path, _)) = &error.export {
-                            crate::platform::open_path(path, true);
+                            crate::platform::reveal_path(path);
                         }
                     }
                     messages::Response::None => {}

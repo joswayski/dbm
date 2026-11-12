@@ -951,7 +951,6 @@ impl State {
         match meta.kind {
             RequestKind::Form => {
                 if let Some(form) = &mut self.profile_form {
-                    form.saving = false;
                     form.revision += 1;
                     if meta.label == PASSWORD_LOAD {
                         if form.id == meta.profile && !form.password_edited {
@@ -960,6 +959,7 @@ impl State {
                         }
                         return;
                     }
+                    form.saving = false;
                     form.feedback = Some((FeedbackKind::Error, error));
                     return;
                 }
@@ -976,6 +976,12 @@ impl State {
                         }
                         state.requested = None;
                         state.restore_loaded();
+                    }
+                    if meta.kind == RequestKind::Export
+                        && let Some(state) = self.tables.get_mut(&tab)
+                    {
+                        // Progress keeps the window re-rendering while set.
+                        state.export_progress = None;
                     }
                     self.table_error(tab, error);
                     return;
@@ -1546,6 +1552,15 @@ impl State {
             self.tables.remove(tab);
         }
         self.tabs.retain(|t| !removed.contains(&t.id));
+        // Their loads would run against the new database and report an error
+        // for a tab that is gone.
+        for meta in self.pending_requests.values_mut() {
+            if meta.tab.is_some_and(|tab| removed.contains(&tab)) {
+                meta.stale = true;
+            }
+        }
+        self.queued
+            .retain(|q| q.meta.tab.is_none_or(|tab| !removed.contains(&tab)));
         for tab in self.tabs.iter_mut().filter(|t| t.profile_id == profile) {
             if tab.embedded.take().is_some() {
                 self.tables.remove(&tab.id);

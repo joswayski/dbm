@@ -385,7 +385,7 @@ final class GridCellView: NSView {
         }
         let isNull = value is NSNull
         var text = displayValue(value)
-        if text.count > 200 { text = String(text.prefix(200)) }
+        text = String(text.prefix(200))
         text = text.replacingOccurrences(of: "\n", with: " ")
         var attributes: [NSAttributedString.Key: Any] = [
             .font: isNull ? NSFontManager.shared.convert(Graphite.mono(12), toHaveTrait: .italicFontMask) : Graphite.mono(12),

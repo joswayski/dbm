@@ -163,6 +163,9 @@ pub fn default_column_width(data_type: &str) -> i32 {
 /// Read-only query results.
 type Values = Rc<dyn Fn(usize, usize) -> Result<Value, ()>>;
 
+/// Column names, row count, and row storage of the result on screen.
+type ResultKey = (Vec<String>, usize, *const Vec<Value>);
+
 pub struct ResultGrid {
     pub root: gtk::ScrolledWindow,
     view: gtk::ColumnView,
@@ -171,7 +174,7 @@ pub struct ResultGrid {
     /// result lives so the grid keeps no copy of its rows; `Err` while that
     /// is busy.
     value: Values,
-    key: RefCell<Option<(usize, usize, *const Vec<Value>)>>,
+    key: RefCell<Option<ResultKey>>,
     cells: Cells<Cell>,
 }
 
@@ -200,11 +203,14 @@ impl ResultGrid {
 
     /// Shows a new result; the same result again changes nothing.
     pub fn show(&self, columns: &[QueryColumn], rows: &[Vec<Value>]) {
-        let key = (columns.len(), rows.len(), rows.as_ptr());
-        if *self.key.borrow() == Some(key) {
+        // Empty results all share one dangling row pointer, so the column
+        // names tell two of them apart.
+        let names = columns.iter().map(|c| c.name.clone()).collect();
+        let key = Some((names, rows.len(), rows.as_ptr()));
+        if *self.key.borrow() == key {
             return;
         }
-        *self.key.borrow_mut() = Some(key);
+        *self.key.borrow_mut() = key;
         while let Some(column) = self
             .view
             .columns()

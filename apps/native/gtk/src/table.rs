@@ -446,25 +446,37 @@ impl TableView {
         let handle = app.clone();
         apply.connect_clicked(move |_| handle.update(|state| apply_filters(state, tab)));
         let handle = app.clone();
+        let weak = Rc::downgrade(self);
         self.clear.connect_clicked(move |_| {
             handle.update(|state| {
+                if blocked_by_pending(state, tab) {
+                    return;
+                }
                 if let Some(table) = state.tables.get_mut(&tab) {
                     table.clear_filters();
                 }
-                state.reload_table(tab);
+                // The reset draft can match the old one in everything but its
+                // text, so rebuild the rows to empty the value box.
+                if let Some(view) = weak.upgrade() {
+                    *view.filter_signature.borrow_mut() = "unset".into();
+                }
+                state.load_table(tab);
             });
         });
         let handle = app.clone();
         self.limit.connect_value_changed(move |spin| {
             let limit = spin.value_as_int().clamp(1, MAX_PREVIEW_ROWS as i32) as u32;
             handle.update(|state| {
-                if let Some(table) = state.tables.get_mut(&tab)
-                    && table.limit != limit
+                if state.tables.get(&tab).is_none_or(|t| t.limit == limit)
+                    || blocked_by_pending(state, tab)
                 {
+                    return;
+                }
+                if let Some(table) = state.tables.get_mut(&tab) {
                     table.limit = limit;
                     table.page_index = 0;
-                    state.reload_table(tab);
                 }
+                state.load_table(tab);
             });
         });
         let handle = app.clone();
@@ -1089,6 +1101,9 @@ impl TableView {
                     .is_some_and(|c| c == *column)
                     && sorter.as_ref().map(|s| s.primary_sort_order()) == Some(sort);
                 if !current {
+                    // Clearing first hides the arrow on a header whose click
+                    // was refused; setting a column only updates that column.
+                    self.view.sort_by_column(None, gtk::SortType::Ascending);
                     self.view.sort_by_column(Some(column), sort);
                 }
             }
@@ -2014,10 +2029,27 @@ fn selected_rows(model: &gtk::MultiSelection) -> BTreeSet<usize> {
 }
 
 fn apply_filters(state: &mut State, tab: u64) {
+    if blocked_by_pending(state, tab) {
+        return;
+    }
     if let Some(table) = state.tables.get_mut(&tab) {
         table.apply_filters();
     }
-    state.reload_table(tab);
+    state.load_table(tab);
+}
+
+/// Refuses a filter, sort, or limit change while edits are staged, before it
+/// touches the view: the controls keep describing the rows that are shown.
+fn blocked_by_pending(state: &mut State, tab: u64) -> bool {
+    if !state.tab_dirty(tab) {
+        return false;
+    }
+    state.table_error(tab, crate::state::PENDING_REFRESH_ERROR);
+    // Put the controls back on the shown page.
+    if let Some(table) = state.tables.get_mut(&tab) {
+        table.version += 1;
+    }
+    true
 }
 
 /// Sorts by `column`; a new column starts ascending.
@@ -2031,14 +2063,12 @@ fn set_order(state: &mut State, tab: u64, column: String, descending: Option<boo
     if same_column && current.as_ref().is_some_and(|o| o.descending == descending) {
         return;
     }
-    if !table.pending.is_empty() {
-        state.table_error(tab, crate::state::PENDING_REFRESH_ERROR);
-        // Put the header and dropdown back on the shown order.
-        if let Some(table) = state.tables.get_mut(&tab) {
-            table.version += 1;
-        }
+    if blocked_by_pending(state, tab) {
         return;
     }
+    let Some(table) = state.tables.get_mut(&tab) else {
+        return;
+    };
     table.order = Some(OrderSpec { column, descending });
     table.page_index = 0;
     state.load_table(tab);

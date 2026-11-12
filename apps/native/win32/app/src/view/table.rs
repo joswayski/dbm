@@ -68,10 +68,14 @@ fn editable_column(cx: &Cx<'_>, page: &TablePage, column: usize) -> bool {
             .contains(&page.metadata.columns[column].name)
 }
 
-fn reload_or_block(state: &TableState) -> Action {
+/// Reloads after a filter, sort, limit, or page change. While edits are
+/// staged the change is refused and undone, so the controls keep describing
+/// the rows that are shown.
+fn reload_or_block(state: &mut TableState) -> Action {
     if state.pending.is_empty() {
         Action::Reload
     } else {
+        state.restore_loaded();
         Action::Error(PENDING_REFRESH_ERROR)
     }
 }
@@ -650,14 +654,19 @@ fn query_controls(
             .show(ui)
             .clicked
     {
-        state.filters = columns
-            .first()
-            .map(|c| FilterDraft::new(c))
-            .into_iter()
-            .collect();
-        state.applied.clear();
-        state.page_index = 0;
-        actions.push(reload_or_block(state));
+        if state.pending.is_empty() {
+            state.filters = columns
+                .first()
+                .map(|c| FilterDraft::new(c))
+                .into_iter()
+                .collect();
+            state.applied.clear();
+            state.page_index = 0;
+            actions.push(Action::Reload);
+        } else {
+            // Keep the filter drafts: nothing reloads while edits are staged.
+            actions.push(Action::Error(PENDING_REFRESH_ERROR));
+        }
     }
     if (state.columns_resized || !state.collapsed_columns.is_empty())
         && widgets::text_button(
@@ -1000,8 +1009,8 @@ fn message_panel(ui: &mut Ui, state: &mut TableState) {
     let path = message.export.as_ref().map(|(path, _)| path.clone());
     match (response, path) {
         (messages::Response::Dismiss, _) => state.message = None,
-        (messages::Response::Open, Some(path)) => crate::platform::open_path(&path, false),
-        (messages::Response::Reveal, Some(path)) => crate::platform::open_path(&path, true),
+        (messages::Response::Open, Some(path)) => ui.ctx.open_url(&path.to_string_lossy()),
+        (messages::Response::Reveal, Some(path)) => crate::platform::reveal_path(&path),
         _ => {}
     }
 }

@@ -59,19 +59,21 @@ pub fn save_result_csv(
         .map(drop)
 }
 
-/// Opens an exported file with its default app, or selects it in Explorer.
-pub fn open_path(path: &Path, reveal: bool) {
-    let result = if reveal {
-        std::process::Command::new("explorer")
-            .arg(format!("/select,{}", path.display()))
-            .spawn()
-    } else {
-        std::process::Command::new("cmd")
-            .args(["/C", "start", ""])
-            .arg(path)
-            .spawn()
-    };
-    drop(result);
+/// Selects an exported file in Explorer. (Opening one goes through the
+/// shell, `Context::open_url`, like a link.)
+pub fn reveal_path(path: &Path) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // Explorer takes quotes around the path only; `arg` would quote the
+        // whole switch when the path has a space.
+        let result = std::process::Command::new("explorer")
+            .raw_arg(format!("/select,\"{}\"", path.display()))
+            .spawn();
+        drop(result);
+    }
+    #[cfg(not(windows))]
+    let _ = path;
 }
 
 /// Opens the system colour picker on its own thread and reports the chosen

@@ -518,6 +518,7 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
 
     /// Discards a staged row, keeping its edits when only a delete is undone.
     private func discardPending(_ row: Int) {
+        guard !state.loading, !(host?.isSaving(tab) ?? false) else { return }
         state.discardPending(row)
         grid.reloadData()
         reload()
@@ -663,6 +664,9 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
 
     private func deleteSelection() {
         guard editable, !state.selected.isEmpty else { return }
+        // The grid is disabled during a save or page load, but the Delete key
+        // can still arrive; staging then would be lost or land on other rows.
+        guard !state.loading, !(host?.isSaving(tab) ?? false) else { return }
         state.toggleDelete(Array(state.selected))
         grid.reloadData()
         reload()
@@ -830,7 +834,13 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
 
     private func reloadIfClean() {
         endEditingOverlay()
-        guard state.pending.isEmpty else { showMessage(.error(pendingRefreshError)); reload(); return }
+        guard state.pending.isEmpty else {
+            // Put sort, limit, and filters back on the page that is shown.
+            state.restoreLoaded()
+            showMessage(.error(pendingRefreshError))
+            reload()
+            return
+        }
         host?.loadTable(tab)
     }
 

@@ -346,7 +346,9 @@ impl Workbench {
                 );
             }
             c.add_space(8.0);
-            let refreshing = self.pending_requests.values().any(|m| {
+            // Queued refreshes count too, or each click behind a long query
+            // would queue another.
+            let refreshing = self.metas().any(|m| {
                 m.profile == Some(id)
                     && (m.label == "Loading schema" || m.label == "Refreshing schema")
             });
@@ -413,6 +415,8 @@ impl Workbench {
                 .map(|(_, s, t)| (s, t));
             let mut open = None;
             c.spacing.y = 0.0;
+            // The tree still lists the database being left.
+            c.set_enabled(!switching);
             for node in nodes {
                 schema_branch(
                     &mut c,
@@ -424,6 +428,7 @@ impl Workbench {
                     &mut open,
                 );
             }
+            c.set_enabled(true);
             if !query.is_empty() && nodes.is_empty() {
                 c.add_space(4.0);
                 c.label_wrapped(

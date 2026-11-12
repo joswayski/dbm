@@ -541,6 +541,7 @@ impl Workbench {
             });
             if form.importing_url {
                 ui.horizontal(32.0, |ui| {
+                    let typed = form.url.chars().count();
                     let o = TextEdit::singleline(Id::new("profile-import-url"), &mut form.url)
                         .password(true)
                         .hint("Paste a connection URL")
@@ -551,9 +552,12 @@ impl Workbench {
                     url_enter = o.submitted;
                     let can = !form.url.trim().is_empty();
                     let clicked = secondary_button("Import").enabled(can).show(ui).clicked;
-                    if (clicked || o.submitted || (o.response.changed && form.url.contains("://")))
-                        && can
-                    {
+                    // A paste imports at once; a URL typed by hand waits for
+                    // Enter or the button instead of importing half of itself.
+                    let pasted = o.response.changed
+                        && form.url.chars().count() > typed + 1
+                        && form.url.contains("://");
+                    if (clicked || o.submitted || pasted) && can {
                         form.import_url();
                     }
                 });
@@ -823,7 +827,11 @@ impl Workbench {
                 }
             }
         });
-        close |= out.backdrop_clicked || ui.ctx.key_pressed(Key::Escape);
+        // Escape and a backdrop click belong to the delete confirmation while
+        // it is open over this editor; they cancel it, not the editor.
+        if self.confirm_delete.is_none() {
+            close |= out.backdrop_clicked || ui.ctx.key_pressed(Key::Escape);
+        }
         // Enter in a text field saves, like submitting the desktop form.
         if field_enter && !url_enter && !busy {
             save = true;

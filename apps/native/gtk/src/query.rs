@@ -85,9 +85,9 @@ impl QueryView {
         );
         let run = ui::primary_with_shortcut(Icon::Play, "Run statement", "Ctrl+Enter");
         run.set_tooltip_text(Some(if redis {
-            "Run the selected command (Command/Ctrl+Enter)"
+            "Run the selected command (Ctrl+Enter)"
         } else {
-            "Run the selected SQL (Command/Ctrl+Enter)"
+            "Run the selected SQL (Ctrl+Enter)"
         }));
         toolbar.append(&title);
         toolbar.append(&status);
@@ -131,9 +131,9 @@ impl QueryView {
         scroller.set_vexpand(true);
         let hint = ui::label(
             if redis {
-                "The outlined command or selection will run · Command/Ctrl+Enter · Preview limit: 10,000 rows"
+                "The outlined command or selection will run · Ctrl+Enter · Preview limit: 10,000 rows"
             } else {
-                "The outlined statement or selected SQL will run · Command/Ctrl+Enter · Preview limit: 10,000 rows"
+                "The outlined statement or selected SQL will run · Ctrl+Enter · Preview limit: 10,000 rows"
             },
             &["editor-hint"],
         );
