@@ -299,20 +299,7 @@ async fn dispatch(state: &AppState, request: Request) -> Result<Value, String> {
             serde_json::to_value(state.profile_summaries().map_err(message)?)
         }
         Request::SaveProfile { input } => {
-            let profile = state.save_profile(input.clone()).map_err(message)?;
-            if let Some(password) = input.password.as_deref() {
-                if password.is_empty() {
-                    state
-                        .credentials
-                        .delete_password(profile.id)
-                        .map_err(message)?;
-                } else {
-                    state
-                        .credentials
-                        .save_password(profile.id, password)
-                        .map_err(message)?;
-                }
-            }
+            let profile = state.save_profile(input).map_err(message)?;
             state.disconnect(profile.id).await;
             serde_json::to_value(profile)
         }

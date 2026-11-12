@@ -140,7 +140,21 @@ impl AppState {
         }
     }
 
-    pub fn save_profile(&self, input: SaveProfileInput) -> AppResult<ConnectionProfile> {
+    /// Saves a profile and, when the editor supplied one, its password. The
+    /// password is stored first, so a credential-store failure saves nothing:
+    /// a half-saved profile would stay hidden until the next launch, and each
+    /// retry would add the same connection again.
+    pub fn save_profile(&self, mut input: SaveProfileInput) -> AppResult<ConnectionProfile> {
+        let existing = input.id.is_some();
+        let id = *input.id.get_or_insert_with(Uuid::new_v4);
+        crate::demo::profile_from_input(&input)?;
+        match input.password.as_deref() {
+            None => {}
+            // A new profile has no stored password to clear.
+            Some("") if !existing => {}
+            Some("") => self.credentials.delete_password(id)?,
+            Some(password) => self.credentials.save_password(id, password)?,
+        }
         self.store.save_profile(&input)
     }
 
@@ -171,7 +185,9 @@ impl AppState {
         // Passwords never reach the SQLite file: credential statements are
         // saved with their literals redacted, or not at all.
         if let Some(sql) = history_text(session.profile().engine, &request.sql) {
-            self.store.add_history(&QueryHistoryEntry {
+            // The statement already ran: failing to record it must not hide
+            // its result, or the user would run it again.
+            if let Err(error) = self.store.add_history(&QueryHistoryEntry {
                 id: Uuid::new_v4(),
                 profile_id: request.profile_id,
                 database,
@@ -179,7 +195,9 @@ impl AppState {
                 executed_at: chrono::Utc::now(),
                 duration_ms: response.as_ref().map_or(0, |result| result.duration_ms),
                 success: response.is_ok(),
-            })?;
+            }) {
+                tracing::warn!(%error, "could not save query history");
+            }
         }
         response
     }
@@ -190,6 +208,48 @@ mod tests {
     use super::*;
     use crate::models::{DatabaseEngine, TlsMode};
     use serde_json::json;
+
+    #[test]
+    fn a_profile_is_not_saved_when_its_password_cannot_be_stored() {
+        use crate::keyring_store::CredentialStore;
+        use crate::models::SaveProfileInput;
+
+        let directory = tempfile::tempdir().unwrap();
+        let state = AppState::mobile(&directory.path().join("state.sqlite3")).unwrap();
+        let input = |password: &str| SaveProfileInput {
+            id: None,
+            name: "Local".into(),
+            color: None,
+            engine: DatabaseEngine::Postgres,
+            host: "127.0.0.1".into(),
+            port: 5432,
+            username: "postgres".into(),
+            default_database: "postgres".into(),
+            tls_mode: TlsMode::Disabled,
+            ca_cert_path: None,
+            ssh: None,
+            read_only: false,
+            open_on_startup: false,
+            password: Some(password.into()),
+        };
+        // Poison the session store so that every credential call fails.
+        let CredentialStore::Memory(passwords) = &state.credentials else {
+            panic!("expected the in-memory store")
+        };
+        let passwords = passwords.clone();
+        std::thread::spawn(move || {
+            let _guard = passwords.lock().unwrap();
+            panic!("poison the credential store");
+        })
+        .join()
+        .unwrap_err();
+
+        assert!(state.save_profile(input("secret")).is_err());
+        assert!(state.profile_summaries().unwrap().is_empty());
+        // A connection without a password never touches the store.
+        let saved = state.save_profile(input("")).unwrap();
+        assert_eq!(state.profile(saved.id).unwrap().name, "Local");
+    }
 
     #[tokio::test]
     async fn user_queries_recover_idle_connections_without_replaying_submitted_sql() {

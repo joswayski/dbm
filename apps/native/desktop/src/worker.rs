@@ -151,16 +151,7 @@ async fn execute_live(state: &AppState, command: Command) -> Result<Payload, Str
                 .collect(),
         ),
         Command::SaveProfile(input) => {
-            let password = input.password.clone();
             let profile = state.save_profile(input).map_err(string_error)?;
-            if let Some(password) = password {
-                if password.is_empty() {
-                    state.credentials.delete_password(profile.id)
-                } else {
-                    state.credentials.save_password(profile.id, &password)
-                }
-                .map_err(string_error)?;
-            }
             state.disconnect(profile.id).await;
             Payload::Profile(profile)
         }

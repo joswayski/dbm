@@ -25,7 +25,10 @@ What the app does today, what is deliberately not built yet, and what it stores 
   saved host and any required private network or VPN, then reconnect. Mobile
   clients continue to connect manually.
 - Passwords through the macOS Keychain, Windows Credential Manager, or Linux
-  secret service via `keyring`.
+  secret service via `keyring`. A connection is saved only once its password
+  is stored. On Linux without a running secret service (GNOME Keyring,
+  KWallet), connections without a password still save and connect, and saving
+  one with a password explains that a keyring is needed.
 - The connection editor displays the current URL with its password masked.
   **Show password** reveals it; the password field has its own Show/Hide toggle.
   **Copy URL** always copies the full URL, including the entered or saved

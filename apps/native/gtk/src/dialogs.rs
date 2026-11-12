@@ -117,26 +117,38 @@ pub fn build(app: &App, state: &State) -> Option<gtk::Widget> {
     // Room for the overlay scrollbar, so it never covers the fields.
     content.set_margin_end(10);
     // The action row stays below the scroller, so its buttons show even when
-    // the content has to scroll.
+    // the content has to scroll. So does the result of a test or save: under
+    // the fold, a failed save would look like nothing happened.
+    let feedback = std::iter::successors(content.first_child(), |child| child.next_sibling())
+        .find(|child| child.has_css_class("feedback"));
     let actions = content
         .last_child()
         .filter(|row| row.has_css_class("dialog-actions"));
-    if let Some(row) = &actions {
-        content.remove(row);
-        row.set_margin_end(10);
+    if let Some(feedback) = &feedback {
+        feedback.set_margin_top(8);
+        // Outside the scroller a wrapping label asks for its one-line width,
+        // which would stretch the card across the window.
+        if let Some(label) = feedback.downcast_ref::<gtk::Label>() {
+            label.set_max_width_chars(40);
+        }
+    }
+    let pinned: Vec<gtk::Widget> = feedback.into_iter().chain(actions).collect();
+    for widget in &pinned {
+        content.remove(widget);
+        widget.set_margin_end(10);
     }
     scroller.set_child(Some(&content));
     dialog.append(&scroller);
-    if let Some(row) = &actions {
-        dialog.append(row);
+    for widget in &pinned {
+        dialog.append(widget);
     }
     // Some GTK versions size the scroller from its child's natural height
     // at the wrong width, collapsing the card to its first line. Once the
     // content has its width, ask for its full height, capped so the card and
-    // its action row fit the window.
+    // the rows pinned under it fit the window.
     let inner = content.downgrade();
     let window = app.window.downgrade();
-    let row = actions.as_ref().map(|row| row.downgrade());
+    let pinned: Vec<_> = pinned.iter().map(|widget| widget.downgrade()).collect();
     scroller.add_tick_callback(move |scroller, _| {
         let (Some(content), Some(window)) = (inner.upgrade(), window.upgrade()) else {
             return glib::ControlFlow::Break;
@@ -146,8 +158,11 @@ pub fn build(app: &App, state: &State) -> Option<gtk::Widget> {
         }
         let width = content.width() + content.margin_start() + content.margin_end();
         let (_, natural, _, _) = content.measure(gtk::Orientation::Vertical, width);
-        let row = row.as_ref().and_then(|row| row.upgrade());
-        let below = row.map_or(0, |row| row.measure(gtk::Orientation::Vertical, width).1);
+        let below: i32 = pinned
+            .iter()
+            .filter_map(|widget| widget.upgrade())
+            .map(|widget| widget.measure(gtk::Orientation::Vertical, width).1)
+            .sum();
         let cap = (window.height() - 120 - below).max(120);
         scroller.set_max_content_height(cap);
         scroller.set_min_content_height(natural.min(cap));
