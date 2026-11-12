@@ -190,3 +190,29 @@ jobs:
         with:
           name: DBM-${{ runner.os }}-development
           path: DBM-*.*
+
+  native-gtk:
+    needs: route
+    name: Native GTK (Linux)
+    runs-on: ${{ needs.route.outputs.linux == 'true' && fromJSON('["self-hosted","joselinux"]') || 'ubuntu-24.04' }}
+    timeout-minutes: 30
+    env:
+      CARGO_PROFILE_DEV_DEBUG: 0
+    steps:
+      - uses: actions/checkout@v4
+      - name: GTK 4 dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev pkg-config libgtk-4-dev
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.94.0
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/native/gtk -> target
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: cargo fmt --manifest-path apps/native/gtk/Cargo.toml --all -- --check
+      - run: cargo test --manifest-path apps/native/gtk/Cargo.toml --locked
+      - run: cargo clippy --manifest-path apps/native/gtk/Cargo.toml --locked --all-targets -- -D warnings
+      - run: cargo build --manifest-path apps/native/gtk/Cargo.toml --locked --release

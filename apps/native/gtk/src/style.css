@@ -1,0 +1,353 @@
+/* Graphite (docs/design-system.md) for GTK 4. Tokens match
+   apps/native/workbench/src/theme.rs and the AppKit Theme.swift. */
+
+@define-color bg #161618;
+@define-color chrome #1c1c1e;
+@define-color sidebar #1f1f21;
+@define-color grid_header #1a1a1c;
+@define-color control #2a2a2d;
+@define-color control_hover #323235;
+@define-color control_active #3a3a3d;
+@define-color popover #262629;
+@define-color hairline #202023;
+@define-color border #2a2a2d;
+@define-color border_strong #353538;
+@define-color text_strong #f5f5f7;
+@define-color text #e8e8ea;
+@define-color secondary #c7c7cc;
+@define-color muted #a0a0a6;
+@define-color faint #808087;
+@define-color accent #4c9aff;
+@define-color accent_strong #3b78c7;
+@define-color accent_text #7db6ff;
+@define-color edit_surface #10192a;
+@define-color modified #f0b14c;
+@define-color success #5ad394;
+@define-color danger #ff8a80;
+
+/* Adwaita names, so stock widgets (entries, popovers, scrollbars) match. */
+@define-color window_bg_color @chrome;
+@define-color window_fg_color @text;
+@define-color view_bg_color @bg;
+@define-color view_fg_color @text;
+@define-color accent_bg_color @accent_strong;
+@define-color accent_color @accent_text;
+@define-color popover_bg_color @popover;
+@define-color theme_selected_bg_color @accent_strong;
+
+* {
+  font-family: "Space Mono", monospace;
+  font-size: 13px;
+  outline-color: alpha(@accent, 0.35);
+}
+
+window, .app {
+  background-color: @chrome;
+  color: @text;
+}
+
+label { color: inherit; }
+.strong { color: @text_strong; }
+.secondary { color: @secondary; }
+.muted { color: @muted; }
+.faint { color: @faint; }
+.bold { font-weight: 700; }
+.mono-11 { font-size: 11px; }
+.size-11 { font-size: 11px; }
+.size-11-5 { font-size: 11.5px; }
+.size-12 { font-size: 12px; }
+.size-12-5 { font-size: 12.5px; }
+.size-15 { font-size: 15px; }
+.size-17 { font-size: 17px; }
+.size-20 { font-size: 20px; }
+.accent-text { color: @accent_text; }
+.danger-text { color: @danger; }
+.modified-text { color: @modified; }
+.section-label { font-size: 11px; font-weight: 700; color: @muted; }
+.eyebrow { font-size: 10.5px; font-weight: 700; color: @faint; }
+
+/* ---- surfaces ------------------------------------------------------- */
+
+.sidebar { background-color: @sidebar; border-right: 1px solid @border; }
+.sidebar-footer { border-top: 1px solid @border; padding: 10px 2px 0 2px; }
+.topbar { background-color: @chrome; border-bottom: 1px solid @border;
+  min-height: 44px; padding: 0 12px 0 16px; }
+.tabstrip { background-color: @chrome; min-height: 36px; padding: 4px 6px 0 6px;
+  border-bottom: 1px solid @border; }
+.canvas { background-color: @bg; }
+.toolbar { background-color: @chrome; min-height: 44px; padding: 0 14px;
+  border-bottom: 1px solid @border; }
+.query-toolbar { background-color: @bg; min-height: 44px; padding: 0 14px; }
+.filters { background-color: @chrome; padding: 7px 10px 7px 12px;
+  border-bottom: 1px solid @border; }
+.statusbar { background-color: @chrome; min-height: 28px; padding: 0 14px;
+  border-top: 1px solid @border; }
+.statusbar label { font-size: 11.5px; color: #8e8e93; }
+.statusbar label.page { color: @secondary; }
+.pending-bar { background-color: @chrome; min-height: 48px; padding: 0 14px;
+  border-top: 1px solid @border; }
+.inspector { background-color: @chrome; border-left: 1px solid @border; }
+.inspector-header { min-height: 40px; padding: 0 8px 0 14px; border-bottom: 1px solid @border; }
+.inspector-footer { padding: 12px 14px; border-top: 1px solid @border; }
+.card { background-color: @bg; border: 1px solid @border; border-radius: 10px; }
+.card.chrome { background-color: @chrome; }
+.editor-hint { background-color: @chrome; border-top: 1px solid @hairline;
+  padding: 6px 10px; border-radius: 0 0 9px 9px; font-size: 11.5px; color: @faint; }
+.history-header { padding: 9px 12px; border-bottom: 1px solid @border; }
+
+/* ---- buttons -------------------------------------------------------- */
+
+button {
+  background-image: none;
+  box-shadow: none;
+  text-shadow: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  min-height: 0;
+  min-width: 0;
+  padding: 0;
+  color: @secondary;
+  background-color: transparent;
+}
+button:disabled { opacity: 0.45; }
+button:focus-visible { outline: 2px solid alpha(@accent, 0.35); outline-offset: 1px; }
+
+.primary, .secondary-button, .danger-button, .accent-button {
+  min-height: 28px; padding: 0 11px; border-radius: 7px; font-size: 12.5px;
+}
+.primary { background-color: @accent_strong; color: white; font-weight: 700; }
+.primary:hover { background-color: #4585d6; }
+.primary:active { background-color: @accent; }
+.secondary-button { background-color: @control; border-color: @border_strong; color: @text; }
+.secondary-button:hover { background-color: @control_hover; }
+.secondary-button:active { background-color: @control_active; }
+.danger-button { background-color: rgba(255,107,97,0.09); border-color: rgba(255,107,97,0.3); color: @danger; }
+.danger-button:hover { background-color: rgba(255,107,97,0.16); }
+.accent-button { background-color: alpha(@accent, 0.14); border-color: alpha(@accent, 0.55); color: @accent_text; }
+.small { min-height: 24px; padding: 0 9px; font-size: 12px; }
+.kbd { background-color: rgba(255,255,255,0.2); border-radius: 4px; padding: 0 5px; font-size: 11px; }
+
+.toolbar-button { min-height: 28px; padding: 0 9px; color: @secondary; font-size: 12.5px; }
+.toolbar-button.icon-only { padding: 0 7px; }
+.toolbar-button:hover { background-color: rgba(255,255,255,0.06); color: @text; }
+.toolbar-button:disabled { color: @faint; opacity: 1; }
+.text-button { padding: 2px 6px; color: @accent_text; font-size: 11.5px; border-radius: 5px; }
+.text-button:hover { background-color: alpha(@accent, 0.14); }
+.text-button:disabled { color: @faint; opacity: 1; }
+.icon-toggle { min-width: 30px; min-height: 28px; color: @muted; }
+.icon-toggle:hover { background-color: rgba(255,255,255,0.06); color: @text; }
+.icon-toggle.on { background-color: alpha(@accent, 0.14); color: @accent_text; }
+.menu-trigger { min-height: 28px; padding: 0 9px; color: @accent_text; font-size: 12.5px; }
+.menu-trigger:hover { background-color: rgba(255,255,255,0.06); }
+
+/* ---- inputs --------------------------------------------------------- */
+
+entry, text, textview, spinbutton {
+  background-color: @control;
+  color: @text;
+  caret-color: @text;
+}
+entry {
+  min-height: 28px;
+  padding: 0 9px;
+  border: 1px solid @border_strong;
+  border-radius: 6px;
+  box-shadow: none;
+  background-image: none;
+}
+entry:focus-within { border-color: @accent; box-shadow: 0 0 0 3px alpha(@accent, 0.18); outline: none; }
+entry placeholder, text placeholder { color: @faint; }
+entry.mono { font-size: 12px; }
+entry selection, text selection, textview selection { background-color: alpha(@accent, 0.25); color: @text_strong; }
+entry.schema-filter { font-size: 12px; }
+
+dropdown > button, menubutton > button, .combo {
+  background-color: @control;
+  border: 1px solid @border_strong;
+  border-radius: 6px;
+  min-height: 26px;
+  padding: 0 8px;
+  color: @text;
+  font-size: 12.5px;
+}
+menubutton.toolbar-button > button, menubutton.menu-trigger > button {
+  background-color: transparent; border-color: transparent; padding: 0 7px; color: inherit; min-height: 28px; }
+menubutton.toolbar-button > button:hover, menubutton.menu-trigger > button:hover { background-color: rgba(255,255,255,0.06); }
+menubutton.toolbar-button, menubutton.menu-trigger { padding: 0; min-height: 0; }
+dropdown > button:hover, menubutton > button:hover { background-color: @control_hover; }
+dropdown arrow, menubutton arrow { color: @muted; }
+
+checkbutton { color: @text; font-size: 12.5px; }
+checkbutton check { background-color: @control; border: 1px solid @border_strong; border-radius: 4px;
+  min-width: 14px; min-height: 14px; background-image: none; }
+checkbutton check:checked { background-color: @accent_strong; border-color: @accent_strong; color: white; }
+
+.segmented { background-color: @control; border-radius: 7px; padding: 2px; }
+.segmented button { min-height: 26px; min-width: 120px; color: @muted; border-radius: 5px; }
+.segmented button.selected { background-color: @control_active; color: @text_strong;
+  box-shadow: 0 1px 1px rgba(0,0,0,0.35); }
+
+/* ---- popovers and menus -------------------------------------------- */
+
+popover > contents, popover.menu > contents {
+  background-color: @popover;
+  border: 1px solid @border_strong;
+  border-radius: 10px;
+  padding: 4px;
+  box-shadow: 0 16px 40px rgba(0,0,0,0.55);
+  color: @text;
+}
+popover > arrow { background-color: @popover; border-color: @border_strong; }
+.menu-item { min-height: 28px; padding: 0 8px; border-radius: 5px; color: @text; font-size: 12.5px; }
+.menu-item:hover { background-color: @accent_strong; color: white; }
+.menu-item.danger { color: @danger; }
+.menu-item.danger:hover { background-color: rgba(255,107,97,0.18); color: #ffb3ac; }
+.menu-item.selected { background-color: @accent_strong; color: white; }
+listview.completion row { min-height: 22px; padding: 0 6px; border-radius: 4px; font-size: 12.5px; }
+listview.completion row:selected { background-color: @accent_strong; color: white; }
+
+tooltip { background-color: @popover; border: 1px solid @border_strong; border-radius: 6px; color: @text; }
+tooltip label { font-size: 12px; }
+
+scrollbar { background-color: transparent; }
+scrollbar slider { background-color: rgba(255,255,255,0.18); border-radius: 6px; min-width: 6px; min-height: 6px; }
+
+paned > separator { background-color: @border; min-width: 1px; min-height: 1px; }
+paned.editor-split > separator { background-color: transparent; min-height: 12px; background-image: none; }
+
+/* ---- sidebar -------------------------------------------------------- */
+
+.connection-item { min-height: 44px; border-radius: 6px; padding: 0; }
+.connection-item:hover { background-color: rgba(255,255,255,0.06); }
+.connection-item.active { background-color: rgba(255,255,255,0.07); }
+.connection-name { font-size: 13px; color: @text; }
+.connection-subtitle { font-size: 11px; color: @faint; }
+.chip { font-size: 11px; padding: 1px 6px; border-radius: 5px; }
+.chip.muted { background-color: alpha(@muted, 0.14); color: @muted; }
+.chip.modified { background-color: alpha(@modified, 0.14); color: @modified; }
+.chip.danger { background-color: alpha(@danger, 0.14); color: @danger; }
+.schema-row { min-height: 26px; border-radius: 6px; color: @secondary; font-size: 12.5px; }
+.schema-row:hover { background-color: rgba(255,255,255,0.06); color: @text; }
+.schema-row .icon { color: @faint; }
+.schema-row .icon.schema { color: @muted; }
+.schema-row .caret { color: @faint; }
+.schema-row.selected { color: white; }
+
+/* ---- tabs ----------------------------------------------------------- */
+
+.tab { min-height: 31px; padding: 0 4px 0 10px; border-radius: 7px 7px 0 0; color: @muted;
+  border: 1px solid transparent; border-bottom: none; font-size: 12.5px; }
+.tab:hover { background-color: rgba(255,255,255,0.04); color: @text; }
+.tab.active { background-color: @bg; color: @text_strong; border-color: @border; }
+.tab-title-input { background-color: @edit_surface; min-height: 22px; }
+.tab.collapsed { min-width: 64px; padding: 0 4px; }
+.tab-close { min-width: 22px; min-height: 22px; color: @faint; border-radius: 5px; }
+.tab-close:hover { background-color: @control_hover; color: @text; }
+
+/* ---- messages ------------------------------------------------------- */
+
+.message { border-radius: 7px; padding: 4px 6px 4px 12px; margin: 8px 12px 0 12px; font-size: 12.5px; }
+.message.error { background-color: rgba(255,107,97,0.09); border: 1px solid rgba(255,107,97,0.25); color: #ffb3ac; }
+.message.notice { background-color: rgba(90,211,148,0.10); border: 1px solid rgba(90,211,148,0.25); color: #9be7bf; }
+.message .link { color: #c6f3da; text-decoration: underline; }
+.banner { background-color: rgba(255,107,97,0.09); border-bottom: 1px solid rgba(255,107,97,0.25);
+  color: #ffb3ac; padding: 4px 14px; font-size: 12.5px; }
+.toast { background-color: @popover; border: 1px solid @border_strong; border-radius: 10px;
+  padding: 10px 10px 10px 14px; box-shadow: 0 16px 40px rgba(0,0,0,0.55); margin: 16px; }
+.dismiss { min-width: 24px; min-height: 24px; color: inherit; }
+.dismiss:hover { background-color: rgba(255,255,255,0.05); }
+.feedback { border-radius: 7px; padding: 9px 12px; font-size: 12px; }
+.feedback.info { background-color: alpha(@accent, 0.14); border: 1px solid alpha(@accent, 0.3); color: @accent_text; }
+.feedback.success { background-color: rgba(90,211,148,0.10); border: 1px solid rgba(90,211,148,0.3); color: #9be7bf; }
+.feedback.error { background-color: rgba(255,107,97,0.09); border: 1px solid rgba(255,107,97,0.3); color: #ffb3ac; }
+.note { background-color: rgba(255,255,255,0.04); border-radius: 7px; padding: 10px 12px; font-size: 11.5px; color: @faint; }
+
+/* ---- dialogs -------------------------------------------------------- */
+
+.modal-backdrop { background-color: rgba(0,0,0,0.55); }
+.dialog { background-color: @popover; border: 1px solid @border_strong; border-radius: 14px;
+  padding: 18px; box-shadow: 0 16px 40px rgba(0,0,0,0.55); }
+.form-label { font-size: 12px; color: @muted; }
+.sql-preview { background-color: @bg; border-radius: 6px; padding: 8px; font-size: 12px; }
+.swatch { min-width: 22px; min-height: 22px; border-radius: 11px; }
+.swatch.selected { box-shadow: 0 0 0 2px @text_strong; }
+.welcome-icon { background-color: #27272a; border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 16px; min-width: 64px; min-height: 64px; color: @accent_text; }
+
+/* ---- editor --------------------------------------------------------- */
+
+textview.code, textview.code text { background-color: @bg; color: @text; font-size: 12.5px; }
+textview.gutter, textview.gutter text { background-color: @bg; color: #5c5c62; font-size: 12.5px; }
+.gutter-line { border-right: 1px solid @hairline; }
+
+/* ---- grid ----------------------------------------------------------- */
+
+.grid { background-color: @bg; }
+.grid-header { background-color: @grid_header; min-height: 34px; border-bottom: 1px solid @border; }
+.grid-header-cell { border-right: 1px solid #242427; padding: 0 0 0 10px; font-size: 12px; color: @text; }
+.grid-header-cell:hover { background-color: rgba(255,255,255,0.03); }
+.grid-header-cell .type { font-size: 11px; color: @faint; }
+.grid-header-cell .key { color: @modified; }
+.grid-header-cell .sort { color: @accent_text; }
+.grid-header-cell.sorted label.name { color: @text_strong; }
+.grid-header-cell.collapsed { padding: 0; font-size: 9.5px; color: @faint; }
+.null { color: @faint; font-style: italic; }
+.empty-state { color: @faint; font-size: 12.5px; }
+.skeleton { background-color: rgba(255,255,255,0.016); border-bottom: 1px solid @hairline; min-height: 32px; }
+.skeleton.header { background-color: @grid_header; min-height: 34px; }
+.refreshing-pill { background-color: @popover; border: 1px solid @border_strong; border-radius: 14px;
+  padding: 6px 12px; font-size: 12px; color: @secondary; }
+.refreshing-dim { background-color: rgba(22,22,24,0.35); }
+
+/* ---- inspector ------------------------------------------------------ */
+
+.inspector-field .name { font-size: 11.5px; color: @secondary; }
+.inspector-field .type { font-size: 11px; color: #6f6f76; }
+.inspector-field entry { min-height: 24px; font-size: 12px; padding: 0 6px; background-color: #232326; }
+.inspector-field entry.changed { background-color: rgba(240,177,76,0.12); border-color: rgba(240,177,76,0.45); }
+.inspector-field entry.readonly { background-color: transparent; border-color: transparent; color: @muted; }
+.inspector-field entry:focus-within { background-color: @edit_surface; }
+
+/* ---- change preview ------------------------------------------------- */
+
+.diff-box { border-radius: 6px; padding: 6px 8px; font-size: 11.5px; }
+.diff-box.before { background-color: #1e1e20; color: @muted; }
+.diff-box.after { background-color: rgba(240,177,76,0.12); color: @text_strong; }
+
+/* ---- updates -------------------------------------------------------- */
+
+.update-version { font-size: 10px; color: @muted; }
+.demo-chip { font-size: 11px; padding: 1px 6px; border-radius: 5px;
+  background-color: alpha(@modified, 0.14); color: @modified; }
+
+/* ---- column views ----------------------------------------------------- */
+
+columnview, columnview > listview, columnview listview row { background-color: @bg; color: @text; }
+columnview > header { background-color: @grid_header; border-bottom: 1px solid @border; }
+columnview > header > button { min-height: 34px; padding: 0 10px; border-radius: 0; border: none;
+  border-right: 1px solid #242427; font-size: 12px; color: @text; background-color: transparent; }
+columnview > header > button:hover { background-color: rgba(255,255,255,0.03); }
+columnview > header > button sort-indicator { color: @accent_text; }
+columnview listview row { min-height: 32px; padding: 0; border-bottom: 1px solid @hairline; }
+columnview listview row:hover { background-color: rgba(255,255,255,0.025); }
+columnview listview row:selected { background-color: alpha(@accent, 0.14); color: @text; }
+columnview listview row > cell { padding: 0; min-height: 32px; border-right: 1px solid @hairline; }
+.cell { min-height: 32px; font-size: 12px; }
+.cell .cell-copy { opacity: 0; min-height: 24px; }
+.cell:hover .cell-copy { opacity: 1; }
+.cell.row-modified { background-color: rgba(240,177,76,0.05); }
+.cell.cell-changed { background-color: rgba(240,177,76,0.12); }
+.cell.row-deleted { background-color: rgba(255,138,128,0.09); }
+.cell.row-deleted label { color: @danger; text-decoration: line-through; }
+.cell.edge-modified { box-shadow: inset 2px 0 @modified; }
+.cell.edge-danger { box-shadow: inset 2px 0 @danger; }
+.cell.edge-accent { box-shadow: inset 2px 0 @accent; }
+.cell.editing { background-color: @edit_surface; box-shadow: inset 0 0 0 1.5px @accent; }
+.cell entry.cell-editor { background-color: transparent; border: none; box-shadow: none; min-height: 30px; }
+.success-text { color: @success; }
+.diff-rule { background-color: @border; }
+.swatch-button { padding: 2px; border-radius: 999px; }
+.swatch-selected { box-shadow: 0 0 0 2px @popover, 0 0 0 4px @text_strong; }
+spinbutton { border: 1px solid @border_strong; border-radius: 6px; min-height: 28px; font-size: 12px; }
+spinbutton > button { color: @muted; min-width: 22px; }
+.header-key { color: @modified; }

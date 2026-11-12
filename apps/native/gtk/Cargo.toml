@@ -1,0 +1,30 @@
+[package]
+name = "dbm-gtk"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.94"
+publish = false
+
+# Its own workspace, like apps/native/workbench, so GTK's dependency graph
+# stays out of the root workspace.
+[workspace]
+
+[dependencies]
+async-channel = "2"
+chrono = "0.4"
+dbm-core = { path = "../../../crates/dbm-core" }
+dbm-desktop = { path = "../desktop" }
+dbm-update = { path = "../../../crates/dbm-update" }
+gtk = { package = "gtk4", version = "0.11", features = ["v4_12"] }
+pangocairo = "0.22"
+ron = "0.11"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
+
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+all = "deny"
+pedantic = { level = "allow", priority = -1 }
