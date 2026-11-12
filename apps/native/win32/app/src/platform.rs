@@ -62,9 +62,60 @@ pub fn save_result_csv(
 /// Opens an exported file with its default app, or selects it in Explorer.
 pub fn open_path(path: &Path, reveal: bool) {
     let result = if reveal {
-        std::process::Command::new("explorer").arg(format!("/select,{}", path.display())).spawn()
+        std::process::Command::new("explorer")
+            .arg(format!("/select,{}", path.display()))
+            .spawn()
     } else {
-        std::process::Command::new("cmd").args(["/C", "start", ""]).arg(path).spawn()
+        std::process::Command::new("cmd")
+            .args(["/C", "start", ""])
+            .arg(path)
+            .spawn()
     };
     drop(result);
+}
+
+/// Opens the system colour picker on its own thread and reports the chosen
+/// colour (`None` when canceled; always `None` off Windows).
+pub fn pick_color(
+    initial: [u8; 3],
+    wake: dbm_desktop::Wake,
+    done: impl FnOnce(Option<[u8; 3]>) + Send + 'static,
+) {
+    let _ = std::thread::Builder::new()
+        .name("dbm-color-dialog".into())
+        .spawn(move || {
+            done(choose_color(initial));
+            wake();
+        });
+}
+
+#[cfg(windows)]
+fn choose_color([r, g, b]: [u8; 3]) -> Option<[u8; 3]> {
+    use windows::Win32::Foundation::COLORREF;
+    use windows::Win32::UI::Controls::Dialogs::{
+        CC_FULLOPEN, CC_RGBINIT, CHOOSECOLORW, ChooseColorW,
+    };
+    let mut custom = [COLORREF(0x00ff_ffff); 16];
+    let mut cc = CHOOSECOLORW {
+        lStructSize: std::mem::size_of::<CHOOSECOLORW>() as u32,
+        rgbResult: COLORREF(u32::from(r) | u32::from(g) << 8 | u32::from(b) << 16),
+        lpCustColors: custom.as_mut_ptr(),
+        Flags: CC_FULLOPEN | CC_RGBINIT,
+        ..Default::default()
+    };
+    // SAFETY: `cc` and `custom` outlive the modal call.
+    let ok = unsafe { ChooseColorW(&mut cc) }.as_bool();
+    let c = cc.rgbResult.0;
+    ok.then(|| {
+        [
+            (c & 0xff) as u8,
+            (c >> 8 & 0xff) as u8,
+            (c >> 16 & 0xff) as u8,
+        ]
+    })
+}
+
+#[cfg(not(windows))]
+fn choose_color(_: [u8; 3]) -> Option<[u8; 3]> {
+    None
 }

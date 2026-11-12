@@ -392,7 +392,8 @@ impl Context {
             }
             // A press outside an open popup closes it (its trigger toggles).
             if self.open_popup.is_some() && !self.popup_area.is_some_and(|r| r.contains(pos)) {
-                self.memory.insert(Id::new("popup-closing"), Box::new(self.open_popup));
+                self.memory
+                    .insert(Id::new("popup-closing"), Box::new(self.open_popup));
                 self.open_popup = None;
             }
         }
@@ -437,7 +438,8 @@ impl Context {
             )
         });
         if let Some(index) = tab {
-            let backwards = matches!(self.events[index], Event::Key { modifiers, .. } if modifiers.shift);
+            let backwards =
+                matches!(self.events[index], Event::Key { modifiers, .. } if modifiers.shift);
             self.events.remove(index);
             if !self.focusables.is_empty() {
                 let current = self
@@ -548,7 +550,13 @@ impl Context {
         }
         let rect = Rect::from_min_size(pos, size);
         let mut p = self.painter(Layer::Tooltip, Rect::EVERYTHING, 1.0);
-        p.shadow(rect, 6.0, Vec2 { x: 0.0, y: 4.0 }, 12.0, Color32::from_black_alpha(90));
+        p.shadow(
+            rect,
+            6.0,
+            Vec2 { x: 0.0, y: 4.0 },
+            12.0,
+            Color32::from_black_alpha(90),
+        );
         p.rect(
             rect,
             6.0,
@@ -566,12 +574,8 @@ impl Context {
                 Color32::from_rgb(0xe8, 0xe8, 0xea),
             );
         }
-        self.a11y.push(Node::new(
-            Id::new("tooltip").0,
-            Role::ToolTip,
-            text,
-            rect,
-        ));
+        self.a11y
+            .push(Node::new(Id::new("tooltip").0, Role::ToolTip, text, rect));
     }
 
     // ---- queries ----------------------------------------------------------
@@ -649,9 +653,9 @@ impl Context {
     /// Whether `key` was pressed this frame (with any modifiers), without
     /// consuming it.
     pub fn key_pressed(&self, key: Key) -> bool {
-        self.events.iter().any(|e| {
-            matches!(e, Event::Key { key: k, pressed: true, .. } if *k == key)
-        })
+        self.events
+            .iter()
+            .any(|e| matches!(e, Event::Key { key: k, pressed: true, .. } if *k == key))
     }
 
     /// Takes a key press with exactly these modifiers (Shift ignored when
@@ -690,10 +694,7 @@ impl Context {
         let mut wheel = self.wheel;
         // Shift turns a vertical wheel horizontal, as on Windows.
         if horizontal && !vertical && wheel.x == 0.0 {
-            wheel = Vec2 {
-                x: wheel.y,
-                y: 0.0,
-            };
+            wheel = Vec2 { x: wheel.y, y: 0.0 };
             if self.wheel.y != 0.0 {
                 out.x = wheel.x;
                 self.wheel.y = 0.0;
@@ -847,9 +848,10 @@ impl Context {
                 r.clicked = true;
             }
         }
-        if self.take_a11y(id, |a| {
-            matches!(a, A11yAction::Invoke(x) | A11yAction::Toggle(x) if *x == id.0)
-        }) && enabled
+        if self.take_a11y(
+            id,
+            |a| matches!(a, A11yAction::Invoke(x) | A11yAction::Toggle(x) if *x == id.0),
+        ) && enabled
         {
             r.clicked = true;
         }
@@ -932,10 +934,7 @@ impl Context {
     /// Toggles a popup; a press that just closed it (outside its area, on
     /// its own trigger) doesn't reopen it.
     pub fn toggle_popup(&mut self, id: Id) {
-        let just_closed = self
-            .data::<Option<Id>>(Id::new("popup-closing"))
-            .flatten()
-            == Some(id);
+        let just_closed = self.data::<Option<Id>>(Id::new("popup-closing")).flatten() == Some(id);
         self.remove_data(Id::new("popup-closing"));
         if self.open_popup == Some(id) || just_closed {
             self.open_popup = None;
@@ -975,6 +974,10 @@ impl Context {
     pub fn copy_text(&self, text: &str) {
         self.platform.set_clipboard(text);
     }
+
+    pub fn open_url(&self, url: &str) {
+        self.platform.open_url(url);
+    }
 }
 
 #[cfg(test)]
@@ -991,7 +994,11 @@ mod tests {
         )
     }
 
-    fn frame(ctx: &mut Context, events: Vec<Event>, f: impl FnMut(&mut Context) -> Response) -> Response {
+    fn frame(
+        ctx: &mut Context,
+        events: Vec<Event>,
+        f: impl FnMut(&mut Context) -> Response,
+    ) -> Response {
         let mut f = f;
         ctx.begin_frame(RawInput {
             events,
@@ -1016,7 +1023,14 @@ mod tests {
     }
 
     fn button(ctx: &mut Context, id: &str, rect: Rect, layer: Layer) -> Response {
-        ctx.interact(Id::new(id), rect, Rect::EVERYTHING, layer, Sense::CLICK, true)
+        ctx.interact(
+            Id::new(id),
+            rect,
+            Rect::EVERYTHING,
+            layer,
+            Sense::CLICK,
+            true,
+        )
     }
 
     fn press(p: Pos2, pressed: bool) -> Event {
@@ -1059,7 +1073,14 @@ mod tests {
         let f = |c: &mut Context| {
             let under = button(c, "under", r, Layer::Background);
             // A hover-only popup background still blocks the layer below.
-            let _ = c.interact(Id::new("popup"), r, Rect::EVERYTHING, Layer::Popup, Sense::HOVER, true);
+            let _ = c.interact(
+                Id::new("popup"),
+                r,
+                Rect::EVERYTHING,
+                Layer::Popup,
+                Sense::HOVER,
+                true,
+            );
             under
         };
         let under = frame(&mut c, vec![Event::PointerMoved(p)], f);
@@ -1071,9 +1092,17 @@ mod tests {
         let mut c = ctx();
         let p = pos2(10.0, 10.0);
         let r = frame(&mut c, vec![Event::PointerMoved(p)], |c| {
-            button(c, "a", Rect::from_ltrb(0.0, 0.0, 50.0, 50.0), Layer::Background)
+            button(
+                c,
+                "a",
+                Rect::from_ltrb(0.0, 0.0, 50.0, 50.0),
+                Layer::Background,
+            )
         });
-        assert!(r.hovered, "the rerun pass sees the new widget under the pointer");
+        assert!(
+            r.hovered,
+            "the rerun pass sees the new widget under the pointer"
+        );
     }
 
     #[test]
@@ -1082,7 +1111,14 @@ mod tests {
         let field = Id::new("field");
         c.focus = Some(field);
         let f = |c: &mut Context| {
-            c.interact(field, Rect::from_ltrb(0.0, 0.0, 50.0, 20.0), Rect::EVERYTHING, Layer::Background, Sense::CLICK, true)
+            c.interact(
+                field,
+                Rect::from_ltrb(0.0, 0.0, 50.0, 20.0),
+                Rect::EVERYTHING,
+                Layer::Background,
+                Sense::CLICK,
+                true,
+            )
         };
         let q = pos2(200.0, 200.0);
         frame(&mut c, vec![Event::PointerMoved(q)], f);

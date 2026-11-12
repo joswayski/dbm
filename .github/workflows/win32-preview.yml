@@ -49,7 +49,10 @@ jobs:
           $dir = Join-Path $PWD 'snapshots'
           $p = Start-Process apps/native/win32/target/release/dbm-win32.exe -ArgumentList '--demo', '--snapshot-dir', $dir -PassThru
           if (-not $p.WaitForExit(180000)) { $p.Kill(); Write-Warning 'snapshot walk timed out' }
-          Get-ChildItem $dir | Format-Table Name, Length
+          Write-Host "exit code: $($p.ExitCode)"
+          $log = Join-Path $env:TEMP 'anybase-win32-error.txt'
+          if (Test-Path $log) { Get-Content $log; Copy-Item $log $dir -ErrorAction SilentlyContinue }
+          if (Test-Path $dir) { Get-ChildItem $dir | Format-Table Name, Length }
       - uses: actions/upload-artifact@v4
         if: always()
         with:

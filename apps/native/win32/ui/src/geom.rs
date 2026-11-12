@@ -270,7 +270,12 @@ impl Rect {
 
     /// Insets each side: left, top, right, bottom.
     pub fn inset(&self, l: f32, t: f32, r: f32, b: f32) -> Rect {
-        Rect::from_ltrb(self.min.x + l, self.min.y + t, self.max.x - r, self.max.y - b)
+        Rect::from_ltrb(
+            self.min.x + l,
+            self.min.y + t,
+            self.max.x - r,
+            self.max.y - b,
+        )
     }
 
     pub fn with_min_x(mut self, x: f32) -> Rect {
@@ -349,11 +354,21 @@ impl Color32 {
     }
 
     pub const fn from_white_alpha(a: u8) -> Self {
-        Color32 { r: a, g: a, b: a, a }
+        Color32 {
+            r: a,
+            g: a,
+            b: a,
+            a,
+        }
     }
 
     pub const fn from_black_alpha(a: u8) -> Self {
-        Color32 { r: 0, g: 0, b: 0, a }
+        Color32 {
+            r: 0,
+            g: 0,
+            b: 0,
+            a,
+        }
     }
 
     pub fn from_hex(v: u32) -> Self {

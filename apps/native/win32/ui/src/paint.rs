@@ -30,10 +30,7 @@ pub enum Shape {
         stroke: Stroke,
     },
     /// A filled convex polygon.
-    Polygon {
-        points: Vec<Pos2>,
-        fill: Color32,
-    },
+    Polygon { points: Vec<Pos2>, fill: Color32 },
     /// One line of text; `pos` is the top-left of its line box.
     Text {
         pos: Pos2,
@@ -400,10 +397,13 @@ fn shape_bounds(shape: &Shape) -> Rect {
             .fold(Rect::NOTHING, |r, p| r.union(Rect::from_min_max(*p, *p))),
         Shape::Text { pos, font, .. } => {
             // Generous: the run's width isn't known here.
-            Rect::from_min_size(*pos, Vec2 {
-                x: 1e6,
-                y: font.line_height(),
-            })
+            Rect::from_min_size(
+                *pos,
+                Vec2 {
+                    x: 1e6,
+                    y: font.line_height(),
+                },
+            )
         }
         Shape::Shadow { rect, blur, .. } => rect.expand(*blur),
     }

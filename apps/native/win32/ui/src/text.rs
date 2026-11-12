@@ -188,7 +188,10 @@ impl Fonts {
                         });
                         line_start = at;
                         // Re-measure from the break to this character.
-                        width = text[at..offset].chars().map(|c| self.advance(c, font)).sum();
+                        width = text[at..offset]
+                            .chars()
+                            .map(|c| self.advance(c, font))
+                            .sum();
                     }
                     _ => {
                         out.push(Line {

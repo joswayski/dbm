@@ -89,7 +89,11 @@ pub fn paint(painter: &mut Painter, rect: Rect, icon: Icon, color: Color32) {
             let points: Vec<Pos2> = (0..=20)
                 .map(|i| {
                     let a = (-40.0 + i as f32 * 14.0_f32).to_radians();
-                    center + Vec2 { x: a.cos(), y: a.sin() } * radius
+                    center
+                        + Vec2 {
+                            x: a.cos(),
+                            y: a.sin(),
+                        } * radius
                 })
                 .collect();
             let end = *points.last().unwrap_or(&center);
@@ -110,20 +114,43 @@ pub fn paint(painter: &mut Painter, rect: Rect, icon: Icon, color: Color32) {
         }
         Icon::Filter => closed(
             painter,
-            vec![p(2.0, 3.3), p(14.0, 3.3), p(9.3, 8.7), p(9.3, 12.7), p(6.7, 11.3), p(6.7, 8.7)],
+            vec![
+                p(2.0, 3.3),
+                p(14.0, 3.3),
+                p(9.3, 8.7),
+                p(9.3, 12.7),
+                p(6.7, 11.3),
+                p(6.7, 8.7),
+            ],
         ),
         Icon::Trash => {
             line(painter, p(3.0, 4.5), p(13.0, 4.5));
-            path(painter, vec![p(6.5, 4.5), p(6.5, 3.0), p(9.5, 3.0), p(9.5, 4.5)]);
-            path(painter, vec![p(4.5, 4.5), p(5.2, 13.0), p(10.8, 13.0), p(11.5, 4.5)]);
+            path(
+                painter,
+                vec![p(6.5, 4.5), p(6.5, 3.0), p(9.5, 3.0), p(9.5, 4.5)],
+            );
+            path(
+                painter,
+                vec![p(4.5, 4.5), p(5.2, 13.0), p(10.8, 13.0), p(11.5, 4.5)],
+            );
         }
         Icon::Undo => {
             path(painter, vec![p(5.5, 3.5), p(3.0, 6.0), p(5.5, 8.5)]);
-            path(painter, cubic([p(3.0, 6.0), p(12.0, 6.0), p(14.0, 13.0), p(8.0, 13.0)]));
+            path(
+                painter,
+                cubic([p(3.0, 6.0), p(12.0, 6.0), p(14.0, 13.0), p(8.0, 13.0)]),
+            );
         }
         Icon::Folder => closed(
             painter,
-            vec![p(2.0, 4.0), p(6.0, 4.0), p(7.5, 5.5), p(14.0, 5.5), p(14.0, 12.5), p(2.0, 12.5)],
+            vec![
+                p(2.0, 4.0),
+                p(6.0, 4.0),
+                p(7.5, 5.5),
+                p(14.0, 5.5),
+                p(14.0, 12.5),
+                p(2.0, 12.5),
+            ],
         ),
         Icon::View => {
             frame(painter);
@@ -156,7 +183,17 @@ pub fn paint(painter: &mut Painter, rect: Rect, icon: Icon, color: Color32) {
             line(painter, p(3.0, 13.0), p(13.0, 13.0));
         }
         Icon::Pencil => {
-            path(painter, vec![p(3.0, 13.0), p(3.6, 10.2), p(10.8, 3.0), p(13.0, 5.2), p(5.8, 12.4), p(3.0, 13.0)]);
+            path(
+                painter,
+                vec![
+                    p(3.0, 13.0),
+                    p(3.6, 10.2),
+                    p(10.8, 3.0),
+                    p(13.0, 5.2),
+                    p(5.8, 12.4),
+                    p(3.0, 13.0),
+                ],
+            );
             line(painter, p(9.3, 4.5), p(11.5, 6.7));
         }
         Icon::Expand => {
@@ -189,7 +226,10 @@ pub fn paint(painter: &mut Painter, rect: Rect, icon: Icon, color: Color32) {
         }
         Icon::Sort => {
             path(painter, vec![p(4.67, 2.67), p(4.67, 13.33)]);
-            path(painter, vec![p(2.67, 11.33), p(4.67, 13.33), p(6.67, 11.33)]);
+            path(
+                painter,
+                vec![p(2.67, 11.33), p(4.67, 13.33), p(6.67, 11.33)],
+            );
             path(painter, vec![p(11.33, 13.33), p(11.33, 2.67)]);
             path(painter, vec![p(9.33, 4.67), p(11.33, 2.67), p(13.33, 4.67)]);
         }

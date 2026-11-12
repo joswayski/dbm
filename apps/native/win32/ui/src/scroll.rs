@@ -119,12 +119,19 @@ impl ScrollArea {
             // Reserve the full height so the content size is right.
             let width = ui.min_rect().width().max(1.0);
             let left = ui.max_rect().left();
-            ui.advance_past(Rect::from_min_size(pos2(left, top), vec2(width, rows as f32 * row_height)));
+            ui.advance_past(Rect::from_min_size(
+                pos2(left, top),
+                vec2(width, rows as f32 * row_height),
+            ));
             inner
         })
     }
 
-    fn show_inner<R>(self, ui: &mut Ui, f: impl FnOnce(&mut Ui, ScrollState) -> R) -> ScrollOutput<R> {
+    fn show_inner<R>(
+        self,
+        ui: &mut Ui,
+        f: impl FnOnce(&mut Ui, ScrollState) -> R,
+    ) -> ScrollOutput<R> {
         let mut state = ui.ctx.data::<ScrollState>(self.id).unwrap_or_default();
         let avail = ui.available_rect();
         let mut height = avail.height();
@@ -135,7 +142,10 @@ impl ScrollArea {
             height = height.min(state.content.y.max(1.0));
             if state.content.y == 0.0 {
                 // Unknown yet: lay out once at full height, then shrink.
-                height = self.max_height.unwrap_or(avail.height()).min(avail.height());
+                height = self
+                    .max_height
+                    .unwrap_or(avail.height())
+                    .min(avail.height());
             }
         }
         let mut outer = Rect::from_min_size(avail.min, vec2(avail.width(), height));
@@ -174,8 +184,16 @@ impl ScrollArea {
         let content_max = Rect::from_min_size(
             viewport.min - state.offset,
             vec2(
-                if self.horizontal { 1e6 } else { viewport.width() },
-                if self.vertical { 1e7 } else { viewport.height() },
+                if self.horizontal {
+                    1e6
+                } else {
+                    viewport.width()
+                },
+                if self.vertical {
+                    1e7
+                } else {
+                    viewport.height()
+                },
             ),
         );
         let (inner, used) = {
@@ -209,9 +227,19 @@ impl ScrollArea {
         let hovered_area = ui.rect_contains_pointer(viewport);
         for vertical in [true, false] {
             let (enabled, content, view, offset) = if vertical {
-                (self.vertical, state.content.y, viewport.height(), state.offset.y)
+                (
+                    self.vertical,
+                    state.content.y,
+                    viewport.height(),
+                    state.offset.y,
+                )
             } else {
-                (self.horizontal, state.content.x, viewport.width(), state.offset.x)
+                (
+                    self.horizontal,
+                    state.content.x,
+                    viewport.width(),
+                    state.offset.x,
+                )
             };
             if !enabled || content <= view + 0.5 {
                 continue;
@@ -224,22 +252,45 @@ impl ScrollArea {
                 };
                 Rect::from_ltrb(x, viewport.top() + 2.0, x + BAR, viewport.bottom() - 2.0)
             } else {
-                Rect::from_ltrb(viewport.left() + 2.0, viewport.bottom() - BAR, viewport.right() - 2.0, viewport.bottom())
+                Rect::from_ltrb(
+                    viewport.left() + 2.0,
+                    viewport.bottom() - BAR,
+                    viewport.right() - 2.0,
+                    viewport.bottom(),
+                )
             };
-            let length = if vertical { track.height() } else { track.width() };
+            let length = if vertical {
+                track.height()
+            } else {
+                track.width()
+            };
             let thumb_len = (length * view / content).clamp(24.0, length);
             let travel = length - thumb_len;
             let max_offset = content - view;
-            let start = if max_offset > 0.0 { travel * offset / max_offset } else { 0.0 };
-            let thumb = if vertical {
-                Rect::from_min_size(pos2(track.left(), track.top() + start), vec2(BAR, thumb_len))
+            let start = if max_offset > 0.0 {
+                travel * offset / max_offset
             } else {
-                Rect::from_min_size(pos2(track.left() + start, track.top()), vec2(thumb_len, BAR))
+                0.0
+            };
+            let thumb = if vertical {
+                Rect::from_min_size(
+                    pos2(track.left(), track.top() + start),
+                    vec2(BAR, thumb_len),
+                )
+            } else {
+                Rect::from_min_size(
+                    pos2(track.left() + start, track.top()),
+                    vec2(thumb_len, BAR),
+                )
             };
             let id = self.id.with(("bar", vertical));
             let r = ui.interact(thumb, id, Sense::DRAG.unfocusable());
             if r.dragged && travel > 0.0 {
-                let d = if vertical { r.drag_delta.y } else { r.drag_delta.x };
+                let d = if vertical {
+                    r.drag_delta.y
+                } else {
+                    r.drag_delta.x
+                };
                 let next = (offset + d * max_offset / travel).clamp(0.0, max_offset);
                 if vertical {
                     state.offset.y = next;
@@ -264,9 +315,13 @@ impl ScrollArea {
             let shown = if r.hovered || r.dragged || self.bar_inset {
                 thumb
             } else if vertical {
-                thumb.with_min_x(thumb.right() - 4.0).translate(vec2(-2.0, 0.0))
+                thumb
+                    .with_min_x(thumb.right() - 4.0)
+                    .translate(vec2(-2.0, 0.0))
             } else {
-                thumb.with_min_y(thumb.bottom() - 4.0).translate(vec2(0.0, -2.0))
+                thumb
+                    .with_min_y(thumb.bottom() - 4.0)
+                    .translate(vec2(0.0, -2.0))
             };
             let mut p = ui.painter();
             p.rect_filled(shown, 4.0, Color32::from_white_alpha(alpha));

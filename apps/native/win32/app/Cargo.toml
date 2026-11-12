@@ -24,6 +24,7 @@ uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(windows)'.dependencies]
 rfd = { version = "0.17", default-features = false }
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_UI_Controls_Dialogs"] }
 
 [build-dependencies]
 winresource = "0.1"

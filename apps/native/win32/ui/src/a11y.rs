@@ -111,10 +111,7 @@ impl Tree {
         let mut parent = None;
         let mut best = None;
         loop {
-            let next = self
-                .children(parent)
-                .filter(|n| n.rect.contains(p))
-                .last();
+            let next = self.children(parent).filter(|n| n.rect.contains(p)).last();
             match next {
                 Some(n) => {
                     best = Some(n);

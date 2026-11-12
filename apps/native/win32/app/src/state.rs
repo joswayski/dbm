@@ -8,10 +8,13 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use dbm_core::connection_url::{engine_defaults, parse_connection_url};
 use dbm_core::models::{
-    ConnectionProfile, DatabaseEngine, MutationBatch, QueryHistoryEntry, QueryRequest, QueryResponse,
-    RowMutation, SaveProfileInput, SchemaNode, TablePageRequest, TlsMode, WorkspaceInfo,
+    ConnectionProfile, DatabaseEngine, MutationBatch, QueryHistoryEntry, QueryRequest,
+    QueryResponse, RowMutation, SaveProfileInput, SchemaNode, TablePageRequest, TlsMode,
+    WorkspaceInfo,
 };
-use dbm_core::sql_text::{describe_schema_refresh, requires_confirmation, resolve_full_table_select, safe_file_name};
+use dbm_core::sql_text::{
+    describe_schema_refresh, requires_confirmation, resolve_full_table_select, safe_file_name,
+};
 use dbm_desktop::updates;
 use dbm_desktop::worker::{Command, ExportRequest, Payload, RequestId, Work, Worker};
 use dbm_ui::Color32;
@@ -50,7 +53,11 @@ fn engine_preset_user(engine: DatabaseEngine) -> &'static str {
 }
 
 fn default_query_text(engine: DatabaseEngine) -> &'static str {
-    if engine == DatabaseEngine::Redis { "PING" } else { "SELECT now();" }
+    if engine == DatabaseEngine::Redis {
+        "PING"
+    } else {
+        "SELECT now();"
+    }
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -164,7 +171,10 @@ impl ProfileForm {
         Self {
             id: Some(p.id),
             name: p.name.clone(),
-            color: p.color.clone().unwrap_or_else(|| theme::DEFAULT_CONNECTION_COLOR.into()),
+            color: p
+                .color
+                .clone()
+                .unwrap_or_else(|| theme::DEFAULT_CONNECTION_COLOR.into()),
             engine: p.engine,
             host: p.host.clone(),
             port: p.port,
@@ -214,7 +224,8 @@ impl ProfileForm {
     pub fn import_url(&mut self) {
         match parse_connection_url(&self.url) {
             Ok(imported) => {
-                let name_is_default = self.name.trim().is_empty() || self.name == engine_preset_name(self.engine);
+                let name_is_default =
+                    self.name.trim().is_empty() || self.name == engine_preset_name(self.engine);
                 if self.id.is_none() && name_is_default {
                     self.name = imported.suggested_name;
                 }
@@ -266,7 +277,11 @@ impl ProfileForm {
             ssh: self.ssh.clone(),
             read_only: self.read_only,
             open_on_startup: self.open_on_startup,
-            password: if self.id.is_some() && !self.password_loaded { None } else { Some(self.password.clone()) },
+            password: if self.id.is_some() && !self.password_loaded {
+                None
+            } else {
+                Some(self.password.clone())
+            },
         }
     }
 }
@@ -356,9 +371,15 @@ pub struct Workbench {
     pub confirm_query: Option<ConfirmQuery>,
     pub confirm_export: Option<u64>,
     pub choosing_export: HashMap<u64, (TablePageRequest, Vec<String>)>,
-    export_paths: (std::sync::mpsc::Sender<ExportDestination>, std::sync::mpsc::Receiver<ExportDestination>),
+    export_paths: (
+        std::sync::mpsc::Sender<ExportDestination>,
+        std::sync::mpsc::Receiver<ExportDestination>,
+    ),
     pub saving_results: HashSet<u64>,
-    saved_results: (std::sync::mpsc::Sender<SavedResult>, std::sync::mpsc::Receiver<SavedResult>),
+    saved_results: (
+        std::sync::mpsc::Sender<SavedResult>,
+        std::sync::mpsc::Receiver<SavedResult>,
+    ),
     pub updates: updates::Updates,
     pub confirm_update: Option<dbm_update::Available>,
     pub renaming: Option<(u64, String)>,
@@ -431,8 +452,21 @@ impl Workbench {
 
     /// Sends now when the worker is idle, otherwise queues. Replies are
     /// routed to the initiating tab, never the selected one.
-    pub fn dispatch(&mut self, command: Command, label: &'static str, tab: Option<u64>, profile: Option<Uuid>, kind: RequestKind) {
-        let meta = RequestMeta { label, tab, profile, kind, stale: false };
+    pub fn dispatch(
+        &mut self,
+        command: Command,
+        label: &'static str,
+        tab: Option<u64>,
+        profile: Option<Uuid>,
+        kind: RequestKind,
+    ) {
+        let meta = RequestMeta {
+            label,
+            tab,
+            profile,
+            kind,
+            stale: false,
+        };
         if self.pending_requests.is_empty() {
             self.submit(command, meta);
         } else {
@@ -451,17 +485,22 @@ impl Workbench {
     }
 
     pub fn busy(&self, kind: RequestKind, tab: Option<u64>) -> bool {
-        self.metas().any(|meta| meta.kind == kind && (tab.is_none() || meta.tab == tab))
+        self.metas()
+            .any(|meta| meta.kind == kind && (tab.is_none() || meta.tab == tab))
     }
 
     /// Requests running and waiting.
     pub fn metas(&self) -> impl Iterator<Item = &RequestMeta> {
-        self.pending_requests.values().chain(self.queued.iter().map(|q| &q.meta))
+        self.pending_requests
+            .values()
+            .chain(self.queued.iter().map(|q| &q.meta))
     }
 
     pub fn drain(&mut self) {
         while let Ok(done) = self.worker.rx.try_recv() {
-            let Some(meta) = self.pending_requests.remove(&done.id) else { continue };
+            let Some(meta) = self.pending_requests.remove(&done.id) else {
+                continue;
+            };
             if meta.stale {
                 continue;
             }
@@ -471,7 +510,9 @@ impl Workbench {
             }
         }
         while self.pending_requests.is_empty() {
-            let Some(next) = self.queued.pop_front() else { break };
+            let Some(next) = self.queued.pop_front() else {
+                break;
+            };
             self.submit(next.command, next.meta);
         }
         self.export_chosen();
@@ -512,14 +553,16 @@ impl Workbench {
                 if meta.kind == RequestKind::Export
                     && let Some(tab) = meta.tab
                 {
-                    self.query_errors.insert(tab, Message::error(error, self.now));
+                    self.query_errors
+                        .insert(tab, Message::error(error, self.now));
                     return;
                 }
             }
             RequestKind::Query => {
                 self.queue_history(meta.tab);
                 if let Some(tab) = meta.tab {
-                    self.query_errors.insert(tab, Message::error(error, self.now));
+                    self.query_errors
+                        .insert(tab, Message::error(error, self.now));
                     return;
                 }
             }
@@ -533,7 +576,10 @@ impl Workbench {
     }
 
     pub fn show_toast(&mut self, message: impl Into<String>, success: bool) {
-        self.toast = Some(Toast { message: Message::notice(message, self.now), success });
+        self.toast = Some(Toast {
+            message: Message::notice(message, self.now),
+            success,
+        });
     }
 
     pub fn table_error(&mut self, tab: u64, message: impl Into<String>) {
@@ -575,18 +621,34 @@ impl Workbench {
             Payload::Profiles(profiles) => {
                 self.profiles = profiles;
                 if !self.demo {
-                    let startup: Vec<_> = self.profiles.iter().filter(|p| p.open_on_startup).map(|p| p.id).collect();
+                    let startup: Vec<_> = self
+                        .profiles
+                        .iter()
+                        .filter(|p| p.open_on_startup)
+                        .map(|p| p.id)
+                        .collect();
                     for id in startup {
                         self.send(Command::Connect(id), "Connecting", Some(id));
                     }
                 }
             }
             Payload::Tested => {
-                let Some(form) = &mut self.profile_form else { return };
+                let Some(form) = &mut self.profile_form else {
+                    return;
+                };
                 if form.saving {
-                    form.feedback = Some((FeedbackKind::Success, "Connection successful. Saving and connecting…".into()));
+                    form.feedback = Some((
+                        FeedbackKind::Success,
+                        "Connection successful. Saving and connecting…".into(),
+                    ));
                     let input = form.input();
-                    self.dispatch(Command::SaveProfile(input), "Saving connection", None, None, RequestKind::Form);
+                    self.dispatch(
+                        Command::SaveProfile(input),
+                        "Saving connection",
+                        None,
+                        None,
+                        RequestKind::Form,
+                    );
                 } else {
                     form.feedback = Some((FeedbackKind::Success, "Connection successful.".into()));
                 }
@@ -604,8 +666,13 @@ impl Workbench {
                 if self.workspaces.contains_key(&id) {
                     let previous = self.schemas.insert(id, tree).unwrap_or_default();
                     if meta.label == "Refreshing schema" {
-                        let kind = if self.engine(id) == DatabaseEngine::Redis { "Keyspace" } else { "Schema" };
-                        let (changed, message) = describe_schema_refresh(&previous, &self.schemas[&id], kind);
+                        let kind = if self.engine(id) == DatabaseEngine::Redis {
+                            "Keyspace"
+                        } else {
+                            "Schema"
+                        };
+                        let (changed, message) =
+                            describe_schema_refresh(&previous, &self.schemas[&id], kind);
                         self.show_toast(message, changed);
                     }
                 }
@@ -615,7 +682,11 @@ impl Workbench {
                 self.histories.insert((id, database), entries);
             }
             Payload::Table(page) => {
-                let embedded = target.is_some_and(|tab| self.tabs.iter().any(|t| t.id == tab && t.embedded.is_some()));
+                let embedded = target.is_some_and(|tab| {
+                    self.tabs
+                        .iter()
+                        .any(|t| t.id == tab && t.embedded.is_some())
+                });
                 if let Some(state) = target.and_then(|tab| self.tables.get_mut(&tab)) {
                     state.in_flight = state.in_flight.saturating_sub(1);
                     let latest = state.in_flight == 0;
@@ -623,7 +694,10 @@ impl Workbench {
                         state.loaded(page, request);
                         // The paged table now owns the rows; keep the query's
                         // metadata for its status line only.
-                        if embedded && let Some(result) = target.and_then(|tab| self.query_results.get_mut(&tab)) {
+                        if embedded
+                            && let Some(result) =
+                                target.and_then(|tab| self.query_results.get_mut(&tab))
+                        {
                             result.rows = Vec::new();
                         }
                     }
@@ -637,11 +711,21 @@ impl Workbench {
                 }
                 self.load_table(tab);
                 if result.conflicts.is_empty() {
-                    let noun = if result.applied == 1 { "change" } else { "changes" };
+                    let noun = if result.applied == 1 {
+                        "change"
+                    } else {
+                        "changes"
+                    };
                     let notice = format!("{} {noun} saved.", result.applied);
                     self.table_notice(tab, Message::notice(notice, self.now));
                 } else {
-                    self.table_error(tab, format!("{} row conflict(s); the table was refreshed.", result.conflicts.len()));
+                    self.table_error(
+                        tab,
+                        format!(
+                            "{} row conflict(s); the table was refreshed.",
+                            result.conflicts.len()
+                        ),
+                    );
                 }
             }
             Payload::Exported(path, rows) => {
@@ -660,7 +744,10 @@ impl Workbench {
     fn profile_saved(&mut self, profile: ConnectionProfile) {
         let previous = self.profiles.iter().find(|p| p.id == profile.id).cloned();
         let id = profile.id;
-        if previous.as_ref().is_some_and(|previous| connection_target_changed(previous, &profile)) {
+        if previous
+            .as_ref()
+            .is_some_and(|previous| connection_target_changed(previous, &profile))
+        {
             self.close_table_tabs(id);
         }
         self.workspaces.remove(&id);
@@ -674,7 +761,13 @@ impl Workbench {
         self.profiles.sort_by_key(|p| p.name.to_lowercase());
         self.profile_form = None;
         self.active_profile = Some(id);
-        self.dispatch(Command::Connect(id), "Connecting", None, Some(id), RequestKind::Other);
+        self.dispatch(
+            Command::Connect(id),
+            "Connecting",
+            None,
+            Some(id),
+            RequestKind::Other,
+        );
     }
 
     fn workspace_opened(&mut self, workspace: WorkspaceInfo) {
@@ -696,14 +789,28 @@ impl Workbench {
         } else if !self.tabs.iter().any(|tab| tab.profile_id == id) {
             self.open_query(id, false);
         }
-        self.dispatch(Command::Schema(id), "Loading schema", None, Some(id), RequestKind::Other);
+        self.dispatch(
+            Command::Schema(id),
+            "Loading schema",
+            None,
+            Some(id),
+            RequestKind::Other,
+        );
     }
 
     fn query_finished(&mut self, target: Option<u64>, result: QueryResponse) {
         let Some(tab_id) = target else { return };
-        let Some(tab) = self.tabs.iter_mut().find(|tab| tab.id == tab_id) else { return };
-        let tree = self.schemas.get(&tab.profile_id).map_or(&[][..], Vec::as_slice);
-        tab.embedded = tab.last_executed.as_deref().and_then(|sql| resolve_full_table_select(sql, tree));
+        let Some(tab) = self.tabs.iter_mut().find(|tab| tab.id == tab_id) else {
+            return;
+        };
+        let tree = self
+            .schemas
+            .get(&tab.profile_id)
+            .map_or(&[][..], Vec::as_slice);
+        tab.embedded = tab
+            .last_executed
+            .as_deref()
+            .and_then(|sql| resolve_full_table_select(sql, tree));
         let embedded = tab.embedded.is_some();
         self.query_results.insert(tab_id, result);
         self.tables.remove(&tab_id);
@@ -716,35 +823,57 @@ impl Workbench {
     }
 
     fn queue_history(&mut self, tab: Option<u64>) {
-        let Some(profile) = tab.and_then(|id| self.tabs.iter().find(|t| t.id == id)).map(|t| t.profile_id) else {
+        let Some(profile) = tab
+            .and_then(|id| self.tabs.iter().find(|t| t.id == id))
+            .map(|t| t.profile_id)
+        else {
             return;
         };
         if let Some(workspace) = self.workspaces.get(&profile) {
             let database = workspace.profile.default_database.clone();
-            self.dispatch(Command::History(profile, database), "Loading history", None, Some(profile), RequestKind::Other);
+            self.dispatch(
+                Command::History(profile, database),
+                "Loading history",
+                None,
+                Some(profile),
+                RequestKind::Other,
+            );
         }
     }
 
     /// Asks for a profile's history the first time it is shown.
     pub fn ensure_history(&mut self, profile: Uuid) {
-        let Some(database) = self.workspaces.get(&profile).map(|w| w.profile.default_database.clone()) else {
+        let Some(database) = self
+            .workspaces
+            .get(&profile)
+            .map(|w| w.profile.default_database.clone())
+        else {
             return;
         };
         let key = (profile, database.clone());
-        if !self.histories.contains_key(&key) && !self.metas().any(|m| m.label == "Loading history") {
+        if !self.histories.contains_key(&key) && !self.metas().any(|m| m.label == "Loading history")
+        {
             self.histories.insert(key, Vec::new());
-            self.send(Command::History(profile, database), "Loading history", Some(profile));
+            self.send(
+                Command::History(profile, database),
+                "Loading history",
+                Some(profile),
+            );
         }
     }
 
     // ---- tabs and profiles ----------------------------------------------
 
     pub fn profile(&self, id: Uuid) -> Option<&ConnectionProfile> {
-        self.workspaces.get(&id).map(|w| &w.profile).or_else(|| self.profiles.iter().find(|p| p.id == id))
+        self.workspaces
+            .get(&id)
+            .map(|w| &w.profile)
+            .or_else(|| self.profiles.iter().find(|p| p.id == id))
     }
 
     pub fn engine(&self, id: Uuid) -> DatabaseEngine {
-        self.profile(id).map_or(DatabaseEngine::Postgres, |p| p.engine)
+        self.profile(id)
+            .map_or(DatabaseEngine::Postgres, |p| p.engine)
     }
 
     pub fn profile_color(&self, id: Uuid) -> Color32 {
@@ -759,7 +888,9 @@ impl Workbench {
     /// latest tab, or a new query tab.
     pub fn activate_profile(&mut self, profile: Uuid) {
         self.active_profile = Some(profile);
-        let current = self.active_tab.and_then(|id| self.tabs.iter().find(|t| t.id == id));
+        let current = self
+            .active_tab
+            .and_then(|id| self.tabs.iter().find(|t| t.id == id));
         if current.is_some_and(|t| t.profile_id == profile) {
             return;
         }
@@ -800,13 +931,19 @@ impl Workbench {
 
     pub fn open_table(&mut self, profile: Uuid, schema: String, table: String) {
         let kind = TabKind::Table { schema, table };
-        if let Some(existing) = self.tabs.iter_mut().find(|t| t.profile_id == profile && t.kind == kind) {
+        if let Some(existing) = self
+            .tabs
+            .iter_mut()
+            .find(|t| t.profile_id == profile && t.kind == kind)
+        {
             existing.collapsed = false;
             self.active_tab = Some(existing.id);
             self.active_profile = Some(profile);
             return;
         }
-        let TabKind::Table { schema, table } = &kind else { return };
+        let TabKind::Table { schema, table } = &kind else {
+            return;
+        };
         let title = format!("{schema}.{table}");
         let id = self.next_id;
         self.next_id += 1;
@@ -831,7 +968,10 @@ impl Workbench {
     /// A fresh table view; the inspector starts open only on windows at
     /// least 1280 DIPs wide, as on the desktop.
     pub fn new_table_state(&self) -> TableState {
-        TableState { inspector_open: self.window_width >= 1280.0, ..TableState::default() }
+        TableState {
+            inspector_open: self.window_width >= 1280.0,
+            ..TableState::default()
+        }
     }
 
     pub fn tab_dirty(&self, tab: u64) -> bool {
@@ -848,7 +988,9 @@ impl Workbench {
 
     /// Shrinks a tab and, when it was active, selects its neighbour.
     pub fn collapse_tab(&mut self, tab_id: u64) {
-        let Some(index) = self.tabs.iter().position(|t| t.id == tab_id) else { return };
+        let Some(index) = self.tabs.iter().position(|t| t.id == tab_id) else {
+            return;
+        };
         self.tabs[index].collapsed = true;
         if self.active_tab == Some(tab_id) {
             let next = self
@@ -868,7 +1010,9 @@ impl Workbench {
             self.show_error("Save or discard staged changes before closing this tab.");
             return;
         }
-        let Some(index) = self.tabs.iter().position(|t| t.id == tab_id) else { return };
+        let Some(index) = self.tabs.iter().position(|t| t.id == tab_id) else {
+            return;
+        };
         self.tabs.remove(index);
         self.tables.remove(&tab_id);
         self.query_results.remove(&tab_id);
@@ -940,7 +1084,12 @@ impl Workbench {
     }
 
     pub fn close_profile(&mut self, id: Uuid) {
-        let removed: Vec<_> = self.tabs.iter().filter(|tab| tab.profile_id == id).map(|tab| tab.id).collect();
+        let removed: Vec<_> = self
+            .tabs
+            .iter()
+            .filter(|tab| tab.profile_id == id)
+            .map(|tab| tab.id)
+            .collect();
         for tab in removed {
             self.tables.remove(&tab);
             self.query_errors.remove(&tab);
@@ -956,13 +1105,20 @@ impl Workbench {
         if self.active_profile == Some(id) {
             self.active_profile = None;
         }
-        if self.active_tab.is_some_and(|tab| !self.tabs.iter().any(|t| t.id == tab)) {
+        if self
+            .active_tab
+            .is_some_and(|tab| !self.tabs.iter().any(|t| t.id == tab))
+        {
             self.active_tab = None;
         }
     }
 
     pub fn profile_is_clean(&mut self, profile: Uuid) -> bool {
-        let dirty = self.tabs.iter().filter(|tab| tab.profile_id == profile).any(|tab| self.tab_dirty(tab.id));
+        let dirty = self
+            .tabs
+            .iter()
+            .filter(|tab| tab.profile_id == profile)
+            .any(|tab| self.tab_dirty(tab.id));
         if dirty {
             self.show_error("Save or discard this connection's staged edits first.");
         }
@@ -971,11 +1127,19 @@ impl Workbench {
 
     /// Opens the editor for a saved profile and loads its password.
     pub fn edit_profile(&mut self, id: Uuid) {
-        let Some(current) = self.profile(id).cloned() else { return };
+        let Some(current) = self.profile(id).cloned() else {
+            return;
+        };
         let form = ProfileForm::from_profile(&current);
         let input = form.input();
         self.profile_form = Some(form);
-        self.dispatch(Command::ConnectionUrl(input, true), PASSWORD_LOAD, None, Some(id), RequestKind::Form);
+        self.dispatch(
+            Command::ConnectionUrl(input, true),
+            PASSWORD_LOAD,
+            None,
+            Some(id),
+            RequestKind::Form,
+        );
     }
 
     /// Selecting a profile: restore its workbench, or connect.
@@ -991,38 +1155,63 @@ impl Workbench {
     }
 
     pub fn connecting(&self, id: Uuid) -> bool {
-        self.metas().any(|m| m.profile == Some(id) && (m.label == "Connecting" || m.label == "Switching database"))
+        self.metas().any(|m| {
+            m.profile == Some(id) && (m.label == "Connecting" || m.label == "Switching database")
+        })
     }
 
     /// The table a tab edits: its own, or the one its last `SELECT *` named.
     pub fn table_target(&self, tab_id: u64) -> Option<(Uuid, String, String)> {
         let tab = self.tabs.iter().find(|t| t.id == tab_id)?;
         match &tab.kind {
-            TabKind::Table { schema, table } => Some((tab.profile_id, schema.clone(), table.clone())),
-            TabKind::Query => tab.embedded.clone().map(|(schema, table)| (tab.profile_id, schema, table)),
+            TabKind::Table { schema, table } => {
+                Some((tab.profile_id, schema.clone(), table.clone()))
+            }
+            TabKind::Query => tab
+                .embedded
+                .clone()
+                .map(|(schema, table)| (tab.profile_id, schema, table)),
         }
     }
 
     pub fn load_table(&mut self, tab_id: u64) {
-        if self.tables.get(&tab_id).is_some_and(|state| !state.pending.is_empty()) {
+        if self
+            .tables
+            .get(&tab_id)
+            .is_some_and(|state| !state.pending.is_empty())
+        {
             self.table_error(tab_id, PENDING_REFRESH_ERROR);
             return;
         }
-        let Some((profile, schema, table)) = self.table_target(tab_id) else { return };
+        let Some((profile, schema, table)) = self.table_target(tab_id) else {
+            return;
+        };
         let state = self.tables.entry(tab_id).or_default();
         state.loading = true;
         // Paging, filtering or sorting replaces a stale notice.
-        if state.message.as_ref().is_some_and(|m| m.kind == messages::Kind::Notice && m.export.is_none()) {
+        if state
+            .message
+            .as_ref()
+            .is_some_and(|m| m.kind == messages::Kind::Notice && m.export.is_none())
+        {
             state.message = None;
         }
         let request = state.request(profile, &schema, &table);
         state.requested = Some(request.clone());
         state.in_flight += 1;
-        self.dispatch(Command::Table(request), "Loading rows", Some(tab_id), Some(profile), RequestKind::Table);
+        self.dispatch(
+            Command::Table(request),
+            "Loading rows",
+            Some(tab_id),
+            Some(profile),
+            RequestKind::Table,
+        );
     }
 
     pub fn run_query(&mut self, tab_id: u64, sql: String, refresh: bool, confirmed: bool) {
-        let Some(tab) = self.tabs.iter().find(|t| t.id == tab_id) else { return };
+        let Some(tab) = self.tabs.iter().find(|t| t.id == tab_id) else {
+            return;
+        };
         let profile = tab.profile_id;
         let sql = sql.trim().to_owned();
         if sql.is_empty() || self.busy(RequestKind::Query, Some(tab_id)) || self.exporting(tab_id) {
@@ -1031,12 +1220,19 @@ impl Workbench {
         if self.tab_dirty(tab_id) {
             self.query_errors.insert(
                 tab_id,
-                Message::error("Save or discard the pending table changes before running another query.", self.now),
+                Message::error(
+                    "Save or discard the pending table changes before running another query.",
+                    self.now,
+                ),
             );
             return;
         }
         if !confirmed && requires_confirmation(self.engine(profile), &sql) {
-            self.confirm_query = Some(ConfirmQuery { tab: tab_id, sql, refresh });
+            self.confirm_query = Some(ConfirmQuery {
+                tab: tab_id,
+                sql,
+                refresh,
+            });
             return;
         }
         if let Some(tab) = self.tabs.iter_mut().find(|t| t.id == tab_id) {
@@ -1044,8 +1240,16 @@ impl Workbench {
         }
         self.query_errors.remove(&tab_id);
         self.dispatch(
-            Command::Query(QueryRequest { profile_id: profile, sql, max_rows: Some(MAX_QUERY_ROWS) }),
-            if refresh { "Refreshing query" } else { "Running query" },
+            Command::Query(QueryRequest {
+                profile_id: profile,
+                sql,
+                max_rows: Some(MAX_QUERY_ROWS),
+            }),
+            if refresh {
+                "Refreshing query"
+            } else {
+                "Running query"
+            },
             Some(tab_id),
             Some(profile),
             RequestKind::Query,
@@ -1057,7 +1261,12 @@ impl Workbench {
         let state = self.tables.get(&tab_id)?;
         Some(MutationBatch {
             profile_id,
-            database: self.workspaces.get(&profile_id)?.profile.default_database.clone(),
+            database: self
+                .workspaces
+                .get(&profile_id)?
+                .profile
+                .default_database
+                .clone(),
             schema,
             table,
             mutations: state
@@ -1078,15 +1287,28 @@ impl Workbench {
         if self.busy(RequestKind::Mutation, Some(tab_id)) {
             return;
         }
-        if let Some(batch) = self.mutation_batch(tab_id).filter(|b| !b.mutations.is_empty()) {
+        if let Some(batch) = self
+            .mutation_batch(tab_id)
+            .filter(|b| !b.mutations.is_empty())
+        {
             let profile = batch.profile_id;
-            self.dispatch(Command::Mutate(batch), "Saving changes", Some(tab_id), Some(profile), RequestKind::Mutation);
+            self.dispatch(
+                Command::Mutate(batch),
+                "Saving changes",
+                Some(tab_id),
+                Some(profile),
+                RequestKind::Mutation,
+            );
         }
     }
 
     /// Export all: warns before very large tables, then asks for a file.
     pub fn request_export(&mut self, tab_id: u64) {
-        let total = self.tables.get(&tab_id).and_then(TableState::total_rows).unwrap_or(0);
+        let total = self
+            .tables
+            .get(&tab_id)
+            .and_then(TableState::total_rows)
+            .unwrap_or(0);
         if total > LARGE_EXPORT_WARNING_ROWS {
             self.confirm_export = Some(tab_id);
         } else {
@@ -1100,11 +1322,25 @@ impl Workbench {
         if self.choosing_export.contains_key(&tab_id) {
             return;
         }
-        let Some((profile, schema, table)) = self.table_target(tab_id) else { return };
-        let Some(state) = self.tables.get(&tab_id) else { return };
-        let (Some(page), Some(loaded)) = (&state.page, &state.loaded) else { return };
-        let request = TablePageRequest { profile_id: profile, ..loaded.clone() };
-        let columns = page.metadata.columns.iter().map(|c| c.name.clone()).collect();
+        let Some((profile, schema, table)) = self.table_target(tab_id) else {
+            return;
+        };
+        let Some(state) = self.tables.get(&tab_id) else {
+            return;
+        };
+        let (Some(page), Some(loaded)) = (&state.page, &state.loaded) else {
+            return;
+        };
+        let request = TablePageRequest {
+            profile_id: profile,
+            ..loaded.clone()
+        };
+        let columns = page
+            .metadata
+            .columns
+            .iter()
+            .map(|c| c.name.clone())
+            .collect();
         let file_name = format!("{}.{}.csv", safe_file_name(&schema), safe_file_name(&table));
         let done = self.export_paths.0.clone();
         match crate::platform::pick_export_path(file_name, self.wake.clone(), move |path| {
@@ -1113,28 +1349,43 @@ impl Workbench {
             Ok(()) => {
                 self.choosing_export.insert(tab_id, (request, columns));
             }
-            Err(error) => self.table_error(tab_id, format!("Couldn't open the save dialog: {error}")),
+            Err(error) => {
+                self.table_error(tab_id, format!("Couldn't open the save dialog: {error}"))
+            }
         }
     }
 
     /// Saves the displayed rows of a query result as CSV.
     pub fn save_result(&mut self, tab_id: u64) {
-        let Some(result) = self.query_results.get(&tab_id) else { return };
-        let title = self.tabs.iter().find(|t| t.id == tab_id).map_or("query", |t| t.title.as_str());
+        let Some(result) = self.query_results.get(&tab_id) else {
+            return;
+        };
+        let title = self
+            .tabs
+            .iter()
+            .find(|t| t.id == tab_id)
+            .map_or("query", |t| t.title.as_str());
         let file_name = format!("{}.csv", safe_file_name(title));
         let columns = result.columns.iter().map(|c| c.name.clone()).collect();
         let rows = result.rows.clone();
         self.query_errors.remove(&tab_id);
         let done = self.saved_results.0.clone();
-        match crate::platform::save_result_csv(file_name, columns, rows, self.wake.clone(), move |outcome| {
-            let _ = done.send((tab_id, outcome));
-        }) {
+        match crate::platform::save_result_csv(
+            file_name,
+            columns,
+            rows,
+            self.wake.clone(),
+            move |outcome| {
+                let _ = done.send((tab_id, outcome));
+            },
+        ) {
             Ok(()) => {
                 self.saving_results.insert(tab_id);
             }
             Err(error) => {
                 let message = format!("Couldn't open the save dialog: {error}");
-                self.query_errors.insert(tab_id, Message::error(message, self.now));
+                self.query_errors
+                    .insert(tab_id, Message::error(message, self.now));
             }
         }
     }
@@ -1162,7 +1413,9 @@ impl Workbench {
 
     fn export_chosen(&mut self) {
         while let Ok((tab_id, path)) = self.export_paths.1.try_recv() {
-            let Some((page, columns)) = self.choosing_export.remove(&tab_id) else { continue };
+            let Some((page, columns)) = self.choosing_export.remove(&tab_id) else {
+                continue;
+            };
             let Some(path) = path else {
                 self.table_notice(tab_id, Message::notice("Export canceled.", self.now));
                 continue;
@@ -1171,12 +1424,23 @@ impl Workbench {
                 continue;
             }
             let profile = page.profile_id;
-            let request = ExportRequest { page, columns, path, progress: std::sync::Arc::default() };
+            let request = ExportRequest {
+                page,
+                columns,
+                path,
+                progress: std::sync::Arc::default(),
+            };
             if let Some(state) = self.tables.get_mut(&tab_id) {
                 state.export_progress = Some(request.progress.clone());
                 state.message = None;
             }
-            self.dispatch(Command::ExportCsv(request), "Exporting CSV", Some(tab_id), Some(profile), RequestKind::Export);
+            self.dispatch(
+                Command::ExportCsv(request),
+                "Exporting CSV",
+                Some(tab_id),
+                Some(profile),
+                RequestKind::Export,
+            );
         }
     }
 
@@ -1189,7 +1453,8 @@ impl Workbench {
     pub fn close_blocker(&self) -> Option<&'static str> {
         let dirty = self.tabs.iter().any(|tab| self.tab_dirty(tab.id));
         // Reads can be abandoned; a save or export stopped halfway can't.
-        let writing = self.busy(RequestKind::Mutation, None) || self.busy(RequestKind::Export, None);
+        let writing =
+            self.busy(RequestKind::Mutation, None) || self.busy(RequestKind::Export, None);
         if dirty {
             Some("Save or discard staged changes before closing Anybase.")
         } else if writing {
@@ -1222,7 +1487,13 @@ mod tests {
     }
 
     fn meta(tab: Option<u64>, kind: RequestKind) -> RequestMeta {
-        RequestMeta { label: "test", tab, profile: None, kind, stale: false }
+        RequestMeta {
+            label: "test",
+            tab,
+            profile: None,
+            kind,
+            stale: false,
+        }
     }
 
     #[test]
@@ -1242,7 +1513,10 @@ mod tests {
         app.tables.insert(second, state);
         assert!(!app.profile_is_clean(profile));
         app.close_tab(second);
-        assert!(app.tabs.iter().any(|t| t.id == second), "dirty tabs stay open");
+        assert!(
+            app.tabs.iter().any(|t| t.id == second),
+            "dirty tabs stay open"
+        );
     }
 
     #[test]
@@ -1266,10 +1540,20 @@ mod tests {
         let (a, b) = (Uuid::from_u128(3), Uuid::from_u128(4));
         app.open_query(a, true);
         app.open_query(b, true);
-        app.dispatch(Command::Schema(a), "Loading schema", None, Some(a), RequestKind::Other);
+        app.dispatch(
+            Command::Schema(a),
+            "Loading schema",
+            None,
+            Some(a),
+            RequestKind::Other,
+        );
         app.close_profile(a);
         assert!(app.tabs.iter().all(|t| t.profile_id == b));
-        assert!(app.pending_requests.values().all(|m| m.profile != Some(a) || m.stale));
+        assert!(
+            app.pending_requests
+                .values()
+                .all(|m| m.profile != Some(a) || m.stale)
+        );
     }
 
     #[test]
@@ -1288,7 +1572,11 @@ mod tests {
         let tab = app.active_tab.unwrap();
         let sql = format!("SELECT * FROM {schema}.{table}");
         app.tabs[0].last_executed = Some(sql.clone());
-        let result = store.run_query(&QueryRequest { profile_id: profile, sql, max_rows: None });
+        let result = store.run_query(&QueryRequest {
+            profile_id: profile,
+            sql,
+            max_rows: None,
+        });
         app.query_finished(Some(tab), result);
         assert_eq!(app.tabs[0].embedded, Some((schema, table)));
         assert!(app.tables.contains_key(&tab));

@@ -442,7 +442,12 @@ impl<'a> Ui<'a> {
             avail.right() - frame.outer.right,
             avail.bottom() - frame.outer.bottom,
         );
-        let inner_max = outer.inset(frame.inner.left, frame.inner.top, frame.inner.right, frame.inner.bottom);
+        let inner_max = outer.inset(
+            frame.inner.left,
+            frame.inner.top,
+            frame.inner.right,
+            frame.inner.bottom,
+        );
         let layer = self.layer as usize;
         let slot = self.ctx.list.layers[layer].len();
         self.ctx.list.layers[layer].push(crate::paint::ClippedShape {
@@ -461,9 +466,19 @@ impl<'a> Ui<'a> {
         };
         let full_width = matches!(self.dir, Dir::Down | Dir::Up);
         let content = if full_width {
-            Rect::from_ltrb(inner_max.left(), inner_max.top(), inner_max.right(), used.bottom().max(inner_max.top()))
+            Rect::from_ltrb(
+                inner_max.left(),
+                inner_max.top(),
+                inner_max.right(),
+                used.bottom().max(inner_max.top()),
+            )
         } else {
-            Rect::from_ltrb(inner_max.left(), inner_max.top(), used.right().max(inner_max.left()), used.bottom().max(inner_max.top()))
+            Rect::from_ltrb(
+                inner_max.left(),
+                inner_max.top(),
+                used.right().max(inner_max.left()),
+                used.bottom().max(inner_max.top()),
+            )
         };
         let rect = Rect::from_ltrb(
             content.left() - frame.inner.left,
@@ -512,7 +527,10 @@ impl<'a> Ui<'a> {
         let avail = self.available_rect();
         let w = (avail.width() - gap) / 2.0;
         let l = Rect::from_min_size(avail.min, vec2(w, avail.height()));
-        let r = Rect::from_min_size(pos2(avail.left() + w + gap, avail.top()), vec2(w, avail.height()));
+        let r = Rect::from_min_size(
+            pos2(avail.left() + w + gap, avail.top()),
+            vec2(w, avail.height()),
+        );
         let used_l = {
             let mut c = self.child(l, Dir::Down);
             left(&mut c);
@@ -524,11 +542,23 @@ impl<'a> Ui<'a> {
             c.used
         };
         let bottom = used_l.bottom().max(used_r.bottom()).max(avail.top());
-        self.advance_past(Rect::from_ltrb(avail.left(), avail.top(), avail.right(), bottom));
+        self.advance_past(Rect::from_ltrb(
+            avail.left(),
+            avail.top(),
+            avail.right(),
+            bottom,
+        ));
     }
 
     /// Groups the controls `f` adds under one accessibility node.
-    pub fn a11y_group<R>(&mut self, id: Id, role: Role, name: &str, rect: Rect, f: impl FnOnce(&mut Ui) -> R) -> R {
+    pub fn a11y_group<R>(
+        &mut self,
+        id: Id,
+        role: Role,
+        name: &str,
+        rect: Rect,
+        f: impl FnOnce(&mut Ui) -> R,
+    ) -> R {
         let mut node = Node::new(id.0, role, name, rect);
         node.parent = self.a11y_parent;
         self.ctx.a11y_node(node);
@@ -557,7 +587,8 @@ impl<'a> Ui<'a> {
 
     pub fn interact(&mut self, rect: Rect, id: Id, sense: Sense) -> Response {
         let enabled = self.enabled;
-        self.ctx.interact(id, rect, self.clip, self.layer, sense, enabled)
+        self.ctx
+            .interact(id, rect, self.clip, self.layer, sense, enabled)
     }
 
     pub fn painter(&mut self) -> Painter<'_> {
@@ -578,7 +609,12 @@ impl<'a> Ui<'a> {
         let w = self.ctx.fonts.width(text, font);
         let rect = self.allocate(vec2(w, font.line_height()));
         self.painter().text(rect.min, text, font, color);
-        self.a11y(Node::new(self.id.with(("label", text)).0, Role::Text, text, rect));
+        self.a11y(Node::new(
+            self.id.with(("label", text)).0,
+            Role::Text,
+            text,
+            rect,
+        ));
         rect
     }
 
@@ -590,13 +626,24 @@ impl<'a> Ui<'a> {
         let w = self.ctx.fonts.width(&shown, font);
         let rect = self.allocate(vec2(w, font.line_height()));
         self.painter().text(rect.min, shown, font, color);
-        self.a11y(Node::new(self.id.with(("label", text)).0, Role::Text, text, rect));
+        self.a11y(Node::new(
+            self.id.with(("label", text)).0,
+            Role::Text,
+            text,
+            rect,
+        ));
         (rect, elided)
     }
 
     /// Text wrapped to the available width (or `max_width`), left aligned
     /// or centred.
-    pub fn label_wrapped(&mut self, text: &str, font: Font, color: Color32, centered: bool) -> Rect {
+    pub fn label_wrapped(
+        &mut self,
+        text: &str,
+        font: Font,
+        color: Color32,
+        centered: bool,
+    ) -> Rect {
         let max = self.available_width().max(20.0);
         let lines = self.ctx.fonts.wrap(text, font, max);
         let lh = font.line_height();
@@ -610,9 +657,19 @@ impl<'a> Ui<'a> {
             } else {
                 rect.left()
             };
-            p.text(pos2(x, rect.top() + i as f32 * lh), &text[line.range.clone()], font, color);
+            p.text(
+                pos2(x, rect.top() + i as f32 * lh),
+                &text[line.range.clone()],
+                font,
+                color,
+            );
         }
-        self.a11y(Node::new(self.id.with(("label", text)).0, Role::Text, text, rect));
+        self.a11y(Node::new(
+            self.id.with(("label", text)).0,
+            Role::Text,
+            text,
+            rect,
+        ));
         rect
     }
 

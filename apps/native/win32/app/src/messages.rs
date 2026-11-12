@@ -120,7 +120,15 @@ fn colors(kind: Kind) -> (Color32, Color32, Color32) {
 
 /// Wrapped text with a dismiss button on the right, inside `rect`'s width;
 /// returns the height it needs and whether dismiss was clicked.
-fn text_row(ui: &mut Ui, x: (f32, f32), top: f32, text: &str, color: Color32, centered: bool, tooltip: &str) -> (f32, bool) {
+fn text_row(
+    ui: &mut Ui,
+    x: (f32, f32),
+    top: f32,
+    text: &str,
+    color: Color32,
+    centered: bool,
+    tooltip: &str,
+) -> (f32, bool) {
     let (left, right) = x;
     let font = theme::ui(12.5);
     let gutter = if centered { 24.0 + 8.0 } else { 0.0 };
@@ -137,12 +145,25 @@ fn text_row(ui: &mut Ui, x: (f32, f32), top: f32, text: &str, color: Color32, ce
             } else {
                 left
             };
-            p.text(pos2(x, text_top + i as f32 * lh), &text[line.range.clone()], font, color);
+            p.text(
+                pos2(x, text_top + i as f32 * lh),
+                &text[line.range.clone()],
+                font,
+                color,
+            );
         }
     }
     let rect = Rect::from_ltrb(left, top, right, top + height);
-    ui.a11y(Node::new(ui.make_id(("message", text)).0, Role::Text, text, rect));
-    let button = Rect::from_min_size(pos2(right - 24.0, top + height / 2.0 - 12.0), vec2(24.0, 24.0));
+    ui.a11y(Node::new(
+        ui.make_id(("message", text)).0,
+        Role::Text,
+        text,
+        rect,
+    ));
+    let button = Rect::from_min_size(
+        pos2(right - 24.0, top + height / 2.0 - 12.0),
+        vec2(24.0, 24.0),
+    );
     let clicked = dismiss_button(ui, button, color, tooltip).clicked;
     (height, clicked)
 }
@@ -153,7 +174,12 @@ pub fn inline(ui: &mut Ui, message: &Message, opacity: f32) -> Response {
     let (fill, stroke, text) = colors(message.kind);
     let mut response = Response::None;
     let avail = ui.available_rect();
-    let outer = Rect::from_ltrb(avail.left() + 12.0, avail.top() + 8.0, avail.right() - 12.0, avail.top() + 8.0);
+    let outer = Rect::from_ltrb(
+        avail.left() + 12.0,
+        avail.top() + 8.0,
+        avail.right() - 12.0,
+        avail.top() + 8.0,
+    );
     let inner_x = (outer.left() + 12.0, outer.right() - 12.0);
     let top = outer.top() + 6.0;
     let previous = ui.replace_opacity(ui.opacity() * opacity);
@@ -164,7 +190,15 @@ pub fn inline(ui: &mut Ui, message: &Message, opacity: f32) -> Response {
         h
     } else {
         let centered = message.kind == Kind::Error;
-        let (h, dismissed) = text_row(ui, inner_x, top, &message.text, text, centered, "Dismiss message");
+        let (h, dismissed) = text_row(
+            ui,
+            inner_x,
+            top,
+            &message.text,
+            text,
+            centered,
+            "Dismiss message",
+        );
         if dismissed {
             response = Response::Dismiss;
         }
@@ -180,9 +214,18 @@ pub fn inline(ui: &mut Ui, message: &Message, opacity: f32) -> Response {
     response
 }
 
-fn export_body(ui: &mut Ui, (left, right): (f32, f32), top: f32, path: &std::path::Path, rows: u64) -> (f32, Response) {
+fn export_body(
+    ui: &mut Ui,
+    (left, right): (f32, f32),
+    top: f32,
+    path: &std::path::Path,
+    rows: u64,
+) -> (f32, Response) {
     let mut response = Response::None;
-    let name = path.file_name().map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned());
+    let name = path.file_name().map_or_else(
+        || path.display().to_string(),
+        |n| n.to_string_lossy().into_owned(),
+    );
     let noun = if rows == 1 { "row" } else { "rows" };
     let font = theme::ui(12.5);
     let height = 26.0;
@@ -190,26 +233,46 @@ fn export_body(ui: &mut Ui, (left, right): (f32, f32), top: f32, path: &std::pat
     let lead = format!("Exported {} {noun} to ", theme::count(rows));
     let lead_w = ui.painter().text_mid(left, y, &lead, font, NOTICE_TEXT);
     let room = (right - left - lead_w - 180.0).max(40.0);
-    let (name_w, _) = ui.painter().text_truncated(left + lead_w, y, &name, font, EXPORT_LINK, room);
-    let link_rect = Rect::from_ltrb(left + lead_w, top + 4.0, left + lead_w + name_w, top + height - 4.0);
+    let (name_w, _) = ui
+        .painter()
+        .text_truncated(left + lead_w, y, &name, font, EXPORT_LINK, room);
+    let link_rect = Rect::from_ltrb(
+        left + lead_w,
+        top + 4.0,
+        left + lead_w + name_w,
+        top + height - 4.0,
+    );
     let id = ui.make_id(("export-link", &name));
-    let link = ui.interact(link_rect, id, Sense::CLICK).on_hover_text("Open the exported file");
-    ui.painter().hline(link_rect.left()..=link_rect.right(), y + 8.0, Stroke::new(1.0, EXPORT_LINK));
+    let link = ui
+        .interact(link_rect, id, Sense::CLICK)
+        .on_hover_text("Open the exported file");
+    ui.painter().hline(
+        link_rect.left()..=link_rect.right(),
+        y + 8.0,
+        Stroke::new(1.0, EXPORT_LINK),
+    );
     let mut node = Node::new(id.0, Role::Link, &name, link_rect);
     node.focusable = true;
     ui.a11y(node);
     if link.clicked {
         response = Response::Open;
     }
-    ui.painter().text_mid(link_rect.right(), y, ".", font, NOTICE_TEXT);
+    ui.painter()
+        .text_mid(link_rect.right(), y, ".", font, NOTICE_TEXT);
     let dismiss = Rect::from_min_size(pos2(right - 24.0, y - 12.0), vec2(24.0, 24.0));
     if dismiss_button(ui, dismiss, NOTICE_TEXT, "Dismiss export result").clicked {
         response = Response::Dismiss;
     }
-    let show = secondary_button("Show in folder").icon(Icon::Folder).small();
+    let show = secondary_button("Show in folder")
+        .icon(Icon::Folder)
+        .small();
     let w = show.width(ui);
     let rect = Rect::from_min_size(pos2(dismiss.left() - 5.0 - w, y - 13.0), vec2(w, 26.0));
-    if show.show_in(ui, rect).on_hover_text("Reveal the exported file").clicked {
+    if show
+        .show_in(ui, rect)
+        .on_hover_text("Reveal the exported file")
+        .clicked
+    {
         response = Response::Reveal;
     }
     (height, response)
@@ -222,15 +285,39 @@ pub fn banner(ui: &mut Ui, rect_top: Rect, message: &Message, opacity: f32) -> (
     let previous = ui.replace_opacity(ui.opacity() * opacity);
     let mark = ui.paint_mark();
     let x = (rect_top.left() + 14.0, rect_top.right() - 14.0);
-    let (h, dismissed) = text_row(ui, x, rect_top.top() + 6.0, &message.text, text, true, "Dismiss error");
-    let rect = Rect::from_ltrb(rect_top.left(), rect_top.top(), rect_top.right(), rect_top.top() + h + 12.0);
+    let (h, dismissed) = text_row(
+        ui,
+        x,
+        rect_top.top() + 6.0,
+        &message.text,
+        text,
+        true,
+        "Dismiss error",
+    );
+    let rect = Rect::from_ltrb(
+        rect_top.left(),
+        rect_top.top(),
+        rect_top.right(),
+        rect_top.top() + h + 12.0,
+    );
     let before = ui.paint_mark();
     ui.painter().rect_filled(rect, 0.0, fill);
     let painted = ui.paint_mark() - before;
     ui.move_last_behind(mark, painted);
-    ui.painter().hline(rect.left()..=rect.right(), rect.bottom() - 0.5, Stroke::new(1.0, stroke));
+    ui.painter().hline(
+        rect.left()..=rect.right(),
+        rect.bottom() - 0.5,
+        Stroke::new(1.0, stroke),
+    );
     ui.replace_opacity(previous);
-    (h + 12.0, if dismissed { Response::Dismiss } else { Response::None })
+    (
+        h + 12.0,
+        if dismissed {
+            Response::Dismiss
+        } else {
+            Response::None
+        },
+    )
 }
 
 /// Bottom-right toast with a status dot, for schema refresh summaries.

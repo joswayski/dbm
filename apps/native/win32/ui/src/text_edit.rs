@@ -200,7 +200,8 @@ impl<'t> TextEdit<'t> {
         let lh = self.font.line_height();
         let width = self.width.unwrap_or_else(|| ui.available_width());
         let height = if self.multiline {
-            ui.available_height().max(lh * self.rows as f32 + self.margin.y * 2.0)
+            ui.available_height()
+                .max(lh * self.rows as f32 + self.margin.y * 2.0)
         } else {
             lh + self.margin.y * 2.0
         };
@@ -225,7 +226,9 @@ impl<'t> TextEdit<'t> {
         let len = self.text.len();
         st.selection.0 = clamp_boundary(self.text, st.selection.0.min(len));
         st.selection.1 = clamp_boundary(self.text, st.selection.1.min(len));
-        let inner = rect.shrink2(self.margin).with_min_x(rect.left() + self.margin.x + self.pad_left);
+        let inner = rect
+            .shrink2(self.margin)
+            .with_min_x(rect.left() + self.margin.x + self.pad_left);
         let password = self.password;
         let display = |text: &str| -> String {
             if password {
@@ -254,7 +257,11 @@ impl<'t> TextEdit<'t> {
         let origin = pos2(inner.left() - st.scroll.x, inner.top() - st.scroll.y);
         if (response.pressed || response.dragged) && self.interactive {
             if let Some(p) = ui.ctx.pointer() {
-                let at = map_offset(&shown, self.text, hit(&ui.ctx.fonts, &shown, &lines, font, origin, p));
+                let at = map_offset(
+                    &shown,
+                    self.text,
+                    hit(&ui.ctx.fonts, &shown, &lines, font, origin, p),
+                );
                 if response.pressed {
                     ui.ctx.request_focus(id);
                     st.blink_from = ui.ctx.time();
@@ -287,21 +294,30 @@ impl<'t> TextEdit<'t> {
                 match event {
                     Event::Text(t) if editable => {
                         let t: String = if self.multiline {
-                            t.chars().filter(|c| *c == '\n' || !c.is_control()).collect()
+                            t.chars()
+                                .filter(|c| *c == '\n' || !c.is_control())
+                                .collect()
                         } else {
                             t.chars().filter(|c| !c.is_control()).collect()
                         };
                         if t.is_empty() {
                             continue;
                         }
-                        let room = self.char_limit.saturating_sub(self.text.chars().count() - selected(self.text, st.selection).chars().count());
+                        let room = self.char_limit.saturating_sub(
+                            self.text.chars().count()
+                                - selected(self.text, st.selection).chars().count(),
+                        );
                         let t: String = t.chars().take(room).collect();
                         if !t.is_empty() {
                             insert(self.text, &mut st, &t);
                             response.changed = true;
                         }
                     }
-                    Event::Key { key, pressed: true, modifiers } => {
+                    Event::Key {
+                        key,
+                        pressed: true,
+                        modifiers,
+                    } => {
                         match self.key(ui, &mut st, key, modifiers, &lines, origin, editable) {
                             KeyResult::Handled(changed) => response.changed |= changed,
                             KeyResult::Submit => {
@@ -316,7 +332,11 @@ impl<'t> TextEdit<'t> {
                                 ui.ctx.report_lost(id);
                                 response.lost_focus = true;
                             }
-                            KeyResult::Unhandled => rest.push(Event::Key { key, pressed: true, modifiers }),
+                            KeyResult::Unhandled => rest.push(Event::Key {
+                                key,
+                                pressed: true,
+                                modifiers,
+                            }),
                         }
                         st.blink_from = ui.ctx.time();
                     }
@@ -389,14 +409,21 @@ impl<'t> TextEdit<'t> {
             self.colors.map(|f| f(&shown)).unwrap_or_default()
         };
         let time = ui.ctx.time();
-        let color = if enabled { self.text_color } else { self.text_color.gamma_multiply(0.6) };
+        let color = if enabled {
+            self.text_color
+        } else {
+            self.text_color.gamma_multiply(0.6)
+        };
         {
             let mut p = ui.painter_at(clip);
             let fonts = p.fonts();
             // Selection.
             let (a, b) = order(st.selection);
             if a != b && (focused || !self.interactive || self.read_only) {
-                let (a, b) = (map_offset_rev(self.text, &shown, a), map_offset_rev(self.text, &shown, b));
+                let (a, b) = (
+                    map_offset_rev(self.text, &shown, a),
+                    map_offset_rev(self.text, &shown, b),
+                );
                 let rects: Vec<Rect> = lines
                     .iter()
                     .enumerate()
@@ -411,7 +438,12 @@ impl<'t> TextEdit<'t> {
                         if b > line.end {
                             x1 += font.size * 0.4;
                         }
-                        Some(Rect::from_ltrb(origin.x + x0, origin.y + i as f32 * lh, origin.x + x1, origin.y + (i + 1) as f32 * lh))
+                        Some(Rect::from_ltrb(
+                            origin.x + x0,
+                            origin.y + i as f32 * lh,
+                            origin.x + x1,
+                            origin.y + (i + 1) as f32 * lh,
+                        ))
                     })
                     .collect();
                 for r in rects {
@@ -419,7 +451,11 @@ impl<'t> TextEdit<'t> {
                 }
             }
             if shown.is_empty() && !self.hint.is_empty() {
-                let hf = if self.hint_italic { font.italics() } else { font };
+                let hf = if self.hint_italic {
+                    font.italics()
+                } else {
+                    font
+                };
                 p.text(origin, self.hint, hf, HINT_COLOR);
             }
             let first = ((st.scroll.y / lh).floor().max(0.0)) as usize;
@@ -437,7 +473,10 @@ impl<'t> TextEdit<'t> {
                 while at < line.end {
                     let idx = spans.partition_point(|(s, _)| *s <= at);
                     let c = if idx == 0 { color } else { spans[idx - 1].1 };
-                    let next = spans.get(idx).map_or(line.end, |(s, _)| (*s).min(line.end)).max(at + 1);
+                    let next = spans
+                        .get(idx)
+                        .map_or(line.end, |(s, _)| (*s).min(line.end))
+                        .max(at + 1);
                     let next = clamp_boundary(&shown, next.min(line.end));
                     let next = if next <= at { line.end } else { next };
                     let run = &shown[at..next];
@@ -452,17 +491,28 @@ impl<'t> TextEdit<'t> {
                 if phase % 2 == 0 {
                     let x = (origin.x + cx).round();
                     let y = origin.y + cl as f32 * lh;
-                    p.rect_filled(Rect::from_ltrb(x, y + 1.0, x + 1.5, y + lh - 1.0), 0.0, TEXT_COLOR);
+                    p.rect_filled(
+                        Rect::from_ltrb(x, y + 1.0, x + 1.5, y + lh - 1.0),
+                        0.0,
+                        TEXT_COLOR,
+                    );
                 }
             }
         }
         if focused && editable {
             let next = 0.5 - ((time - st.blink_from) % 0.5);
             ui.ctx.request_repaint_after(next);
-            ui.ctx.set_ime_rect(Rect::from_min_size(pos2(origin.x + cx, origin.y + cl as f32 * lh), vec2(1.0, lh)));
+            ui.ctx.set_ime_rect(Rect::from_min_size(
+                pos2(origin.x + cx, origin.y + cl as f32 * lh),
+                vec2(1.0, lh),
+            ));
         }
         let mut node = Node::new(id.0, Role::Edit, self.name, rect);
-        node.value = Some(if self.password { String::new() } else { self.text.clone() });
+        node.value = Some(if self.password {
+            String::new()
+        } else {
+            self.text.clone()
+        });
         node.focusable = self.interactive;
         node.password = self.password;
         node.read_only = !editable;
@@ -482,7 +532,16 @@ impl<'t> TextEdit<'t> {
         }
     }
 
-    fn key(&mut self, ui: &mut Ui, st: &mut EditState, key: Key, m: Modifiers, lines: &[LineSpan], origin: Pos2, editable: bool) -> KeyResult {
+    fn key(
+        &mut self,
+        ui: &mut Ui,
+        st: &mut EditState,
+        key: Key,
+        m: Modifiers,
+        lines: &[LineSpan],
+        origin: Pos2,
+        editable: bool,
+    ) -> KeyResult {
         let text = &mut *self.text;
         let word = m.ctrl;
         let caret = st.selection.1;
@@ -499,20 +558,40 @@ impl<'t> TextEdit<'t> {
         match key {
             Key::ArrowLeft => {
                 let (a, b) = order(st.selection);
-                let to = if a != b && !m.shift { a } else if word { prev_word(text, caret) } else { prev_char(text, caret) };
+                let to = if a != b && !m.shift {
+                    a
+                } else if word {
+                    prev_word(text, caret)
+                } else {
+                    prev_char(text, caret)
+                };
                 moved(st, to, false);
             }
             Key::ArrowRight => {
                 let (a, b) = order(st.selection);
-                let to = if a != b && !m.shift { b } else if word { next_word(text, caret) } else { next_char(text, caret) };
+                let to = if a != b && !m.shift {
+                    b
+                } else if word {
+                    next_word(text, caret)
+                } else {
+                    next_char(text, caret)
+                };
                 moved(st, to, false);
             }
             Key::Home => {
-                let to = if word || !self.multiline { 0 } else { text[..caret].rfind('\n').map_or(0, |i| i + 1) };
+                let to = if word || !self.multiline {
+                    0
+                } else {
+                    text[..caret].rfind('\n').map_or(0, |i| i + 1)
+                };
                 moved(st, to, false);
             }
             Key::End => {
-                let to = if word || !self.multiline { text.len() } else { text[caret..].find('\n').map_or(text.len(), |i| caret + i) };
+                let to = if word || !self.multiline {
+                    text.len()
+                } else {
+                    text[caret..].find('\n').map_or(text.len(), |i| caret + i)
+                };
                 moved(st, to, false);
             }
             Key::ArrowUp | Key::ArrowDown | Key::PageUp | Key::PageDown if self.multiline => {
@@ -520,7 +599,11 @@ impl<'t> TextEdit<'t> {
                 let shown_caret = caret; // multiline fields are never masked
                 let (line, x) = locate(fonts, text, lines, self.font, shown_caret);
                 let goal = st.goal_x.unwrap_or(x);
-                let step = if matches!(key, Key::PageUp | Key::PageDown) { 20 } else { 1 };
+                let step = if matches!(key, Key::PageUp | Key::PageDown) {
+                    20
+                } else {
+                    1
+                };
                 let target = if matches!(key, Key::ArrowUp | Key::PageUp) {
                     line.checked_sub(step).or(Some(0)).filter(|_| line > 0)
                 } else {
@@ -564,7 +647,9 @@ impl<'t> TextEdit<'t> {
                     if !self.multiline {
                         s = s.replace('\n', " ");
                     }
-                    let room = self.char_limit.saturating_sub(text.chars().count() - selected(text, st.selection).chars().count());
+                    let room = self.char_limit.saturating_sub(
+                        text.chars().count() - selected(text, st.selection).chars().count(),
+                    );
                     let s: String = s.chars().take(room).collect();
                     push_undo(st, text);
                     replace_selection(text, st, &s);
@@ -572,10 +657,18 @@ impl<'t> TextEdit<'t> {
                 }
             }
             Key::Z if m.ctrl && editable => {
-                let from = if m.shift { st.redo.pop() } else { st.undo.pop() };
+                let from = if m.shift {
+                    st.redo.pop()
+                } else {
+                    st.undo.pop()
+                };
                 if let Some((t, sel)) = from {
                     let current = (std::mem::replace(text, t), st.selection);
-                    if m.shift { st.undo.push(current) } else { st.redo.push(current) }
+                    if m.shift {
+                        st.undo.push(current)
+                    } else {
+                        st.redo.push(current)
+                    }
                     st.selection = sel;
                     return KeyResult::Handled(true);
                 }
@@ -591,7 +684,11 @@ impl<'t> TextEdit<'t> {
                 let (a, b) = order(st.selection);
                 push_undo(st, text);
                 if a == b {
-                    let from = if word { prev_word(text, a) } else { prev_char(text, a) };
+                    let from = if word {
+                        prev_word(text, a)
+                    } else {
+                        prev_char(text, a)
+                    };
                     st.selection = (from, a);
                 }
                 replace_selection(text, st, "");
@@ -601,7 +698,11 @@ impl<'t> TextEdit<'t> {
                 let (a, b) = order(st.selection);
                 push_undo(st, text);
                 if a == b {
-                    let to = if word { next_word(text, a) } else { next_char(text, a) };
+                    let to = if word {
+                        next_word(text, a)
+                    } else {
+                        next_char(text, a)
+                    };
                     st.selection = (a, to);
                 }
                 replace_selection(text, st, "");
@@ -610,7 +711,10 @@ impl<'t> TextEdit<'t> {
             Key::Enter if self.multiline && !m.ctrl && editable => {
                 // Keep the current line's indentation, like a code editor.
                 let start = text[..caret].rfind('\n').map_or(0, |i| i + 1);
-                let indent: String = text[start..].chars().take_while(|c| *c == ' ' || *c == '\t').collect();
+                let indent: String = text[start..]
+                    .chars()
+                    .take_while(|c| *c == ' ' || *c == '\t')
+                    .collect();
                 insert(text, st, &format!("\n{indent}"));
                 return KeyResult::Handled(true);
             }
@@ -642,7 +746,10 @@ pub struct LineSpan {
 /// Lines split at `\n` (no soft wrap: the editor scrolls horizontally).
 pub fn layout_lines(text: &str, multiline: bool) -> Vec<LineSpan> {
     if !multiline {
-        return vec![LineSpan { start: 0, end: text.len() }];
+        return vec![LineSpan {
+            start: 0,
+            end: text.len(),
+        }];
     }
     let mut out = Vec::new();
     let mut start = 0;
@@ -652,19 +759,38 @@ pub fn layout_lines(text: &str, multiline: bool) -> Vec<LineSpan> {
             start = i + 1;
         }
     }
-    out.push(LineSpan { start, end: text.len() });
+    out.push(LineSpan {
+        start,
+        end: text.len(),
+    });
     out
 }
 
 /// (line index, x) of a byte offset in the shown text.
-pub fn locate(fonts: &crate::text::Fonts, shown: &str, lines: &[LineSpan], font: Font, at: usize) -> (usize, f32) {
-    let line = lines.iter().position(|l| at <= l.end).unwrap_or(lines.len().saturating_sub(1));
+pub fn locate(
+    fonts: &crate::text::Fonts,
+    shown: &str,
+    lines: &[LineSpan],
+    font: Font,
+    at: usize,
+) -> (usize, f32) {
+    let line = lines
+        .iter()
+        .position(|l| at <= l.end)
+        .unwrap_or(lines.len().saturating_sub(1));
     let l = lines[line];
     let at = at.clamp(l.start, l.end);
     (line, fonts.width(&shown[l.start..at], font))
 }
 
-fn hit(fonts: &crate::text::Fonts, shown: &str, lines: &[LineSpan], font: Font, origin: Pos2, p: Pos2) -> usize {
+fn hit(
+    fonts: &crate::text::Fonts,
+    shown: &str,
+    lines: &[LineSpan],
+    font: Font,
+    origin: Pos2,
+    p: Pos2,
+) -> usize {
     let lh = font.line_height();
     let line = (((p.y - origin.y) / lh).floor().max(0.0) as usize).min(lines.len() - 1);
     let l = lines[line];
@@ -743,7 +869,10 @@ fn prev_char(text: &str, at: usize) -> usize {
 }
 
 fn next_char(text: &str, at: usize) -> usize {
-    text[at..].chars().next().map_or(text.len(), |c| at + c.len_utf8())
+    text[at..]
+        .chars()
+        .next()
+        .map_or(text.len(), |c| at + c.len_utf8())
 }
 
 fn is_word(c: char) -> bool {
@@ -832,7 +961,8 @@ mod tests {
         replace_selection(&mut text, &mut st, "x");
         assert_eq!(text, "x");
         let (t, sel) = st.undo.pop().unwrap();
-        st.redo.push((std::mem::replace(&mut text, t), st.selection));
+        st.redo
+            .push((std::mem::replace(&mut text, t), st.selection));
         st.selection = sel;
         assert_eq!((text.as_str(), st.selection), ("abc", (3, 3)));
     }

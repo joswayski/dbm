@@ -20,7 +20,12 @@ const STEPS: &[(&str, fn(&mut Workbench))] = &[
     }),
     ("03-query-result", |app| {
         if let Some(tab) = app.active_tab {
-            let sql = app.tabs.iter().find(|t| t.id == tab).map(|t| t.sql.clone()).unwrap_or_default();
+            let sql = app
+                .tabs
+                .iter()
+                .find(|t| t.id == tab)
+                .map(|t| t.sql.clone())
+                .unwrap_or_default();
             app.run_query(tab, sql, false, false);
         }
     }),
@@ -29,7 +34,9 @@ const STEPS: &[(&str, fn(&mut Workbench))] = &[
             app.open_table(id, "public".into(), "users".into());
         }
     }),
-    ("05-new-connection", |app| app.profile_form = Some(ProfileForm::fresh())),
+    ("05-new-connection", |app| {
+        app.profile_form = Some(ProfileForm::fresh())
+    }),
     ("06-sidebar-collapsed", |app| {
         app.profile_form = None;
         app.sidebar_collapsed = true;
@@ -50,13 +57,21 @@ pub struct Walk {
 impl Walk {
     pub fn new(dir: PathBuf) -> Self {
         let _ = std::fs::create_dir_all(&dir);
-        Walk { dir, step: 0, entered: None, idle_since: None, ready: false }
+        Walk {
+            dir,
+            step: 0,
+            entered: None,
+            idle_since: None,
+            ready: false,
+        }
     }
 
     pub fn step(&mut self, app: &mut Workbench, ui: &mut Ui) {
         let now = ui.ctx.time();
         ui.ctx.request_repaint_after(0.05);
-        let Some(&(_, enter)) = STEPS.get(self.step) else { return };
+        let Some(&(_, enter)) = STEPS.get(self.step) else {
+            return;
+        };
         if self.entered.is_none() {
             enter(app);
             self.entered = Some(now);

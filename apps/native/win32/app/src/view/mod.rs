@@ -25,14 +25,25 @@ pub struct View {
 
 impl View {
     pub fn new(app: Workbench, store: Store) -> Self {
-        let mut view = View { app, store, saved: (false, 260.0) };
+        let mut view = View {
+            app,
+            store,
+            saved: (false, 260.0),
+        };
         view.app.sidebar_collapsed = view.store.get(store::SIDEBAR_COLLAPSED) == Some("true");
-        if let Some(w) = view.store.get(store::SIDEBAR_WIDTH).and_then(|v| v.parse::<f32>().ok()) {
+        if let Some(w) = view
+            .store
+            .get(store::SIDEBAR_WIDTH)
+            .and_then(|v| v.parse::<f32>().ok())
+        {
             view.app.sidebar_width = w.clamp(220.0, 480.0);
         }
         view.saved = (view.app.sidebar_collapsed, view.app.sidebar_width);
         if !view.app.demo {
-            let acknowledged = view.store.get(store::WHATS_NEW).and_then(|v| v.parse().ok());
+            let acknowledged = view
+                .store
+                .get(store::WHATS_NEW)
+                .and_then(|v| v.parse().ok());
             view.app.updates.start_whats_new(acknowledged);
         }
         view
@@ -60,7 +71,11 @@ impl View {
         }
         shortcuts(app, ui);
         ui.painter().rect_filled(screen, 0.0, theme::CHROME);
-        let sidebar_w = if app.sidebar_collapsed { 48.0 } else { app.sidebar_width };
+        let sidebar_w = if app.sidebar_collapsed {
+            48.0
+        } else {
+            app.sidebar_width
+        };
         let (side, main) = screen.split_left(sidebar_w);
         app.sidebar(ui, side);
         let (top, rest) = main.split_top(44.0);
@@ -82,7 +97,8 @@ impl View {
         let now = (self.app.sidebar_collapsed, self.app.sidebar_width);
         if now != self.saved {
             self.store.set(store::SIDEBAR_COLLAPSED, now.0.to_string());
-            self.store.set(store::SIDEBAR_WIDTH, format!("{}", now.1.round()));
+            self.store
+                .set(store::SIDEBAR_WIDTH, format!("{}", now.1.round()));
             self.saved = now;
             dirty = true;
         }
@@ -106,7 +122,9 @@ fn shortcuts(app: &mut Workbench, ui: &mut Ui) {
         app.profile_form = Some(ProfileForm::fresh());
     }
     if ui.ctx.consume_key(Modifiers::COMMAND, Key::T)
-        && let Some(profile) = app.active_profile.filter(|p| app.workspaces.contains_key(p))
+        && let Some(profile) = app
+            .active_profile
+            .filter(|p| app.workspaces.contains_key(p))
     {
         app.open_query(profile, true);
     }
@@ -123,7 +141,11 @@ fn toast(app: &mut Workbench, ui: &mut Ui) {
         app.toast = None;
         return;
     };
-    let dot = if t.success { theme::SUCCESS } else { theme::ACCENT };
+    let dot = if t.success {
+        theme::SUCCESS
+    } else {
+        theme::ACCENT
+    };
     let text = t.message.text.clone();
     if messages::toast(ui, &text, dot, opacity) {
         app.toast = None;
@@ -132,7 +154,9 @@ fn toast(app: &mut Workbench, ui: &mut Ui) {
 
 impl Workbench {
     fn banner_ui(&mut self, ui: &mut Ui, rest: Rect) -> Rect {
-        let Some(banner) = self.banner.clone() else { return rest };
+        let Some(banner) = self.banner.clone() else {
+            return rest;
+        };
         let Some(opacity) = banner.opacity(ui.ctx, self.now) else {
             self.banner = None;
             return rest;
@@ -148,13 +172,18 @@ impl Workbench {
     }
 
     fn content(&mut self, ui: &mut Ui, rect: Rect) {
-        let tab = self.active_tab.and_then(|id| self.tabs.iter().find(|t| t.id == id)).map(|t| (t.id, t.kind.clone(), t.profile_id));
+        let tab = self
+            .active_tab
+            .and_then(|id| self.tabs.iter().find(|t| t.id == id))
+            .map(|t| (t.id, t.kind.clone(), t.profile_id));
         let mut child = ui.child(rect, dbm_ui::Dir::Down);
         child.set_clip(rect);
         match tab {
             None => self.welcome(&mut child, rect),
             Some((id, crate::state::TabKind::Query, _)) => self.query_ui(&mut child, rect, id),
-            Some((id, crate::state::TabKind::Table { .. }, profile)) => self.table_ui(&mut child, rect, id, profile, false),
+            Some((id, crate::state::TabKind::Table { .. }, profile)) => {
+                self.table_ui(&mut child, rect, id, profile, false)
+            }
         }
     }
 
@@ -162,24 +191,51 @@ impl Workbench {
         use dbm_ui::icons::{self, Icon};
         use dbm_ui::{Color32, Stroke, Vec2, pos2, vec2};
         let profile = self.active_profile.and_then(|id| self.profile(id).cloned());
-        let connected = profile.as_ref().is_some_and(|p| self.workspaces.contains_key(&p.id));
-        let title = profile.as_ref().map_or("No connection selected", |p| p.name.as_str()).to_owned();
+        let connected = profile
+            .as_ref()
+            .is_some_and(|p| self.workspaces.contains_key(&p.id));
+        let title = profile
+            .as_ref()
+            .map_or("No connection selected", |p| p.name.as_str())
+            .to_owned();
         let message = match (&profile, connected) {
-            (Some(_), true) => "Choose a table from the sidebar or open a new query with the plus button above.",
-            (Some(_), false) => "This connection is selected but not connected. Select it again to connect.",
-            (None, _) if self.profiles.is_empty() => "Create a connection from the sidebar to get started.",
+            (Some(_), true) => {
+                "Choose a table from the sidebar or open a new query with the plus button above."
+            }
+            (Some(_), false) => {
+                "This connection is selected but not connected. Select it again to connect."
+            }
+            (None, _) if self.profiles.is_empty() => {
+                "Create a connection from the sidebar to get started."
+            }
             (None, _) => "Select a saved connection from the sidebar to browse its data.",
         };
         let width = (rect.width() - 80.0).clamp(200.0, 520.0);
-        let column = Rect::from_min_size(pos2(rect.center().x - width / 2.0, rect.top() + rect.height() * 0.18), vec2(width, rect.height()));
+        let column = Rect::from_min_size(
+            pos2(
+                rect.center().x - width / 2.0,
+                rect.top() + rect.height() * 0.18,
+            ),
+            vec2(width, rect.height()),
+        );
         let mut c = ui.child(column, dbm_ui::Dir::Down);
         c.set_centered(true);
         c.spacing.y = 0.0;
         let tile = c.allocate(Vec2::splat(64.0));
         {
             let mut p = c.painter();
-            p.rect(tile, 16.0, Color32::from_rgb(0x27, 0x27, 0x2a), Stroke::new(1.0, Color32::from_white_alpha(18)));
-            icons::paint(&mut p, Rect::from_center_size(tile.center(), Vec2::splat(28.0)), Icon::Database, theme::ACCENT_TEXT);
+            p.rect(
+                tile,
+                16.0,
+                Color32::from_rgb(0x27, 0x27, 0x2a),
+                Stroke::new(1.0, Color32::from_white_alpha(18)),
+            );
+            icons::paint(
+                &mut p,
+                Rect::from_center_size(tile.center(), Vec2::splat(28.0)),
+                Icon::Database,
+                theme::ACCENT_TEXT,
+            );
         }
         c.add_space(22.0);
         let font = theme::bold(20.0);

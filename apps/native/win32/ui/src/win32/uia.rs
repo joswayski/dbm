@@ -159,7 +159,9 @@ impl IRawElementProviderSimple_Impl for Node_Impl {
             UIA_HasKeyboardFocusPropertyId => VARIANT::from(s.tree.focus == Some(n.id)),
             UIA_IsPasswordPropertyId => VARIANT::from(n.password),
             UIA_IsControlElementPropertyId | UIA_IsContentElementPropertyId => VARIANT::from(true),
-            UIA_AcceleratorKeyPropertyId => VARIANT::from(BSTR::from(n.shortcut.as_deref().unwrap_or(""))),
+            UIA_AcceleratorKeyPropertyId => {
+                VARIANT::from(BSTR::from(n.shortcut.as_deref().unwrap_or("")))
+            }
             UIA_IsOffscreenPropertyId => VARIANT::from(!n.rect.is_positive()),
             _ => VARIANT::default(),
         })
@@ -295,7 +297,12 @@ impl IToggleProvider_Impl for Node_Impl {
     }
 
     fn ToggleState(&self) -> Result<ToggleState> {
-        with_node(self.id, |n, _| if n.toggled == Some(true) { ToggleState_On } else { ToggleState_Off })
+        with_node(self.id, |n, _| {
+            if n.toggled == Some(true) {
+                ToggleState_On
+            } else {
+                ToggleState_Off
+            }
+        })
     }
 }
-

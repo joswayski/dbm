@@ -147,7 +147,14 @@ impl Platform for WinPlatform {
         let mut w = wide(url);
         w.push(0);
         unsafe {
-            ShellExecuteW(None, w!("open"), PCWSTR(w.as_ptr()), None, None, SW_SHOWNORMAL);
+            ShellExecuteW(
+                None,
+                w!("open"),
+                PCWSTR(w.as_ptr()),
+                None,
+                None,
+                SW_SHOWNORMAL,
+            );
         }
     }
 }
@@ -227,7 +234,12 @@ pub fn run(options: Options, make: impl FnOnce(Waker) -> Box<dyn App>) -> Result
             None,
         )?;
         let dark: BOOL = true.into();
-        let _ = DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, (&dark as *const BOOL).cast(), 4);
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_USE_IMMERSIVE_DARK_MODE,
+            (&dark as *const BOOL).cast(),
+            4,
+        );
         let dpi = GetDpiForWindow(hwnd).max(96);
         let scale = dpi as f32 / 96.0;
         // Size the client area in DIPs, centred on the window's monitor,
@@ -252,7 +264,9 @@ pub fn run(options: Options, make: impl FnOnce(Waker) -> Box<dyn App>) -> Result
         );
         let mut show = SW_SHOWNORMAL;
         match placement {
-            Some((x, y, pw, ph, maximized)) if pw >= 200 && ph >= 150 && on_screen(x, y, pw, ph) => {
+            Some((x, y, pw, ph, maximized))
+                if pw >= 200 && ph >= 150 && on_screen(x, y, pw, ph) =>
+            {
                 let _ = SetWindowPos(hwnd, None, x, y, pw, ph, SWP_NOZORDER | SWP_NOACTIVATE);
                 if maximized {
                     show = SW_SHOWMAXIMIZED;
@@ -266,11 +280,19 @@ pub fn run(options: Options, make: impl FnOnce(Waker) -> Box<dyn App>) -> Result
         }
         let mut client = RECT::default();
         let _ = GetClientRect(hwnd, &mut client);
-        let size_px = ((client.right - client.left).max(1) as u32, (client.bottom - client.top).max(1) as u32);
+        let size_px = (
+            (client.right - client.left).max(1) as u32,
+            (client.bottom - client.top).max(1) as u32,
+        );
         let text = render::Text::new()?;
         let renderer = render::Renderer::new(Some(hwnd), text.clone(), size_px.0, size_px.1)?;
-        let platform = Rc::new(WinPlatform { hwnd: RefCell::new(hwnd) });
-        let ctx = Context::new(Fonts::new(Box::new(render::DWriteMetrics(text))), platform.clone());
+        let platform = Rc::new(WinPlatform {
+            hwnd: RefCell::new(hwnd),
+        });
+        let ctx = Context::new(
+            Fonts::new(Box::new(render::DWriteMetrics(text))),
+            platform.clone(),
+        );
         waker.0.store(hwnd.0 as isize, Ordering::Release);
         let app = make(waker);
         STATE.with(|s| {
@@ -334,7 +356,10 @@ pub fn run(options: Options, make: impl FnOnce(Waker) -> Box<dyn App>) -> Result
                 }
                 Some(match s.next_frame {
                     _ if s.dirty => 0,
-                    Some(t) => t.saturating_duration_since(Instant::now()).as_millis().min(u32::MAX as u128) as u32,
+                    Some(t) => t
+                        .saturating_duration_since(Instant::now())
+                        .as_millis()
+                        .min(u32::MAX as u128) as u32,
                     None => INFINITE,
                 })
             });
@@ -362,14 +387,20 @@ fn on_screen(x: i32, y: i32, w: i32, h: i32) -> bool {
 
 fn read_placement(path: &std::path::Path) -> Option<(i32, i32, i32, i32, bool)> {
     let text = std::fs::read_to_string(path).ok()?;
-    let v: Vec<i32> = text.split_whitespace().filter_map(|s| s.parse().ok()).collect();
+    let v: Vec<i32> = text
+        .split_whitespace()
+        .filter_map(|s| s.parse().ok())
+        .collect();
     (v.len() == 5).then(|| (v[0], v[1], v[2], v[3], v[4] != 0))
 }
 
 impl State {
     fn frame(&mut self) {
         self.dirty = false;
-        let screen = vec2(self.size_px.0 as f32 / self.scale, self.size_px.1 as f32 / self.scale);
+        let screen = vec2(
+            self.size_px.0 as f32 / self.scale,
+            self.size_px.1 as f32 / self.scale,
+        );
         let mut events = std::mem::take(&mut self.events);
         let close_requested = events.iter().any(|e| matches!(e, Event::CloseRequested));
         let mut output = None;
@@ -382,7 +413,11 @@ impl State {
             };
             self.ctx.begin_frame(input);
             {
-                let mut ui = Ui::root(&mut self.ctx, crate::geom::Rect::from_min_size(pos2(0.0, 0.0), screen), Layer::Background);
+                let mut ui = Ui::root(
+                    &mut self.ctx,
+                    crate::geom::Rect::from_min_size(pos2(0.0, 0.0), screen),
+                    Layer::Background,
+                );
                 self.app.update(&mut ui);
             }
             let out = self.ctx.end_frame();
@@ -411,7 +446,10 @@ impl State {
         }
         if let Some(path) = self.app.snapshot_path() {
             let (w, h) = self.size_px;
-            if let Err(e) = self.renderer.snapshot(&out.list, w, h, self.scale, BACKGROUND, &path) {
+            if let Err(e) = self
+                .renderer
+                .snapshot(&out.list, w, h, self.scale, BACKGROUND, &path)
+            {
                 eprintln!("snapshot {} failed: {e}", path.display());
             }
             self.dirty = true;
@@ -464,7 +502,17 @@ impl State {
                     if let Some(dir) = path.parent() {
                         let _ = std::fs::create_dir_all(dir);
                     }
-                    let _ = std::fs::write(path, format!("{} {} {} {} {}", r.left, r.top, r.right - r.left, r.bottom - r.top, maximized as i32));
+                    let _ = std::fs::write(
+                        path,
+                        format!(
+                            "{} {} {} {} {}",
+                            r.left,
+                            r.top,
+                            r.right - r.left,
+                            r.bottom - r.top,
+                            maximized as i32
+                        ),
+                    );
                 }
             }
         }
@@ -602,7 +650,12 @@ unsafe fn handle(s: &mut State, msg: u32, wp: WPARAM, lp: LPARAM) -> Option<LRES
             } else {
                 let _ = ReleaseCapture();
             }
-            s.push(Event::PointerButton { pos, button, pressed, double });
+            s.push(Event::PointerButton {
+                pos,
+                button,
+                pressed,
+                double,
+            });
             Some(LRESULT(0))
         };
         match msg {
@@ -631,7 +684,15 @@ unsafe fn handle(s: &mut State, msg: u32, wp: WPARAM, lp: LPARAM) -> Option<LRES
             WM_DPICHANGED => {
                 s.scale = ((wp.0 & 0xffff) as f32 / 96.0).max(1.0);
                 let r = &*(lp.0 as *const RECT);
-                let _ = SetWindowPos(s.hwnd, None, r.left, r.top, r.right - r.left, r.bottom - r.top, SWP_NOZORDER | SWP_NOACTIVATE);
+                let _ = SetWindowPos(
+                    s.hwnd,
+                    None,
+                    r.left,
+                    r.top,
+                    r.right - r.left,
+                    r.bottom - r.top,
+                    SWP_NOZORDER | SWP_NOACTIVATE,
+                );
                 s.dirty = true;
                 Some(LRESULT(0))
             }
@@ -644,7 +705,13 @@ unsafe fn handle(s: &mut State, msg: u32, wp: WPARAM, lp: LPARAM) -> Option<LRES
                     right: (s.min_size.x * s.scale) as i32,
                     bottom: (s.min_size.y * s.scale) as i32,
                 };
-                let _ = AdjustWindowRectExForDpi(&mut r, WS_OVERLAPPEDWINDOW, false, WS_EX_NOREDIRECTIONBITMAP, dpi);
+                let _ = AdjustWindowRectExForDpi(
+                    &mut r,
+                    WS_OVERLAPPEDWINDOW,
+                    false,
+                    WS_EX_NOREDIRECTIONBITMAP,
+                    dpi,
+                );
                 info.ptMinTrackSize = POINT {
                     x: r.right - r.left,
                     y: r.bottom - r.top,
@@ -679,15 +746,23 @@ unsafe fn handle(s: &mut State, msg: u32, wp: WPARAM, lp: LPARAM) -> Option<LRES
             WM_MBUTTONDOWN | WM_MBUTTONDBLCLK => button(s, Button::Middle, true, false),
             WM_MBUTTONUP => button(s, Button::Middle, false, false),
             WM_MOUSEWHEEL | WM_MOUSEHWHEEL => {
-                let delta = ((wp.0 >> 16) & 0xffff) as i16 as f32 / 120.0 * crate::scroll::WHEEL_STEP;
+                let delta =
+                    ((wp.0 >> 16) & 0xffff) as i16 as f32 / 120.0 * crate::scroll::WHEEL_STEP;
                 // The wheel's point is in screen coordinates.
                 let mut p = POINT {
                     x: (lp.0 & 0xffff) as i16 as i32,
                     y: ((lp.0 >> 16) & 0xffff) as i16 as i32,
                 };
                 let _ = ScreenToClient(s.hwnd, &mut p);
-                s.push(Event::PointerMoved(pos2(p.x as f32 / s.scale, p.y as f32 / s.scale)));
-                let v = if msg == WM_MOUSEWHEEL { vec2(0.0, delta) } else { vec2(-delta, 0.0) };
+                s.push(Event::PointerMoved(pos2(
+                    p.x as f32 / s.scale,
+                    p.y as f32 / s.scale,
+                )));
+                let v = if msg == WM_MOUSEWHEEL {
+                    vec2(0.0, delta)
+                } else {
+                    vec2(-delta, 0.0)
+                };
                 s.push(Event::Wheel(v));
                 Some(LRESULT(0))
             }
@@ -702,7 +777,11 @@ unsafe fn handle(s: &mut State, msg: u32, wp: WPARAM, lp: LPARAM) -> Option<LRES
             WM_KEYDOWN | WM_SYSKEYDOWN | WM_KEYUP | WM_SYSKEYUP => {
                 let pressed = msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN;
                 if let Some(key) = map_key(wp.0 as u16) {
-                    s.push(Event::Key { key, pressed, modifiers: modifiers() });
+                    s.push(Event::Key {
+                        key,
+                        pressed,
+                        modifiers: modifiers(),
+                    });
                     // Alt+F4 and other system keys still reach DefWindowProc.
                     if msg == WM_SYSKEYDOWN || msg == WM_SYSKEYUP {
                         return None;

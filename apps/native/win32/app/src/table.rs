@@ -214,11 +214,20 @@ impl TableState {
         let Some(page) = &self.page else {
             return String::new();
         };
-        let columns: Vec<String> = page.metadata.columns.iter().map(|c| c.name.clone()).collect();
+        let columns: Vec<String> = page
+            .metadata
+            .columns
+            .iter()
+            .map(|c| c.name.clone())
+            .collect();
         let values: Vec<Vec<Value>> = rows
             .filter_map(|i| {
                 let row = page.rows.get(i)?;
-                Some(self.pending.get(&i).map_or_else(|| row.clone(), |p| p.changes.clone()))
+                Some(
+                    self.pending
+                        .get(&i)
+                        .map_or_else(|| row.clone(), |p| p.changes.clone()),
+                )
             })
             .collect();
         csv_document(&columns, &values)
@@ -226,7 +235,9 @@ impl TableState {
 
     pub fn copyable_rows(&self) -> Vec<usize> {
         let count = self.page.as_ref().map_or(0, |p| p.rows.len());
-        (0..count).filter(|i| !self.pending.get(i).is_some_and(|p| p.deleted)).collect()
+        (0..count)
+            .filter(|i| !self.pending.get(i).is_some_and(|p| p.deleted))
+            .collect()
     }
 
     /// Applies the filter drafts that have a column and (when needed) a value.
@@ -248,13 +259,18 @@ impl TableState {
     pub fn has_filters(&self) -> bool {
         !self.applied.is_empty()
             || self.filters.len() > 1
-            || self.filters.iter().any(|f| !filter_needs_value(f.operator) || !f.value.trim().is_empty())
+            || self
+                .filters
+                .iter()
+                .any(|f| !filter_needs_value(f.operator) || !f.value.trim().is_empty())
     }
 
     /// Clicking a header sorts by it, flipping direction on the current column.
     pub fn sort_by(&mut self, column: String) {
         let order = self.effective_order();
-        let descending = order.as_ref().is_some_and(|o| o.column == column && !o.descending);
+        let descending = order
+            .as_ref()
+            .is_some_and(|o| o.column == column && !o.descending);
         self.order = Some(OrderSpec { column, descending });
         self.page_index = 0;
     }
@@ -294,7 +310,11 @@ pub fn pending_row(page: &TablePage, row: &[Value]) -> PendingRow {
         .primary_key
         .iter()
         .filter_map(|key| {
-            page.metadata.columns.iter().position(|c| &c.name == key).map(|i| original[i].clone())
+            page.metadata
+                .columns
+                .iter()
+                .position(|c| &c.name == key)
+                .map(|i| original[i].clone())
         })
         .collect();
     PendingRow {
@@ -308,10 +328,18 @@ pub fn pending_row(page: &TablePage, row: &[Value]) -> PendingRow {
 
 pub fn stage_cell(state: &mut TableState, row: usize, column: usize, text: &str) {
     let Some(page) = &state.page else { return };
-    let Some(values) = page.rows.get(row) else { return };
-    let pending = state.pending.entry(row).or_insert_with(|| pending_row(page, values));
-    pending.changes[column] =
-        parse_cell_input(text, &page.metadata.columns[column], &pending.original[column]);
+    let Some(values) = page.rows.get(row) else {
+        return;
+    };
+    let pending = state
+        .pending
+        .entry(row)
+        .or_insert_with(|| pending_row(page, values));
+    pending.changes[column] = parse_cell_input(
+        text,
+        &page.metadata.columns[column],
+        &pending.original[column],
+    );
     if !pending.deleted && pending.changes == pending.original {
         state.pending.remove(&row);
     }
@@ -319,7 +347,9 @@ pub fn stage_cell(state: &mut TableState, row: usize, column: usize, text: &str)
 
 /// Stages (or, when every row is already staged, undoes) deletion of `rows`.
 pub fn toggle_delete(state: &mut TableState, rows: &[usize]) {
-    let all_deleted = rows.iter().all(|r| state.pending.get(r).is_some_and(|p| p.deleted));
+    let all_deleted = rows
+        .iter()
+        .all(|r| state.pending.get(r).is_some_and(|p| p.deleted));
     stage_delete(state, rows, !all_deleted);
 }
 
@@ -328,7 +358,11 @@ pub fn stage_delete(state: &mut TableState, rows: &[usize], deleted: bool) {
     for &row in rows {
         if deleted {
             if let Some(values) = page.rows.get(row) {
-                state.pending.entry(row).or_insert_with(|| pending_row(page, values)).deleted = true;
+                state
+                    .pending
+                    .entry(row)
+                    .or_insert_with(|| pending_row(page, values))
+                    .deleted = true;
             }
         } else if let Some(pending) = state.pending.get_mut(&row) {
             pending.deleted = false;
@@ -426,7 +460,10 @@ pub fn large_value_size(value: &Value) -> Option<String> {
 }
 
 pub fn rows_label(count: usize, which: &str) -> String {
-    format!("{count} {which} {}", if count == 1 { "row" } else { "rows" })
+    format!(
+        "{count} {which} {}",
+        if count == 1 { "row" } else { "rows" }
+    )
 }
 
 #[cfg(test)]
@@ -460,7 +497,12 @@ pub mod tests {
     fn staging_uses_typed_parsing_and_drops_no_op_edits() {
         let mut s = state();
         let page = s.page.clone().unwrap();
-        let column = page.metadata.columns.iter().position(|c| !page.metadata.primary_key.contains(&c.name)).unwrap();
+        let column = page
+            .metadata
+            .columns
+            .iter()
+            .position(|c| !page.metadata.primary_key.contains(&c.name))
+            .unwrap();
         let original = dbm_core::cell_values::editable_text(&page.rows[0][column]);
         stage_cell(&mut s, 0, column, "changed value");
         assert!(s.pending.contains_key(&0));
@@ -484,7 +526,12 @@ pub mod tests {
     fn undoing_a_delete_keeps_the_rows_edits() {
         let mut s = state();
         let page = s.page.clone().unwrap();
-        let column = page.metadata.columns.iter().position(|c| !page.metadata.primary_key.contains(&c.name)).unwrap();
+        let column = page
+            .metadata
+            .columns
+            .iter()
+            .position(|c| !page.metadata.primary_key.contains(&c.name))
+            .unwrap();
         stage_cell(&mut s, 2, column, "edit");
         toggle_delete(&mut s, &[2]);
         s.discard_row(2);
@@ -499,7 +546,10 @@ pub mod tests {
         let mut s = state();
         s.page_index = 4;
         s.limit = 10;
-        s.order = Some(OrderSpec { column: "x".into(), descending: true });
+        s.order = Some(OrderSpec {
+            column: "x".into(),
+            descending: true,
+        });
         s.restore_loaded();
         assert_eq!((s.page_index, s.limit), (0, MAX_PREVIEW_ROWS));
         assert!(s.order.is_none());
@@ -519,7 +569,10 @@ pub mod tests {
     fn large_values_are_previewed_not_edited() {
         assert!(large_value_size(&json!("x".repeat(LARGE_VALUE_BYTES + 1))).is_some());
         assert!(large_value_size(&json!("small")).is_none());
-        assert_eq!(large_value_size(&json!("x".repeat(2 * 1024 * 1024))).as_deref(), Some("2.0 MiB"));
+        assert_eq!(
+            large_value_size(&json!("x".repeat(2 * 1024 * 1024))).as_deref(),
+            Some("2.0 MiB")
+        );
     }
 
     #[test]
@@ -527,7 +580,10 @@ pub mod tests {
         let mut s = state();
         let pk = s.page.as_ref().unwrap().metadata.primary_key[0].clone();
         s.sort_by(pk.clone());
-        assert!(s.order.as_ref().unwrap().descending, "the pk is the implicit ascending sort");
+        assert!(
+            s.order.as_ref().unwrap().descending,
+            "the pk is the implicit ascending sort"
+        );
         s.sort_by("email".into());
         assert!(!s.order.as_ref().unwrap().descending);
     }

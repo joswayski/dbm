@@ -34,6 +34,27 @@ public static class Native {
 New-Item -ItemType Directory -Force -Path $Out | Out-Null
 $Out = (Resolve-Path $Out).Path
 
+function Save-Screen([IntPtr]$hwnd, [string]$path) {
+    $r = New-Object Native+RECT
+    [Native]::GetWindowRect($hwnd, [ref]$r) | Out-Null
+    if ($r.Right -le $r.Left) { return }
+    $bmp = New-Object Drawing.Bitmap ($r.Right - $r.Left), ($r.Bottom - $r.Top)
+    $g = [Drawing.Graphics]::FromImage($bmp)
+    $g.CopyFromScreen($r.Left, $r.Top, 0, 0, $bmp.Size)
+    $bmp.Save($path, [Drawing.Imaging.ImageFormat]::Png)
+    $g.Dispose(); $bmp.Dispose()
+}
+
+function Dump-Tree([IntPtr]$hwnd, [string]$path) {
+    try {
+        $root = [Windows.Automation.AutomationElement]::FromHandle($hwnd)
+        $all = $root.FindAll([Windows.Automation.TreeScope]::Descendants, [Windows.Automation.Condition]::TrueCondition)
+        $all | Select-Object -First 300 | ForEach-Object {
+            "$($_.Current.ControlType.ProgrammaticName)`t$($_.Current.Name)`t$($_.Current.BoundingRectangle)"
+        } | Set-Content $path
+    } catch { "UIA failed: $_" | Set-Content $path }
+}
+
 function Click-At([int]$x, [int]$y) {
     [Native]::SetCursorPos($x, $y) | Out-Null
     Start-Sleep -Milliseconds 60
@@ -52,7 +73,10 @@ function Find-Element([IntPtr]$hwnd, [string]$name, [int]$timeoutSeconds = 30) {
         } catch { }
         Start-Sleep -Milliseconds 250
     }
-    throw "No UI Automation element named '$name' after $timeoutSeconds s"
+    $tag = Get-Random
+    Save-Screen $hwnd (Join-Path $Out "missing-$tag.png")
+    Dump-Tree $hwnd (Join-Path $Out "missing-$tag-uia.txt")
+    throw "No UI Automation element named '$name' after $timeoutSeconds s (see missing-$tag.*)"
 }
 
 function Click-Element([IntPtr]$hwnd, [string]$name) {
@@ -79,7 +103,14 @@ function Measure-App([string]$label, [string]$exe, [int]$run) {
         Start-Sleep -Milliseconds 5
     }
     $firstWindowMs = $sw.Elapsed.TotalMilliseconds
-    if ($hwnd -eq [IntPtr]::Zero) { throw "$label showed no window" }
+    if ($hwnd -eq [IntPtr]::Zero -or -not [Native]::IsWindowVisible($hwnd)) {
+        $p.Refresh()
+        $why = if ($p.HasExited) { "exited with $($p.ExitCode)" } else { 'still running' }
+        $log = Join-Path $env:TEMP 'anybase-win32-error.txt'
+        if (Test-Path $log) { $why += ": " + (Get-Content $log -Raw) }
+        Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+        throw "$label showed no window ($why)"
+    }
     try {
         # Same place and size for both apps.
         [Native]::MoveWindow($hwnd, 0, 0, 1280, 800, $true) | Out-Null
@@ -88,15 +119,7 @@ function Measure-App([string]$label, [string]$exe, [int]$run) {
         Click-Element $hwnd 'Production'
         Click-Element $hwnd 'users'
         Start-Sleep -Seconds 3
-        if ($run -eq 1) {
-            $r = New-Object Native+RECT
-            [Native]::GetWindowRect($hwnd, [ref]$r) | Out-Null
-            $bmp = New-Object Drawing.Bitmap ($r.Right - $r.Left), ($r.Bottom - $r.Top)
-            $g = [Drawing.Graphics]::FromImage($bmp)
-            $g.CopyFromScreen($r.Left, $r.Top, 0, 0, $bmp.Size)
-            $bmp.Save((Join-Path $Out "$label-table.png"), [Drawing.Imaging.ImageFormat]::Png)
-            $g.Dispose(); $bmp.Dispose()
-        }
+        if ($run -eq 1) { Save-Screen $hwnd (Join-Path $Out "$label-table.png") }
         $p.Refresh()
         $workingSet = $p.WorkingSet64
         $private = $p.PrivateMemorySize64

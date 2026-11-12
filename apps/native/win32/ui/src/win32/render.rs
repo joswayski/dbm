@@ -155,7 +155,11 @@ impl Text {
         let face = unsafe {
             let family = self.fonts.GetFontFamily(0).ok()?;
             let f = family
-                .GetFirstMatchingFont(Self::weight(font), DWRITE_FONT_STRETCH_NORMAL, Self::style(font))
+                .GetFirstMatchingFont(
+                    Self::weight(font),
+                    DWRITE_FONT_STRETCH_NORMAL,
+                    Self::style(font),
+                )
                 .ok()?;
             let face = f.CreateFontFace().ok()?;
             let mut m = DWRITE_FONT_METRICS::default();
@@ -167,7 +171,13 @@ impl Text {
     }
 
     /// A cached single-line layout of `text`.
-    pub fn layout(&self, text: &str, font: Font, underline: bool, strike: bool) -> Result<IDWriteTextLayout> {
+    pub fn layout(
+        &self,
+        text: &str,
+        font: Font,
+        underline: bool,
+        strike: bool,
+    ) -> Result<IDWriteTextLayout> {
         let bits = style_bits(font) | (underline as u8) << 2 | (strike as u8) << 3;
         let key = (text.to_owned(), font.size.to_bits(), bits);
         let mut cache = self.layouts.borrow_mut();
@@ -178,7 +188,9 @@ impl Text {
         }
         let w = wide(text);
         let layout = unsafe {
-            let l = self.dwrite.CreateTextLayout(&w, &self.format(font)?, 100_000.0, 1_000.0)?;
+            let l = self
+                .dwrite
+                .CreateTextLayout(&w, &self.format(font)?, 100_000.0, 1_000.0)?;
             let range = DWRITE_TEXT_RANGE {
                 startPosition: 0,
                 length: w.len() as u32,
@@ -257,7 +269,8 @@ impl Renderer {
         unsafe {
             let (d3d, software) = create_device()?;
             let dxgi: IDXGIDevice = d3d.cast()?;
-            let factory: ID2D1Factory1 = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)?;
+            let factory: ID2D1Factory1 =
+                D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)?;
             let device = factory.CreateDevice(&dxgi)?;
             let dc = device.CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE)?;
             dc.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
@@ -307,7 +320,10 @@ impl Renderer {
                 Height: self.size.1,
                 Format: DXGI_FORMAT_B8G8R8A8_UNORM,
                 Stereo: false.into(),
-                SampleDesc: DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
+                SampleDesc: DXGI_SAMPLE_DESC {
+                    Count: 1,
+                    Quality: 0,
+                },
                 BufferUsage: DXGI_USAGE_RENDER_TARGET_OUTPUT,
                 BufferCount: 2,
                 Scaling: DXGI_SCALING_STRETCH,
@@ -339,7 +355,13 @@ impl Renderer {
         if let Some(swap) = &self.swap {
             unsafe {
                 self.dc.SetTarget(None);
-                let _ = swap.ResizeBuffers(0, size.0, size.1, DXGI_FORMAT_UNKNOWN, DXGI_SWAP_CHAIN_FLAG(0));
+                let _ = swap.ResizeBuffers(
+                    0,
+                    size.0,
+                    size.1,
+                    DXGI_FORMAT_UNKNOWN,
+                    DXGI_SWAP_CHAIN_FLAG(0),
+                );
             }
         }
     }
@@ -368,7 +390,9 @@ impl Renderer {
         };
         unsafe {
             let surface: IDXGISurface = swap.GetBuffer(0)?;
-            let bmp = self.dc.CreateBitmapFromDxgiSurface(&surface, Some(&Self::target_props(scale, true)))?;
+            let bmp = self
+                .dc
+                .CreateBitmapFromDxgiSurface(&surface, Some(&Self::target_props(scale, true)))?;
             self.dc.SetTarget(&bmp);
             self.draw(list, scale, clear);
             let result = self.dc.EndDraw(None, None);
@@ -414,11 +438,19 @@ impl Renderer {
         let dc = &self.dc;
         unsafe {
             match shape {
-                Shape::Rect { rect, radius, fill, stroke } => {
+                Shape::Rect {
+                    rect,
+                    radius,
+                    fill,
+                    stroke,
+                } => {
                     if !fill.is_transparent() {
-                        self.rounded(*rect, *radius, |g| dc.FillGeometry(g, self.set(*fill), None), |rr| {
-                            dc.FillRoundedRectangle(rr, self.set(*fill))
-                        });
+                        self.rounded(
+                            *rect,
+                            *radius,
+                            |g| dc.FillGeometry(g, self.set(*fill), None),
+                            |rr| dc.FillRoundedRectangle(rr, self.set(*fill)),
+                        );
                     }
                     if !stroke.is_none() {
                         // Inside the edge.
@@ -430,12 +462,20 @@ impl Renderer {
                             se: (radius.se - stroke.width / 2.0).max(0.0),
                         };
                         let w = stroke.width;
-                        self.rounded(r, rad, |g| dc.DrawGeometry(g, self.set(stroke.color), w, None), |rr| {
-                            dc.DrawRoundedRectangle(rr, self.set(stroke.color), w, None)
-                        });
+                        self.rounded(
+                            r,
+                            rad,
+                            |g| dc.DrawGeometry(g, self.set(stroke.color), w, None),
+                            |rr| dc.DrawRoundedRectangle(rr, self.set(stroke.color), w, None),
+                        );
                     }
                 }
-                Shape::Circle { center, radius, fill, stroke } => {
+                Shape::Circle {
+                    center,
+                    radius,
+                    fill,
+                    stroke,
+                } => {
                     let e = D2D1_ELLIPSE {
                         point: pt(*center),
                         radiusX: *radius,
@@ -448,7 +488,11 @@ impl Renderer {
                         dc.DrawEllipse(&e, self.set(stroke.color), stroke.width, None);
                     }
                 }
-                Shape::Ellipse { center, radii, stroke } => {
+                Shape::Ellipse {
+                    center,
+                    radii,
+                    stroke,
+                } => {
                     let e = D2D1_ELLIPSE {
                         point: pt(*center),
                         radiusX: radii.x,
@@ -456,9 +500,19 @@ impl Renderer {
                     };
                     dc.DrawEllipse(&e, self.set(stroke.color), stroke.width, None);
                 }
-                Shape::Path { points, closed, stroke } => {
+                Shape::Path {
+                    points,
+                    closed,
+                    stroke,
+                } => {
                     if points.len() == 2 && !closed {
-                        dc.DrawLine(pt(points[0]), pt(points[1]), self.set(stroke.color), stroke.width, &self.round);
+                        dc.DrawLine(
+                            pt(points[0]),
+                            pt(points[1]),
+                            self.set(stroke.color),
+                            stroke.width,
+                            &self.round,
+                        );
                     } else if let Some(g) = self.polyline(points, *closed, false) {
                         dc.DrawGeometry(&g, self.set(stroke.color), stroke.width, &self.round);
                     }
@@ -468,12 +522,29 @@ impl Renderer {
                         dc.FillGeometry(&g, self.set(*fill), None);
                     }
                 }
-                Shape::Text { pos, text, font, color, underline, strikethrough } => {
+                Shape::Text {
+                    pos,
+                    text,
+                    font,
+                    color,
+                    underline,
+                    strikethrough,
+                } => {
                     if let Ok(layout) = self.text.layout(text, *font, *underline, *strikethrough) {
-                        dc.DrawTextLayout(pt(*pos), &layout, self.set(*color), D2D1_DRAW_TEXT_OPTIONS_NONE);
+                        dc.DrawTextLayout(
+                            pt(*pos),
+                            &layout,
+                            self.set(*color),
+                            D2D1_DRAW_TEXT_OPTIONS_NONE,
+                        );
                     }
                 }
-                Shape::Shadow { rect, radius, blur, color: c } => {
+                Shape::Shadow {
+                    rect,
+                    radius,
+                    blur,
+                    color: c,
+                } => {
                     // A few widening, fading rounded rectangles: a soft edge
                     // without an effect graph.
                     let steps = 6;
@@ -493,9 +564,19 @@ impl Renderer {
         }
     }
 
-    fn rounded(&self, r: Rect, radius: Radius, path: impl FnOnce(&ID2D1PathGeometry), uniform: impl FnOnce(&D2D1_ROUNDED_RECT)) {
+    fn rounded(
+        &self,
+        r: Rect,
+        radius: Radius,
+        path: impl FnOnce(&ID2D1PathGeometry),
+        uniform: impl FnOnce(&D2D1_ROUNDED_RECT),
+    ) {
         if radius.is_uniform() {
-            let rad = radius.nw.min(r.width() / 2.0).min(r.height() / 2.0).max(0.0);
+            let rad = radius
+                .nw
+                .min(r.width() / 2.0)
+                .min(r.height() / 2.0)
+                .max(0.0);
             uniform(&D2D1_ROUNDED_RECT {
                 rect: rectf(r),
                 radiusX: rad,
@@ -505,33 +586,85 @@ impl Renderer {
         }
         // Per-corner radii: a path of lines and arcs.
         let geo = unsafe {
-            let Ok(geo) = self.factory.CreatePathGeometry() else { return };
+            let Ok(geo) = self.factory.CreatePathGeometry() else {
+                return;
+            };
             let Ok(sink) = geo.Open() else { return };
             let m = r.width().min(r.height()) / 2.0;
-            let (nw, ne, se, sw) = (radius.nw.min(m), radius.ne.min(m), radius.se.min(m), radius.sw.min(m));
+            let (nw, ne, se, sw) = (
+                radius.nw.min(m),
+                radius.ne.min(m),
+                radius.se.min(m),
+                radius.sw.min(m),
+            );
             let arc = |to: Pos2, rad: f32| D2D1_ARC_SEGMENT {
                 point: pt(to),
-                size: D2D_SIZE_F { width: rad, height: rad },
+                size: D2D_SIZE_F {
+                    width: rad,
+                    height: rad,
+                },
                 rotationAngle: 0.0,
                 sweepDirection: D2D1_SWEEP_DIRECTION_CLOCKWISE,
                 arcSize: D2D1_ARC_SIZE_SMALL,
             };
-            sink.BeginFigure(pt(Pos2 { x: r.left() + nw, y: r.top() }), D2D1_FIGURE_BEGIN_FILLED);
-            sink.AddLine(pt(Pos2 { x: r.right() - ne, y: r.top() }));
+            sink.BeginFigure(
+                pt(Pos2 {
+                    x: r.left() + nw,
+                    y: r.top(),
+                }),
+                D2D1_FIGURE_BEGIN_FILLED,
+            );
+            sink.AddLine(pt(Pos2 {
+                x: r.right() - ne,
+                y: r.top(),
+            }));
             if ne > 0.0 {
-                sink.AddArc(&arc(Pos2 { x: r.right(), y: r.top() + ne }, ne));
+                sink.AddArc(&arc(
+                    Pos2 {
+                        x: r.right(),
+                        y: r.top() + ne,
+                    },
+                    ne,
+                ));
             }
-            sink.AddLine(pt(Pos2 { x: r.right(), y: r.bottom() - se }));
+            sink.AddLine(pt(Pos2 {
+                x: r.right(),
+                y: r.bottom() - se,
+            }));
             if se > 0.0 {
-                sink.AddArc(&arc(Pos2 { x: r.right() - se, y: r.bottom() }, se));
+                sink.AddArc(&arc(
+                    Pos2 {
+                        x: r.right() - se,
+                        y: r.bottom(),
+                    },
+                    se,
+                ));
             }
-            sink.AddLine(pt(Pos2 { x: r.left() + sw, y: r.bottom() }));
+            sink.AddLine(pt(Pos2 {
+                x: r.left() + sw,
+                y: r.bottom(),
+            }));
             if sw > 0.0 {
-                sink.AddArc(&arc(Pos2 { x: r.left(), y: r.bottom() - sw }, sw));
+                sink.AddArc(&arc(
+                    Pos2 {
+                        x: r.left(),
+                        y: r.bottom() - sw,
+                    },
+                    sw,
+                ));
             }
-            sink.AddLine(pt(Pos2 { x: r.left(), y: r.top() + nw }));
+            sink.AddLine(pt(Pos2 {
+                x: r.left(),
+                y: r.top() + nw,
+            }));
             if nw > 0.0 {
-                sink.AddArc(&arc(Pos2 { x: r.left() + nw, y: r.top() }, nw));
+                sink.AddArc(&arc(
+                    Pos2 {
+                        x: r.left() + nw,
+                        y: r.top(),
+                    },
+                    nw,
+                ));
             }
             sink.EndFigure(D2D1_FIGURE_END_CLOSED);
             if sink.Close().is_err() {
@@ -547,17 +680,36 @@ impl Renderer {
         unsafe {
             let geo = self.factory.CreatePathGeometry().ok()?;
             let sink = geo.Open().ok()?;
-            sink.BeginFigure(pt(first), if filled { D2D1_FIGURE_BEGIN_FILLED } else { D2D1_FIGURE_BEGIN_HOLLOW });
+            sink.BeginFigure(
+                pt(first),
+                if filled {
+                    D2D1_FIGURE_BEGIN_FILLED
+                } else {
+                    D2D1_FIGURE_BEGIN_HOLLOW
+                },
+            );
             let rest: Vec<Vector2> = points[1..].iter().map(|p| pt(*p)).collect();
             sink.AddLines(&rest);
-            sink.EndFigure(if closed { D2D1_FIGURE_END_CLOSED } else { D2D1_FIGURE_END_OPEN });
+            sink.EndFigure(if closed {
+                D2D1_FIGURE_END_CLOSED
+            } else {
+                D2D1_FIGURE_END_OPEN
+            });
             sink.Close().ok()?;
             Some(geo)
         }
     }
 
     /// Renders `list` off screen at `scale` and writes a PNG.
-    pub fn snapshot(&self, list: &DisplayList, width: u32, height: u32, scale: f32, clear: Color32, path: &std::path::Path) -> Result<()> {
+    pub fn snapshot(
+        &self,
+        list: &DisplayList,
+        width: u32,
+        height: u32,
+        scale: f32,
+        clear: Color32,
+        path: &std::path::Path,
+    ) -> Result<()> {
         unsafe {
             let props = Self::target_props(scale, false);
             let size = D2D_SIZE_U { width, height };
@@ -592,9 +744,17 @@ impl Renderer {
 }
 
 unsafe fn create_device() -> Result<(ID3D11Device, bool)> {
-    let levels = [D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_10_1, D3D_FEATURE_LEVEL_10_0];
+    let levels = [
+        D3D_FEATURE_LEVEL_11_1,
+        D3D_FEATURE_LEVEL_11_0,
+        D3D_FEATURE_LEVEL_10_1,
+        D3D_FEATURE_LEVEL_10_0,
+    ];
     let force_warp = std::env::var_os("DBM_FORCE_WARP").is_some();
-    for (driver, software) in [(D3D_DRIVER_TYPE_HARDWARE, false), (D3D_DRIVER_TYPE_WARP, true)] {
+    for (driver, software) in [
+        (D3D_DRIVER_TYPE_HARDWARE, false),
+        (D3D_DRIVER_TYPE_WARP, true),
+    ] {
         if force_warp && !software {
             continue;
         }
@@ -621,9 +781,16 @@ unsafe fn create_device() -> Result<(ID3D11Device, bool)> {
     Err(Error::from(E_FAIL))
 }
 
-unsafe fn write_png(bgra: &[u8], width: u32, height: u32, stride: usize, path: &std::path::Path) -> Result<()> {
+unsafe fn write_png(
+    bgra: &[u8],
+    width: u32,
+    height: u32,
+    stride: usize,
+    path: &std::path::Path,
+) -> Result<()> {
     unsafe {
-        let wic: IWICImagingFactory = CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)?;
+        let wic: IWICImagingFactory =
+            CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)?;
         let stream = wic.CreateStream()?;
         let p = wide(&path.to_string_lossy());
         let mut z = p.clone();

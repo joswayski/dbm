@@ -177,7 +177,9 @@ impl<'a> ActionButton<'a> {
         let alpha = if enabled { 1.0 } else { 0.45 };
         let font = self.font();
         let fonts_w = ui.ctx.fonts.width(self.text, font);
-        let kbd_w = self.shortcut.map(|s| ui.ctx.fonts.width(s, theme::ui(11.0)));
+        let kbd_w = self
+            .shortcut
+            .map(|s| ui.ctx.fonts.width(s, theme::ui(11.0)));
         let icon_w = if self.icon.is_some() { 18.0 } else { 0.0 };
         let content = icon_w + fonts_w + kbd_w.map_or(0.0, |w| w + 16.0);
         let mut p = ui.painter();
@@ -191,15 +193,25 @@ impl<'a> ActionButton<'a> {
         let mut x = rect.center().x - content / 2.0;
         let y = rect.center().y;
         if let Some(icon) = self.icon {
-            icons::paint(&mut p, Rect::from_center_size(pos2(x + 6.0, y), Vec2::splat(12.0)), icon, color);
+            icons::paint(
+                &mut p,
+                Rect::from_center_size(pos2(x + 6.0, y), Vec2::splat(12.0)),
+                icon,
+                color,
+            );
             x += icon_w;
         }
         p.text_mid(x, y, self.text, font, color);
         x += fonts_w;
         if let (Some(s), Some(w)) = (self.shortcut, kbd_w) {
             let lh = theme::ui(11.0).line_height();
-            let pill = Rect::from_min_size(pos2(x + 6.0, y - lh / 2.0 - 1.0), vec2(w + 10.0, lh + 2.0));
-            p.rect_filled(pill, 4.0, Color32::from_white_alpha(51).gamma_multiply(alpha));
+            let pill =
+                Rect::from_min_size(pos2(x + 6.0, y - lh / 2.0 - 1.0), vec2(w + 10.0, lh + 2.0));
+            p.rect_filled(
+                pill,
+                4.0,
+                Color32::from_white_alpha(51).gamma_multiply(alpha),
+            );
             p.text_mid(pill.left() + 5.0, y, s, theme::ui(11.0), color);
         }
         r
@@ -209,7 +221,13 @@ impl<'a> ActionButton<'a> {
 impl Ui<'_> {
     /// `interact` with an explicit enabled state (a disabled button inside
     /// an enabled area).
-    pub fn interact_enabled(&mut self, rect: Rect, id: Id, sense: Sense, enabled: bool) -> Response {
+    pub fn interact_enabled(
+        &mut self,
+        rect: Rect,
+        id: Id,
+        sense: Sense,
+        enabled: bool,
+    ) -> Response {
         let was = self.is_enabled();
         if was && !enabled {
             let mut r = {
@@ -234,7 +252,13 @@ pub fn icon_button(ui: &mut Ui, icon: Icon, label: Option<&str>, tooltip: &str) 
     icon_button_enabled(ui, true, icon, label, tooltip)
 }
 
-pub fn icon_button_enabled(ui: &mut Ui, enabled: bool, icon: Icon, label: Option<&str>, tooltip: &str) -> Response {
+pub fn icon_button_enabled(
+    ui: &mut Ui,
+    enabled: bool,
+    icon: Icon,
+    label: Option<&str>,
+    tooltip: &str,
+) -> Response {
     let font = theme::ui(12.5);
     let text_w = label.map(|l| ui.ctx.fonts.width(l, font));
     let pad = if label.is_some() { 9.0 } else { 7.0 };
@@ -243,7 +267,14 @@ pub fn icon_button_enabled(ui: &mut Ui, enabled: bool, icon: Icon, label: Option
     icon_button_in(ui, rect, enabled, icon, label, tooltip)
 }
 
-pub fn icon_button_in(ui: &mut Ui, rect: Rect, enabled: bool, icon: Icon, label: Option<&str>, tooltip: &str) -> Response {
+pub fn icon_button_in(
+    ui: &mut Ui,
+    rect: Rect,
+    enabled: bool,
+    icon: Icon,
+    label: Option<&str>,
+    tooltip: &str,
+) -> Response {
     let enabled = enabled && ui.is_enabled();
     let name = label.unwrap_or(tooltip);
     let id = ui.make_id(("icon-button", tooltip, icon as u8));
@@ -267,18 +298,37 @@ pub fn icon_button_in(ui: &mut Ui, rect: Rect, enabled: bool, icon: Icon, label:
         SECONDARY
     };
     let icon_rect = Rect::from_center_size(
-        pos2(if label.is_some() { rect.left() + pad + 7.0 } else { rect.center().x }, rect.center().y),
+        pos2(
+            if label.is_some() {
+                rect.left() + pad + 7.0
+            } else {
+                rect.center().x
+            },
+            rect.center().y,
+        ),
         Vec2::splat(14.0),
     );
     icons::paint(&mut p, icon_rect, icon, color);
     if let Some(l) = label {
-        p.text_mid(icon_rect.right() + 6.0, rect.center().y, l, theme::ui(12.5), color);
+        p.text_mid(
+            icon_rect.right() + 6.0,
+            rect.center().y,
+            l,
+            theme::ui(12.5),
+            color,
+        );
     }
     r
 }
 
 /// `.text-button`: accent text with an optional icon and an accent wash on hover.
-pub fn text_button(ui: &mut Ui, icon: Option<Icon>, label: &str, size: f32, tooltip: &str) -> Response {
+pub fn text_button(
+    ui: &mut Ui,
+    icon: Option<Icon>,
+    label: &str,
+    size: f32,
+    tooltip: &str,
+) -> Response {
     let enabled = ui.is_enabled();
     let font = theme::ui(size);
     let tw = ui.ctx.fonts.width(label, font);
@@ -286,7 +336,9 @@ pub fn text_button(ui: &mut Ui, icon: Option<Icon>, label: &str, size: f32, tool
     let iw = icon.map_or(0.0, |_| icon_size + 4.0);
     let rect = ui.allocate(vec2(12.0 + iw + tw, font.line_height() + 6.0));
     let id = ui.make_id(("text-button", label));
-    let r = ui.interact(rect, id, Sense::CLICK).on_any_hover_text(tooltip);
+    let r = ui
+        .interact(rect, id, Sense::CLICK)
+        .on_any_hover_text(tooltip);
     let mut node = Node::new(id.0, Role::Button, label, rect);
     node.focusable = true;
     ui.a11y(node);
@@ -297,7 +349,15 @@ pub fn text_button(ui: &mut Ui, icon: Option<Icon>, label: &str, size: f32, tool
     let color = if enabled { ACCENT_TEXT } else { FAINT };
     let mut x = rect.left() + 6.0;
     if let Some(icon) = icon {
-        icons::paint(&mut p, Rect::from_center_size(pos2(x + icon_size / 2.0, rect.center().y), Vec2::splat(icon_size)), icon, color);
+        icons::paint(
+            &mut p,
+            Rect::from_center_size(
+                pos2(x + icon_size / 2.0, rect.center().y),
+                Vec2::splat(icon_size),
+            ),
+            icon,
+            color,
+        );
         x += iw;
     }
     p.text_mid(x, rect.center().y, label, font, color);
@@ -320,7 +380,12 @@ pub fn menu_trigger(ui: &mut Ui, label: &str, tooltip: &str) -> Response {
     }
     let y = rect.center().y;
     p.text_mid(rect.left() + 9.0, y, label, font, ACCENT_TEXT);
-    icons::paint(&mut p, Rect::from_center_size(pos2(rect.left() + 9.0 + tw + 11.0, y), Vec2::splat(12.0)), Icon::ChevronDown, ACCENT_TEXT);
+    icons::paint(
+        &mut p,
+        Rect::from_center_size(pos2(rect.left() + 9.0 + tw + 11.0, y), Vec2::splat(12.0)),
+        Icon::ChevronDown,
+        ACCENT_TEXT,
+    );
     r
 }
 
@@ -342,7 +407,12 @@ pub fn toggle(ui: &mut Ui, icon: Icon, on: bool, tooltip: &str) -> Response {
     };
     let mut p = ui.painter();
     p.rect_filled(rect, 6.0, fill);
-    icons::paint(&mut p, Rect::from_center_size(rect.center(), Vec2::splat(14.0)), icon, color);
+    icons::paint(
+        &mut p,
+        Rect::from_center_size(rect.center(), Vec2::splat(14.0)),
+        icon,
+        color,
+    );
     r
 }
 
@@ -369,7 +439,13 @@ pub fn chip_in(ui: &mut Ui, rect: Rect, text: &str, color: Color32) -> Response 
     let w = ui.ctx.fonts.width(text, font);
     let mut p = ui.painter();
     p.rect_filled(rect, 5.0, color.gamma_multiply(0.14));
-    p.text_mid(rect.center().x - w / 2.0, rect.center().y, text, font, color);
+    p.text_mid(
+        rect.center().x - w / 2.0,
+        rect.center().y,
+        text,
+        font,
+        color,
+    );
     r
 }
 
@@ -394,13 +470,33 @@ pub fn checkbox(ui: &mut Ui, value: &mut bool, label: &str) -> Response {
     let mut p = ui.painter();
     if *value {
         p.rect_filled(bx, 4.0, ACCENT_STRONG.gamma_multiply(alpha));
-        icons::paint(&mut p, bx.shrink(2.0), Icon::Check, Color32::WHITE.gamma_multiply(alpha));
+        icons::paint(
+            &mut p,
+            bx.shrink(2.0),
+            Icon::Check,
+            Color32::WHITE.gamma_multiply(alpha),
+        );
     } else {
         let fill = if r.hovered { CONTROL_HOVER } else { CONTROL };
-        p.rect(bx, 4.0, fill.gamma_multiply(alpha), Stroke::new(1.0, BORDER_STRONG.gamma_multiply(alpha)));
+        p.rect(
+            bx,
+            4.0,
+            fill.gamma_multiply(alpha),
+            Stroke::new(1.0, BORDER_STRONG.gamma_multiply(alpha)),
+        );
     }
-    let color = if r.hovered && enabled { TEXT_STRONG } else { TEXT };
-    p.text_mid(rect.left() + 26.0, rect.center().y, label, font, color.gamma_multiply(alpha));
+    let color = if r.hovered && enabled {
+        TEXT_STRONG
+    } else {
+        TEXT
+    };
+    p.text_mid(
+        rect.left() + 26.0,
+        rect.center().y,
+        label,
+        font,
+        color.gamma_multiply(alpha),
+    );
     r
 }
 
@@ -430,7 +526,13 @@ pub fn spinner_in(ui: &mut Ui, rect: Rect) {
 
 /// Shows a popup under `anchor` while it is open. A press outside closes
 /// it; `f` returning `true` (an item was chosen) closes it too.
-pub fn popup(ui: &mut Ui, id: Id, anchor: Rect, width: f32, f: impl FnOnce(&mut Ui) -> bool) -> bool {
+pub fn popup(
+    ui: &mut Ui,
+    id: Id,
+    anchor: Rect,
+    width: f32,
+    f: impl FnOnce(&mut Ui) -> bool,
+) -> bool {
     if !ui.ctx.is_popup_open(id) {
         return false;
     }
@@ -444,7 +546,17 @@ pub fn popup(ui: &mut Ui, id: Id, anchor: Rect, width: f32, f: impl FnOnce(&mut 
         pos.y = anchor.top() - height - 2.0;
     }
     let max_h = (screen.bottom() - pos.y - 6.0).max(80.0);
-    let rect = Rect::from_min_size(pos, vec2(width, if height > 0.0 { height.min(max_h) } else { max_h }));
+    let rect = Rect::from_min_size(
+        pos,
+        vec2(
+            width,
+            if height > 0.0 {
+                height.min(max_h)
+            } else {
+                max_h
+            },
+        ),
+    );
     ui.ctx.set_popup_area(rect);
     let mut chosen = false;
     let mut measured = 0.0;
@@ -452,14 +564,21 @@ pub fn popup(ui: &mut Ui, id: Id, anchor: Rect, width: f32, f: impl FnOnce(&mut 
         // Blocks the content underneath.
         let _ = ui.interact(rect, id.with("bg"), Sense::HOVER);
         let mut p = ui.painter();
-        p.shadow(rect, 8.0, vec2(0.0, 8.0), 24.0, Color32::from_black_alpha(110));
+        p.shadow(
+            rect,
+            8.0,
+            vec2(0.0, 8.0),
+            24.0,
+            Color32::from_black_alpha(110),
+        );
         p.rect(rect, 8.0, POPOVER, Stroke::new(1.0, BORDER_STRONG));
         ui.a11y_group(id.with("menu"), Role::Menu, "", rect, |ui| {
             let inner = rect.shrink(4.0);
             let mut child = ui.child(inner, Dir::Down);
             child.spacing = vec2(0.0, 1.0);
             child.set_clip(rect);
-            let out = crate::scroll::ScrollArea::vertical(id.with("scroll")).show(&mut child, |ui| f(ui));
+            let out =
+                crate::scroll::ScrollArea::vertical(id.with("scroll")).show(&mut child, |ui| f(ui));
             chosen = out.inner;
             measured = out.state.content.y + 8.0;
         });
@@ -494,13 +613,22 @@ pub fn menu_item_enabled(ui: &mut Ui, label: &str, danger: bool, enabled: bool) 
     let (fill, color) = match (danger, hovered) {
         (false, true) => (ACCENT_STRONG, Color32::WHITE),
         (false, false) => (Color32::TRANSPARENT, TEXT),
-        (true, true) => (Color32::from_rgba_unmultiplied(255, 107, 97, 46), Color32::from_rgb(0xff, 0xb3, 0xac)),
+        (true, true) => (
+            Color32::from_rgba_unmultiplied(255, 107, 97, 46),
+            Color32::from_rgb(0xff, 0xb3, 0xac),
+        ),
         (true, false) => (Color32::TRANSPARENT, DANGER),
     };
     let alpha = if enabled { 1.0 } else { 0.45 };
     let mut p = ui.painter();
     p.rect_filled(rect, 5.0, fill);
-    p.text_mid(rect.left() + 8.0, rect.center().y, label, theme::ui(12.5), color.gamma_multiply(alpha));
+    p.text_mid(
+        rect.left() + 8.0,
+        rect.center().y,
+        label,
+        theme::ui(12.5),
+        color.gamma_multiply(alpha),
+    );
     r
 }
 
@@ -523,18 +651,37 @@ pub fn select_item(ui: &mut Ui, label: &str, selected: bool) -> Response {
     };
     p.rect_filled(rect, 5.0, fill);
     let max = rect.width() - 16.0;
-    p.text_truncated(rect.left() + 8.0, rect.center().y, label, theme::ui(12.5), color, max);
+    p.text_truncated(
+        rect.left() + 8.0,
+        rect.center().y,
+        label,
+        theme::ui(12.5),
+        color,
+        max,
+    );
     r
 }
 
 /// A combo box: a control showing `selected`, opening a list. `f` adds the
 /// options (with `select_item`) and returns whether one was chosen.
-pub fn combo_box(ui: &mut Ui, id: Id, selected: &str, width: f32, f: impl FnOnce(&mut Ui) -> bool) -> Response {
+pub fn combo_box(
+    ui: &mut Ui,
+    id: Id,
+    selected: &str,
+    width: f32,
+    f: impl FnOnce(&mut Ui) -> bool,
+) -> Response {
     let rect = ui.allocate(vec2(width, 28.0));
     combo_box_in(ui, id, rect, selected, f)
 }
 
-pub fn combo_box_in(ui: &mut Ui, id: Id, rect: Rect, selected: &str, f: impl FnOnce(&mut Ui) -> bool) -> Response {
+pub fn combo_box_in(
+    ui: &mut Ui,
+    id: Id,
+    rect: Rect,
+    selected: &str,
+    f: impl FnOnce(&mut Ui) -> bool,
+) -> Response {
     let mut r = ui.interact(rect, id, Sense::CLICK);
     let open = ui.ctx.is_popup_open(id);
     let mut node = Node::new(id.0, Role::ComboBox, "", rect);
@@ -556,9 +703,29 @@ pub fn combo_box_in(ui: &mut Ui, id: Id, rect: Rect, selected: &str, f: impl FnO
     };
     {
         let mut p = ui.painter();
-        p.rect(rect, 6.0, fill.gamma_multiply(alpha), Stroke::new(1.0, BORDER_STRONG.gamma_multiply(alpha)));
-        p.text_truncated(rect.left() + 9.0, rect.center().y, selected, theme::ui(12.5), TEXT.gamma_multiply(alpha), rect.width() - 34.0);
-        icons::paint(&mut p, Rect::from_center_size(pos2(rect.right() - 13.0, rect.center().y), Vec2::splat(12.0)), Icon::ChevronDown, MUTED.gamma_multiply(alpha));
+        p.rect(
+            rect,
+            6.0,
+            fill.gamma_multiply(alpha),
+            Stroke::new(1.0, BORDER_STRONG.gamma_multiply(alpha)),
+        );
+        p.text_truncated(
+            rect.left() + 9.0,
+            rect.center().y,
+            selected,
+            theme::ui(12.5),
+            TEXT.gamma_multiply(alpha),
+            rect.width() - 34.0,
+        );
+        icons::paint(
+            &mut p,
+            Rect::from_center_size(
+                pos2(rect.right() - 13.0, rect.center().y),
+                Vec2::splat(12.0),
+            ),
+            Icon::ChevronDown,
+            MUTED.gamma_multiply(alpha),
+        );
     }
     let width = rect.width().max(160.0);
     if popup(ui, id, rect, width, f) {
@@ -587,7 +754,10 @@ pub fn context_menu(ui: &mut Ui, target: &Response, width: f32, f: impl FnOnce(&
         ui.ctx.open_popup(id);
     }
     if ui.ctx.is_popup_open(id) {
-        let at: Pos2 = ui.ctx.data(id.with("at")).unwrap_or(target.rect.left_bottom());
+        let at: Pos2 = ui
+            .ctx
+            .data(id.with("at"))
+            .unwrap_or(target.rect.left_bottom());
         popup(ui, id, Rect::from_min_size(at, Vec2::ZERO), width, f);
     }
 }
@@ -601,14 +771,24 @@ pub struct ModalOutput<R> {
 
 /// A centred dialog over a 55% backdrop. Its height is its content's,
 /// scrolling when the window is too short.
-pub fn modal<R>(ui: &mut Ui, title: &str, width: f32, f: impl FnOnce(&mut Ui) -> R) -> ModalOutput<R> {
+pub fn modal<R>(
+    ui: &mut Ui,
+    title: &str,
+    width: f32,
+    f: impl FnOnce(&mut Ui) -> R,
+) -> ModalOutput<R> {
     let id = Id::new(("modal", title));
     let screen = ui.ctx.screen_rect();
     let mut backdrop_clicked = false;
     let inner = ui.area(Layer::Modal, screen, |ui| {
-        let r = ui.interact(screen, id.with("backdrop"), Sense::CLICK.unfocusable().plain());
+        let r = ui.interact(
+            screen,
+            id.with("backdrop"),
+            Sense::CLICK.unfocusable().plain(),
+        );
         backdrop_clicked = r.clicked;
-        ui.painter().rect_filled(screen, 0.0, Color32::from_black_alpha(140));
+        ui.painter()
+            .rect_filled(screen, 0.0, Color32::from_black_alpha(140));
         let height: f32 = ui.ctx.data(id.with("height")).unwrap_or(200.0);
         let max_h = (screen.height() - 80.0).max(120.0);
         let h = height.min(max_h);
@@ -617,13 +797,21 @@ pub fn modal<R>(ui: &mut Ui, title: &str, width: f32, f: impl FnOnce(&mut Ui) ->
         // Blocks the backdrop under the window.
         let _ = ui.interact(rect, id.with("window"), Sense::CLICK.unfocusable().plain());
         let mut p = ui.painter();
-        p.shadow(rect, 14.0, vec2(0.0, 16.0), 40.0, Color32::from_black_alpha(140));
+        p.shadow(
+            rect,
+            14.0,
+            vec2(0.0, 16.0),
+            40.0,
+            Color32::from_black_alpha(140),
+        );
         p.rect(rect, 14.0, POPOVER, Stroke::new(1.0, BORDER_STRONG));
         let mut measured = 0.0;
         let inner = ui.a11y_group(id, Role::Dialog, title, rect, |ui| {
             let mut child = ui.child(rect.shrink(18.0), Dir::Down);
             child.set_clip(rect.shrink(1.0));
-            let out = crate::scroll::ScrollArea::vertical(id.with("scroll")).solid_bar().show(&mut child, f);
+            let out = crate::scroll::ScrollArea::vertical(id.with("scroll"))
+                .solid_bar()
+                .show(&mut child, f);
             measured = out.state.content.y + 36.0;
             out.inner
         });
@@ -652,10 +840,16 @@ pub fn dialog_title(ui: &mut Ui, eyebrow: Option<&str>, title: &str) {
 pub fn toast(ui: &mut Ui, text: &str, dot: Color32, opacity: f32) -> bool {
     let screen = ui.ctx.screen_rect();
     let font = theme::ui(12.5);
-    let lines = ui.ctx.fonts.wrap(text, font, 520.0 - 14.0 - 10.0 - 20.0 - 24.0 - 12.0);
+    let lines = ui
+        .ctx
+        .fonts
+        .wrap(text, font, 520.0 - 14.0 - 10.0 - 20.0 - 24.0 - 12.0);
     let tw = lines.iter().map(|l| l.width).fold(0.0, f32::max);
     let lh = font.line_height();
-    let size = vec2(14.0 + 8.0 + 12.0 + tw + 12.0 + 24.0 + 10.0, (lines.len() as f32 * lh).max(24.0) + 20.0);
+    let size = vec2(
+        14.0 + 8.0 + 12.0 + tw + 12.0 + 24.0 + 10.0,
+        (lines.len() as f32 * lh).max(24.0) + 20.0,
+    );
     let rect = Rect::from_min_size(screen.right_bottom() - size - vec2(16.0, 16.0), size);
     let mut dismiss = false;
     ui.area(Layer::Popup, rect, |ui| {
@@ -663,18 +857,32 @@ pub fn toast(ui: &mut Ui, text: &str, dot: Color32, opacity: f32) -> bool {
         let _ = ui.interact(rect, Id::new("toast-bg"), Sense::HOVER);
         {
             let mut p = ui.painter();
-            p.shadow(rect, 10.0, vec2(0.0, 16.0), 40.0, Color32::from_black_alpha(140));
+            p.shadow(
+                rect,
+                10.0,
+                vec2(0.0, 16.0),
+                40.0,
+                Color32::from_black_alpha(140),
+            );
             p.rect(rect, 10.0, POPOVER, Stroke::new(1.0, BORDER_STRONG));
             p.circle_filled(pos2(rect.left() + 18.0, rect.center().y), 4.0, dot);
             let top = rect.center().y - lines.len() as f32 * lh / 2.0;
             for (i, l) in lines.iter().enumerate() {
-                p.text(pos2(rect.left() + 34.0, top + i as f32 * lh), &text[l.range.clone()], font, TEXT);
+                p.text(
+                    pos2(rect.left() + 34.0, top + i as f32 * lh),
+                    &text[l.range.clone()],
+                    font,
+                    TEXT,
+                );
             }
         }
         let mut node = Node::new(Id::new("toast").0, Role::Text, text, rect);
         node.parent = None;
         ui.a11y(node);
-        let b = Rect::from_center_size(pos2(rect.right() - 22.0, rect.center().y), Vec2::splat(24.0));
+        let b = Rect::from_center_size(
+            pos2(rect.right() - 22.0, rect.center().y),
+            Vec2::splat(24.0),
+        );
         dismiss = dismiss_button(ui, b, MUTED, "Dismiss notification").clicked;
     });
     dismiss

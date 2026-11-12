@@ -3,14 +3,16 @@
 //! resize edge (220-480 px, double click restores 260, arrows step 10).
 
 use dbm_core::models::{ConnectionProfile, DatabaseEngine, SchemaNode};
-use dbm_desktop::worker::Command;
 use dbm_core::sql_text::filter_schema_nodes;
+use dbm_desktop::worker::Command;
 use dbm_ui::a11y::{Node, Role};
 use dbm_ui::icons::{self, Icon};
 use dbm_ui::input::{Key, Modifiers};
 use dbm_ui::text_edit::TextEdit;
 use dbm_ui::widgets::{self, icon_button, icon_button_in, secondary_button};
-use dbm_ui::{Color32, CursorIcon, Dir, Id, Rect, ScrollArea, Sense, Stroke, Ui, Vec2, pos2, theme, vec2};
+use dbm_ui::{
+    Color32, CursorIcon, Dir, Id, Rect, ScrollArea, Sense, Stroke, Ui, Vec2, pos2, theme, vec2,
+};
 use uuid::Uuid;
 
 use crate::state::{PASSWORD_LOAD, ProfileForm, RequestKind, Workbench, engine_label};
@@ -45,7 +47,11 @@ impl Workbench {
         if !self.sidebar_collapsed {
             self.sidebar_resize(ui, rect);
         } else {
-            ui.painter().vline(rect.right() - 0.5, rect.top()..=rect.bottom(), Stroke::new(1.0, theme::BORDER));
+            ui.painter().vline(
+                rect.right() - 0.5,
+                rect.top()..=rect.bottom(),
+                Stroke::new(1.0, theme::BORDER),
+            );
         }
     }
 
@@ -53,11 +59,20 @@ impl Workbench {
         let inner = rect.shrink(10.0);
         // `.sidebar-footer`: a hairline above a full-width New connection.
         let (body, footer) = inner.split_bottom(40.0);
-        ui.painter().hline(rect.left()..=rect.right(), footer.top() + 0.5, Stroke::new(1.0, theme::BORDER));
+        ui.painter().hline(
+            rect.left()..=rect.right(),
+            footer.top() + 0.5,
+            Stroke::new(1.0, theme::BORDER),
+        );
         {
             let mut f = ui.child(footer.inset(2.0, 10.0, 2.0, 0.0), Dir::Down);
             let w = f.available_width();
-            if secondary_button("New connection").icon(Icon::Plus).min_width(w).show(&mut f).clicked {
+            if secondary_button("New connection")
+                .icon(Icon::Plus)
+                .min_width(w)
+                .show(&mut f)
+                .clicked
+            {
                 self.profile_form = Some(ProfileForm::fresh());
             }
         }
@@ -88,9 +103,17 @@ impl Workbench {
     /// The draggable right edge, with the 2 px accent line while hovered,
     /// dragged or focused.
     fn sidebar_resize(&mut self, ui: &mut Ui, rect: Rect) {
-        let edge = Rect::from_ltrb(rect.right() - 3.0, rect.top(), rect.right() + 3.0, rect.bottom());
+        let edge = Rect::from_ltrb(
+            rect.right() - 3.0,
+            rect.top(),
+            rect.right() + 3.0,
+            rect.bottom(),
+        );
         let id = Id::new("sidebar-resize");
-        let sense = Sense { focusable: true, ..Sense::DRAG };
+        let sense = Sense {
+            focusable: true,
+            ..Sense::DRAG
+        };
         let r = ui.interact(edge, id, sense);
         let mut node = Node::new(id.0, Role::Separator, "Resize sidebar", edge);
         node.focusable = true;
@@ -122,9 +145,22 @@ impl Workbench {
         }
         let mut p = ui.painter();
         if r.hovered || r.dragged || r.has_focus {
-            p.rect_filled(Rect::from_ltrb(rect.right() - 1.0, rect.top(), rect.right() + 1.0, rect.bottom()), 0.0, theme::ACCENT);
+            p.rect_filled(
+                Rect::from_ltrb(
+                    rect.right() - 1.0,
+                    rect.top(),
+                    rect.right() + 1.0,
+                    rect.bottom(),
+                ),
+                0.0,
+                theme::ACCENT,
+            );
         } else {
-            p.vline(rect.right() - 0.5, rect.top()..=rect.bottom(), Stroke::new(1.0, theme::BORDER));
+            p.vline(
+                rect.right() - 0.5,
+                rect.top()..=rect.bottom(),
+                Stroke::new(1.0, theme::BORDER),
+            );
         }
     }
 
@@ -146,7 +182,11 @@ impl Workbench {
         let chip_width = if profile.read_only { 68.0 } else { 0.0 };
         let text_left = rect.left() + 26.0;
         let text_width = (rect.right() - actions_width - chip_width - text_left).max(40.0);
-        let target = if profile.username.is_empty() { profile.host.clone() } else { format!("{}@{}", profile.username, profile.host) };
+        let target = if profile.username.is_empty() {
+            profile.host.clone()
+        } else {
+            format!("{}@{}", profile.username, profile.host)
+        };
         let subtitle = format!("{} · {target}", engine_label(profile.engine));
         let elided = {
             let mut p = ui.painter();
@@ -163,13 +203,35 @@ impl Workbench {
                 p.circle_stroke(dot, 3.5, Stroke::new(1.5, color));
             }
             let (name_font, sub_font) = (theme::ui(13.0), theme::ui(11.0));
-            let a = p.text_truncated(text_left, rect.top() + 6.0 + name_font.line_height() / 2.0, &profile.name, name_font, theme::TEXT, text_width).1;
-            let b = p.text_truncated(text_left, rect.top() + 24.0 + sub_font.line_height() / 2.0, &subtitle, sub_font, theme::FAINT, text_width).1;
+            let a = p
+                .text_truncated(
+                    text_left,
+                    rect.top() + 6.0 + name_font.line_height() / 2.0,
+                    &profile.name,
+                    name_font,
+                    theme::TEXT,
+                    text_width,
+                )
+                .1;
+            let b = p
+                .text_truncated(
+                    text_left,
+                    rect.top() + 24.0 + sub_font.line_height() / 2.0,
+                    &subtitle,
+                    sub_font,
+                    theme::FAINT,
+                    text_width,
+                )
+                .1;
             a || b
         };
         let _ = match (elided, connected) {
-            (true, true) => response.clone().on_hover_text(format!("{}\n{subtitle}", profile.name)),
-            (true, false) => response.clone().on_hover_text(format!("Connect to {}\n{subtitle}", profile.name)),
+            (true, true) => response
+                .clone()
+                .on_hover_text(format!("{}\n{subtitle}", profile.name)),
+            (true, false) => response
+                .clone()
+                .on_hover_text(format!("Connect to {}\n{subtitle}", profile.name)),
             (false, true) => response.clone(),
             (false, false) => response.clone().on_hover_text("Connect"),
         };
@@ -183,7 +245,10 @@ impl Workbench {
                 }
             }
         }
-        let more_rect = Rect::from_min_size(pos2(rect.right() - 30.0, rect.top() + 1.0), vec2(28.0, 28.0));
+        let more_rect = Rect::from_min_size(
+            pos2(rect.right() - 30.0, rect.top() + 1.0),
+            vec2(28.0, 28.0),
+        );
         let more = icon_button_in(ui, more_rect, true, Icon::More, None, "Connection actions");
         let mut edit = false;
         let mut disconnect = false;
@@ -192,7 +257,11 @@ impl Workbench {
                 edit = true;
                 return true;
             }
-            if connected && widgets::menu_item(ui, "Disconnect", true).on_hover_text("Close this connection and its tabs").clicked {
+            if connected
+                && widgets::menu_item(ui, "Disconnect", true)
+                    .on_hover_text("Close this connection and its tabs")
+                    .clicked
+            {
                 disconnect = true;
                 return true;
             }
@@ -203,24 +272,50 @@ impl Workbench {
             let form = ProfileForm::from_profile(current);
             let input = form.input();
             self.profile_form = Some(form);
-            self.dispatch(Command::ConnectionUrl(input, true), PASSWORD_LOAD, None, Some(id), RequestKind::Form);
+            self.dispatch(
+                Command::ConnectionUrl(input, true),
+                PASSWORD_LOAD,
+                None,
+                Some(id),
+                RequestKind::Form,
+            );
         }
         if disconnect && self.profile_is_clean(id) {
             self.send(Command::Disconnect(id), "Disconnecting", None);
         }
-        let second = Rect::from_min_size(pos2(more_rect.left() - 28.0, more_rect.top()), vec2(28.0, 28.0));
+        let second = Rect::from_min_size(
+            pos2(more_rect.left() - 28.0, more_rect.top()),
+            vec2(28.0, 28.0),
+        );
         if connecting {
-            widgets::spinner_in(ui, Rect::from_center_size(second.center(), Vec2::splat(14.0)));
+            widgets::spinner_in(
+                ui,
+                Rect::from_center_size(second.center(), Vec2::splat(14.0)),
+            );
         } else if connected && active {
-            let (icon, tip) = if expanded { (Icon::ChevronUp, "Collapse connection") } else { (Icon::ChevronDown, "Expand connection") };
-            if icon_button_in(ui, second, true, icon, None, tip).clicked && !self.collapsed_profiles.remove(&id) {
+            let (icon, tip) = if expanded {
+                (Icon::ChevronUp, "Collapse connection")
+            } else {
+                (Icon::ChevronDown, "Expand connection")
+            };
+            if icon_button_in(ui, second, true, icon, None, tip).clicked
+                && !self.collapsed_profiles.remove(&id)
+            {
                 self.collapsed_profiles.insert(id);
             }
         }
         if profile.read_only {
-            let chip = Rect::from_min_size(pos2(rect.right() - actions_width - 64.0, rect.top() + 4.0), vec2(64.0, 20.0));
+            let chip = Rect::from_min_size(
+                pos2(rect.right() - actions_width - 64.0, rect.top() + 4.0),
+                vec2(64.0, 20.0),
+            );
             let w = ui.ctx.fonts.width("Read-only", theme::ui(11.0)) + 12.0;
-            widgets::chip_in(ui, Rect::from_min_size(chip.min, vec2(w, 20.0)), "Read-only", theme::MUTED);
+            widgets::chip_in(
+                ui,
+                Rect::from_min_size(chip.min, vec2(w, 20.0)),
+                "Read-only",
+                theme::MUTED,
+            );
         }
         if expanded {
             self.workspace_tree(ui, profile, color);
@@ -230,9 +325,13 @@ impl Workbench {
 
     fn workspace_tree(&mut self, ui: &mut Ui, profile: &ConnectionProfile, color: Color32) {
         let id = profile.id;
-        let Some(workspace) = self.workspaces.get(&id).cloned() else { return };
+        let Some(workspace) = self.workspaces.get(&id).cloned() else {
+            return;
+        };
         let redis = profile.engine == DatabaseEngine::Redis;
-        let switching = self.metas().any(|m| m.profile == Some(id) && m.label == "Switching database");
+        let switching = self
+            .metas()
+            .any(|m| m.profile == Some(id) && m.label == "Switching database");
         // Inset under the connection row, with room for the overlay scrollbar.
         let avail = ui.available_rect();
         let area = avail.inset(10.0, 2.0, 8.0, 0.0);
@@ -257,15 +356,33 @@ impl Workbench {
             if let Some(database) = chosen.filter(|d| *d != current)
                 && self.profile_is_clean(id)
             {
-                self.send(Command::SwitchDatabase(id, database), "Switching database", Some(id));
+                self.send(
+                    Command::SwitchDatabase(id, database),
+                    "Switching database",
+                    Some(id),
+                );
             }
             c.add_space(8.0);
-            let refreshing = self.pending_requests.values().any(|m| m.profile == Some(id) && (m.label == "Loading schema" || m.label == "Refreshing schema"));
+            let refreshing = self.pending_requests.values().any(|m| {
+                m.profile == Some(id)
+                    && (m.label == "Loading schema" || m.label == "Refreshing schema")
+            });
             let mut refresh = false;
             section_row(&mut c, if redis { "Keyspace" } else { "Schema" }, |ui| {
                 ui.set_enabled(!refreshing);
-                let label = if refreshing { "Refreshing…" } else { "Refresh" };
-                refresh = widgets::text_button(ui, Some(Icon::Refresh), label, 11.5, "Reload the schema tree").clicked;
+                let label = if refreshing {
+                    "Refreshing…"
+                } else {
+                    "Refresh"
+                };
+                refresh = widgets::text_button(
+                    ui,
+                    Some(Icon::Refresh),
+                    label,
+                    11.5,
+                    "Reload the schema tree",
+                )
+                .clicked;
             });
             if refresh {
                 self.send(Command::Schema(id), "Refreshing schema", Some(id));
@@ -273,13 +390,25 @@ impl Workbench {
             let filter = self.schema_filters.entry(id).or_default();
             // `.schema-filter`: 28 px, 12 px text after a search glyph.
             let out = TextEdit::singleline(Id::new(("schema-filter", id)), filter)
-                .hint(if redis { "Filter keys…" } else { "Filter tables…" })
+                .hint(if redis {
+                    "Filter keys…"
+                } else {
+                    "Filter tables…"
+                })
                 .font(theme::ui(12.0))
                 .margin(9.0, 6.0)
                 .pad_left(18.0)
                 .name("Filter")
                 .show(&mut c);
-            icons::paint(&mut c.painter(), Rect::from_center_size(out.response.rect.left_center() + vec2(14.5, 0.0), Vec2::splat(13.0)), Icon::Search, theme::FAINT);
+            icons::paint(
+                &mut c.painter(),
+                Rect::from_center_size(
+                    out.response.rect.left_center() + vec2(14.5, 0.0),
+                    Vec2::splat(13.0),
+                ),
+                Icon::Search,
+                theme::FAINT,
+            );
             // Escape clears the filter and keeps it focused.
             if out.escaped {
                 filter.clear();
@@ -294,15 +423,32 @@ impl Workbench {
                 filtered = filter_schema_nodes(all, &query);
                 filtered.as_slice()
             };
-            let selected = self.active_tab.and_then(|tab| self.table_target(tab)).filter(|(p, _, _)| *p == id).map(|(_, s, t)| (s, t));
+            let selected = self
+                .active_tab
+                .and_then(|tab| self.table_target(tab))
+                .filter(|(p, _, _)| *p == id)
+                .map(|(_, s, t)| (s, t));
             let mut open = None;
             c.spacing.y = 0.0;
             for node in nodes {
-                schema_branch(&mut c, (id, &mut self.schema_toggled), node, 0, !query.is_empty(), (selected.as_ref(), color), &mut open);
+                schema_branch(
+                    &mut c,
+                    (id, &mut self.schema_toggled),
+                    node,
+                    0,
+                    !query.is_empty(),
+                    (selected.as_ref(), color),
+                    &mut open,
+                );
             }
             if !query.is_empty() && nodes.is_empty() {
                 c.add_space(4.0);
-                c.label_wrapped(&format!("No matches for “{query}”."), theme::ui(12.5), theme::MUTED, false);
+                c.label_wrapped(
+                    &format!("No matches for “{query}”."),
+                    theme::ui(12.5),
+                    theme::MUTED,
+                    false,
+                );
             }
             if !self.schemas.contains_key(&id) {
                 c.add_space(4.0);
@@ -316,7 +462,12 @@ impl Workbench {
             }
             c.min_rect()
         };
-        ui.advance_past(Rect::from_ltrb(avail.left(), avail.top(), avail.right(), used.bottom()));
+        ui.advance_past(Rect::from_ltrb(
+            avail.left(),
+            avail.top(),
+            avail.right(),
+            used.bottom(),
+        ));
     }
 }
 
@@ -336,13 +487,20 @@ fn schema_branch(
     // column, a 15 px icon, then 12.5 px text.
     let x0 = 8.0 + depth as f32 * 14.0;
     let rect = ui.allocate_row(26.0);
-    let key = format!("{depth}/{}/{}/{}", node.kind, node.schema.as_deref().unwrap_or(""), node.name);
-    let is_open = leaf.is_none() && (force_open || ((depth < 1) != toggled.contains(&(profile, key.clone()))));
+    let key = format!(
+        "{depth}/{}/{}/{}",
+        node.kind,
+        node.schema.as_deref().unwrap_or(""),
+        node.name
+    );
+    let is_open = leaf.is_none()
+        && (force_open || ((depth < 1) != toggled.contains(&(profile, key.clone()))));
     // Large schemas have thousands of rows; only draw the visible ones.
     if rect.intersects(ui.clip_rect()) {
         let id = ui.make_id(("schema-node", &key));
         let response = ui.interact(rect, id, Sense::CLICK);
-        let is_selected = leaf.is_some_and(|(s, t)| selected.is_some_and(|(ss, tt)| ss == s && tt == t));
+        let is_selected =
+            leaf.is_some_and(|(s, t)| selected.is_some_and(|(ss, tt)| ss == s && tt == t));
         let mut a = Node::new(id.0, Role::TreeItem, &node.name, rect);
         a.focusable = true;
         a.selected = leaf.map(|_| is_selected);
@@ -370,10 +528,30 @@ fn schema_branch(
                 p.rect_filled(rect, 6.0, Color32::from_white_alpha(15));
             }
             if leaf.is_none() {
-                let caret = if is_open { Icon::ChevronDown } else { Icon::ChevronRight };
-                icons::paint(&mut p, Rect::from_center_size(pos2(rect.left() + x0 + 6.0, rect.center().y), Vec2::splat(11.0)), caret, theme::FAINT);
+                let caret = if is_open {
+                    Icon::ChevronDown
+                } else {
+                    Icon::ChevronRight
+                };
+                icons::paint(
+                    &mut p,
+                    Rect::from_center_size(
+                        pos2(rect.left() + x0 + 6.0, rect.center().y),
+                        Vec2::splat(11.0),
+                    ),
+                    caret,
+                    theme::FAINT,
+                );
             }
-            icons::paint(&mut p, Rect::from_center_size(pos2(rect.left() + x0 + 25.5, rect.center().y), Vec2::splat(13.0)), glyph, icon_color);
+            icons::paint(
+                &mut p,
+                Rect::from_center_size(
+                    pos2(rect.left() + x0 + 25.5, rect.center().y),
+                    Vec2::splat(13.0),
+                ),
+                glyph,
+                icon_color,
+            );
             let (font, text) = if is_selected {
                 (theme::bold(12.5), Color32::WHITE)
             } else if response.hovered {
@@ -381,7 +559,15 @@ fn schema_branch(
             } else {
                 (theme::ui(12.5), theme::SECONDARY)
             };
-            p.text_truncated(text_left, rect.center().y, &node.name, font, text, rect.right() - text_left - 8.0).1
+            p.text_truncated(
+                text_left,
+                rect.center().y,
+                &node.name,
+                font,
+                text,
+                rect.right() - text_left - 8.0,
+            )
+            .1
         };
         if elided {
             let _ = response.clone().on_hover_text(node.name.clone());
@@ -396,7 +582,15 @@ fn schema_branch(
     }
     if is_open {
         for child in &node.children {
-            schema_branch(ui, (profile, toggled), child, depth + 1, force_open, (selected, color), open);
+            schema_branch(
+                ui,
+                (profile, toggled),
+                child,
+                depth + 1,
+                force_open,
+                (selected, color),
+                open,
+            );
         }
     }
 }
