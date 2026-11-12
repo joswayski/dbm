@@ -218,7 +218,17 @@ impl QueryView {
         let notices = ui::vbox(2);
         notices.set_margin_start(14);
         notices.set_margin_end(14);
-        let grid = ResultGrid::new();
+        let handle = app.clone();
+        let grid = ResultGrid::new(move |row, column| {
+            let state = handle.state.try_borrow().map_err(|_| ())?;
+            Ok(state
+                .query_results
+                .get(&tab_id)
+                .and_then(|result| result.rows.get(row))
+                .and_then(|values| values.get(column))
+                .cloned()
+                .unwrap_or(serde_json::Value::Null))
+        });
         let grid_card = ui::vbox(0);
         grid_card.add_css_class("card");
         grid_card.set_overflow(gtk::Overflow::Hidden);

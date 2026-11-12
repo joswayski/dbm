@@ -8,7 +8,7 @@ use std::rc::Rc;
 use dbm_core::cell_values::numeric_column;
 use dbm_core::models::QueryColumn;
 use dbm_core::sql_text::display_value;
-use gtk::glib::BoxedAnyObject;
+use gtk::glib::{self, BoxedAnyObject};
 use gtk::prelude::*;
 use serde_json::Value;
 
@@ -161,17 +161,22 @@ pub fn default_column_width(data_type: &str) -> i32 {
 }
 
 /// Read-only query results.
+type Values = Rc<dyn Fn(usize, usize) -> Result<Value, ()>>;
+
 pub struct ResultGrid {
     pub root: gtk::ScrolledWindow,
     view: gtk::ColumnView,
     store: gtk::gio::ListStore,
-    rows: Rc<RefCell<Rc<Vec<Vec<Value>>>>>,
+    /// The value at (row, column) of the shown result, read from where the
+    /// result lives so the grid keeps no copy of its rows; `Err` while that
+    /// is busy.
+    value: Values,
     key: RefCell<Option<(usize, usize, *const Vec<Value>)>>,
     cells: Cells<Cell>,
 }
 
 impl ResultGrid {
-    pub fn new() -> Self {
+    pub fn new(value: impl Fn(usize, usize) -> Result<Value, ()> + 'static) -> Self {
         let store = gtk::gio::ListStore::new::<BoxedAnyObject>();
         let selection = gtk::NoSelection::new(Some(store.clone()));
         let view = gtk::ColumnView::new(Some(selection));
@@ -187,7 +192,7 @@ impl ResultGrid {
             root,
             view,
             store,
-            rows: Rc::new(RefCell::new(Rc::new(Vec::new()))),
+            value: Rc::new(value),
             key: RefCell::new(None),
             cells: Rc::default(),
         }
@@ -208,7 +213,6 @@ impl ResultGrid {
         {
             self.view.remove_column(&column);
         }
-        *self.rows.borrow_mut() = Rc::new(rows.to_vec());
         let share = columns.len() < 6;
         for (index, column) in columns.iter().enumerate() {
             let numeric = numeric_column(&column.data_type);
@@ -229,21 +233,15 @@ impl ResultGrid {
                     cells.borrow_mut().remove(&root);
                 }
             });
-            let rows = self.rows.clone();
+            let value = self.value.clone();
             let cells = self.cells.clone();
             factory.connect_bind(move |_, item| {
                 let item = item.downcast_ref::<gtk::ListItem>().expect("list item");
                 let (Some(row), Some(root)) = (row_of(item), item.child()) else {
                     return;
                 };
-                let rows = rows.borrow();
-                let value = rows
-                    .get(row)
-                    .and_then(|r| r.get(index))
-                    .cloned()
-                    .unwrap_or(Value::Null);
-                if let Some(cell) = cells.borrow().get(&root) {
-                    cell.show(&value, numeric);
+                if let Some(cell) = cells.borrow().get(&root).cloned() {
+                    show_value(cell, value.clone(), row, index, numeric);
                 }
             });
             let view_column = gtk::ColumnViewColumn::new(Some(&column.name), Some(factory));
@@ -253,6 +251,16 @@ impl ResultGrid {
             self.view.append_column(&view_column);
         }
         fill(&self.store, rows.len());
+    }
+}
+
+/// Fills `cell` with (row, column), retrying once the result is free.
+fn show_value(cell: Rc<Cell>, value: Values, row: usize, column: usize, numeric: bool) {
+    match value(row, column) {
+        Ok(v) => cell.show(&v, numeric),
+        Err(()) => {
+            glib::idle_add_local_once(move || show_value(cell, value, row, column, numeric));
+        }
     }
 }
 
