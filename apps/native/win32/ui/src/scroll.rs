@@ -264,7 +264,11 @@ impl ScrollArea {
             } else {
                 track.width()
             };
-            let thumb_len = (length * view / content).clamp(24.0, length);
+            if length <= 1.0 {
+                continue;
+            }
+            // At least 24 px, unless the track itself is shorter.
+            let thumb_len = (length * view / content).max(24.0).min(length);
             let travel = length - thumb_len;
             let max_offset = content - view;
             let start = if max_offset > 0.0 {
@@ -327,5 +331,42 @@ impl ScrollArea {
             p.rect_filled(shown, 4.0, Color32::from_white_alpha(alpha));
         }
         state
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::rc::Rc;
+
+    use crate::ctx::{Context, Id, NullPlatform};
+    use crate::geom::{Rect, pos2, vec2};
+    use crate::input::RawInput;
+    use crate::paint::Layer;
+    use crate::text::{Fonts, MonoMetrics};
+    use crate::ui::Ui;
+
+    /// A scroll area shorter than the minimum thumb (a tiny first window)
+    /// must lay out without panicking, on the first frame and the rerun.
+    #[test]
+    fn overflowing_area_shorter_than_the_minimum_thumb() {
+        let mut ctx = Context::new(
+            Fonts::new(Box::new(MonoMetrics)),
+            Rc::new(NullPlatform::default()),
+        );
+        for _ in 0..3 {
+            ctx.begin_frame(RawInput {
+                screen: vec2(200.0, 12.0),
+                ..Default::default()
+            });
+            let mut ui = Ui::root(
+                &mut ctx,
+                Rect::from_min_size(pos2(0.0, 0.0), vec2(200.0, 12.0)),
+                Layer::Background,
+            );
+            super::ScrollArea::vertical(Id::new("tiny")).show(&mut ui, |ui| {
+                ui.allocate(vec2(100.0, 400.0));
+            });
+            ctx.end_frame();
+        }
     }
 }

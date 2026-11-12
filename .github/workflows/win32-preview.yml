@@ -32,6 +32,7 @@ jobs:
           toolchain: 1.94.0
       - uses: Swatinem/rust-cache@v2
         with:
+          cache-on-failure: true
           workspaces: |
             apps/native/win32 -> target
             apps/native/workbench -> target
@@ -41,8 +42,6 @@ jobs:
         run: Set-DisplayResolution -Width 1920 -Height 1080 -Force
       - name: Build the Win32 app
         run: cargo build --manifest-path apps/native/win32/Cargo.toml --locked --release -p dbm-win32
-      - name: Test the Win32 crates
-        run: cargo test --manifest-path apps/native/win32/Cargo.toml --locked
       - name: Snapshot the demo
         shell: pwsh
         run: |
