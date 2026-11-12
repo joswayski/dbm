@@ -19,6 +19,9 @@ use gtk::prelude::*;
 
 fn main() -> gtk::glib::ExitCode {
     let demo = std::env::args().any(|arg| arg == "--demo");
+    // System Monitor and top show the process name, which is otherwise the
+    // binary's (dbm-workbench inside the AppImage).
+    let _ = std::fs::write("/proc/self/comm", "Anybase");
     fonts::prepare();
     // WM_CLASS on X11 follows the program name; match the app id (and the
     // desktop entry's StartupWMClass) rather than the binary's file name,
