@@ -91,8 +91,76 @@ fn main() {
     }
 }
 
+/// Off Windows with the `raster` feature: `--snapshot-dir DIR` walks the
+/// demo with the software renderer, to check layout without a Windows box.
+#[cfg(all(not(windows), feature = "raster"))]
+fn main() {
+    use std::rc::Rc;
+
+    use dbm_ui::ctx::NullPlatform;
+    use dbm_ui::raster::{RasterMetrics, render};
+    use dbm_ui::{Color32, Context, Fonts, Layer, RawInput, Rect, Ui, pos2, vec2};
+
+    let args: Vec<String> = std::env::args().collect();
+    let Some(dir) = args
+        .iter()
+        .position(|a| a == "--snapshot-dir")
+        .and_then(|i| args.get(i + 1))
+    else {
+        eprintln!("usage: dbm-win32 --snapshot-dir DIR");
+        std::process::exit(2);
+    };
+    let (screen, scale) = (vec2(1280.0, 800.0), 1.0);
+    let app = state::Workbench::new(std::sync::Arc::new(|| {}), true);
+    let mut view = view::View::new(app, store::Store::open(true));
+    let mut walk = snapshots::Walk::new(dir.into());
+    let mut ctx = Context::new(
+        Fonts::new(Box::new(RasterMetrics)),
+        Rc::new(NullPlatform::default()),
+    );
+    let start = std::time::Instant::now();
+    while !walk.done() && start.elapsed().as_secs() < 60 {
+        let mut out = None;
+        for _ in 0..4 {
+            ctx.begin_frame(RawInput {
+                events: Vec::new(),
+                screen,
+                time: start.elapsed().as_secs_f64(),
+                modifiers: Default::default(),
+            });
+            {
+                let mut ui = Ui::root(
+                    &mut ctx,
+                    Rect::from_min_size(pos2(0.0, 0.0), screen),
+                    Layer::Background,
+                );
+                walk.step(&mut view.app, &mut ui);
+                view.update(&mut ui);
+            }
+            let o = ctx.end_frame();
+            let rerun = o.rerun;
+            out = Some(o);
+            if !rerun {
+                break;
+            }
+        }
+        if let (Some(out), Some(path)) = (out, walk.take_path(&view.app)) {
+            let pm = render(
+                &out.list,
+                screen.x as u32,
+                screen.y as u32,
+                scale,
+                Color32::from_rgb(0x1c, 0x1c, 0x1e),
+            );
+            pm.save_png(&path).expect("write snapshot");
+            println!("{}", path.display());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(30));
+    }
+}
+
 /// The app is Windows only; elsewhere the crate builds for its unit tests.
-#[cfg(not(windows))]
+#[cfg(all(not(windows), not(feature = "raster")))]
 fn main() {
     eprintln!("Anybase's Win32 app runs on Windows.");
 }

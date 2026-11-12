@@ -177,7 +177,7 @@ fn show(ui: &mut Ui, rect: Rect, cx: &Cx<'_>, state: &mut TableState) -> Vec<Act
     bar(ui, filters_rect, true);
     filter_panel(
         ui,
-        filters_rect.inset(12.0, 7.0, 10.0, 7.0),
+        filters_rect.inset(12.0, 7.0, 14.0, 7.0),
         cx,
         state,
         &page,
@@ -477,7 +477,7 @@ fn header_width(ui: &Ui) -> f32 {
 /// (or on their own row when they don't fit), and one row per filter.
 fn filter_panel_height(ui: &Ui, cx: &Cx<'_>, state: &TableState, width: f32) -> f32 {
     let known: f32 = ui.ctx.data(controls_width_id(cx)).unwrap_or(0.0);
-    let inner = width - 22.0;
+    let inner = width - 26.0;
     let wrapped = header_width(ui) + 16.0 + known > inner;
     14.0 + 30.0 + if wrapped { 32.0 } else { 0.0 } + state.filters.len() as f32 * 32.0
 }

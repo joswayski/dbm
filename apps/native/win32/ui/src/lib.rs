@@ -10,6 +10,8 @@ pub mod geom;
 pub mod icons;
 pub mod input;
 pub mod paint;
+#[cfg(feature = "raster")]
+pub mod raster;
 pub mod scroll;
 pub mod text;
 pub mod text_edit;
