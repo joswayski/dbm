@@ -263,7 +263,9 @@ jobs:
           set -euo pipefail
           # Installed copies rebuild this exact file from their own bundle
           # (crates/dbm-update/src/patch.rs). It must unpack into an app that
-          # passes the same check the updater runs before swapping it in.
+          # passes the same check the updater runs before swapping it in. (Not
+          # stapler validate: it asks Apple over the network, and the staple
+          # was validated on the original app above.)
           cargo build --locked --release -p dbm-delta
           tar_file="target/native/release/DBM-macOS.app.tar"
           target/release/dbm-delta bundle target/native/Anybase.app "$tar_file"
@@ -271,7 +273,6 @@ jobs:
           rm -rf "$check" && mkdir -p "$check"
           tar -xf "$tar_file" -C "$check"
           codesign --verify --deep --strict --verbose=2 "$check/Anybase.app"
-          xcrun stapler validate "$check/Anybase.app"
       - name: Sign the updater archives with the release key
         run: |
           cargo build --locked --release -p dbm-sign

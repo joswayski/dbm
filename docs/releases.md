@@ -192,7 +192,7 @@ attempt, so a patch can only make an update smaller, never different.
 
 Release tooling: the macOS job writes the bundle tar with `tools/dbm-delta
 bundle`, checks that it unpacks into an app that passes `codesign --verify
---deep --strict` and `stapler validate`, and signs it. **publish** downloads
+--deep --strict`, and signs it. **publish** downloads
 those files from the five newest published releases and runs `dbm-delta
 diff` for each, which checks that the patch rebuilds the new file exactly.
 Patches over half the full file are dropped. The step never fails a release;
