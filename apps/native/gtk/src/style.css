@@ -194,7 +194,8 @@ popover > contents, popover.menu > contents {
   border: 1px solid @border_strong;
   border-radius: 10px;
   padding: 4px;
-  box-shadow: 0 16px 40px rgba(0,0,0,0.55);
+  /* Small, so non-composited X11 sessions show only a thin opaque margin. */
+  box-shadow: 0 4px 10px rgba(0,0,0,0.45);
   color: @text;
 }
 popover > arrow { background-color: @popover; border-color: @border_strong; }
@@ -351,3 +352,5 @@ columnview listview row > cell { padding: 0; min-height: 32px; border-right: 1px
 spinbutton { border: 1px solid @border_strong; border-radius: 6px; min-height: 28px; font-size: 12px; }
 spinbutton > button { color: @muted; min-width: 22px; }
 .header-key { color: @modified; }
+
+scrolledwindow > undershoot, scrolledwindow > overshoot { background: none; box-shadow: none; }

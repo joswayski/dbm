@@ -20,6 +20,10 @@ use gtk::prelude::*;
 fn main() -> gtk::glib::ExitCode {
     let demo = std::env::args().any(|arg| arg == "--demo");
     fonts::prepare();
+    // WM_CLASS on X11 follows the program name; match the app id (and the
+    // desktop entry's StartupWMClass) rather than the binary's file name,
+    // which is dbm-workbench inside the AppImage.
+    gtk::glib::set_prgname(Some("io.github.joswayski.dbm"));
     // NON_UNIQUE: a second launch opens its own window, as the egui app did,
     // and the self-updater can start the new build while this one exits.
     let application = gtk::Application::builder()
@@ -35,6 +39,11 @@ fn main() -> gtk::glib::ExitCode {
                 &css,
                 gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
             );
+            // The window icon, for X11 docks and taskbars that read it
+            // rather than the desktop entry's icon.
+            if let Some(icons) = icon_directory() {
+                gtk::IconTheme::for_display(&display).add_search_path(icons);
+            }
             if let Some(settings) = gtk::Settings::for_display(&display).into() {
                 let settings: gtk::Settings = settings;
                 settings.set_gtk_application_prefer_dark_theme(true);
@@ -51,4 +60,19 @@ fn main() -> gtk::glib::ExitCode {
     });
     // GTK would reject our own flags (--demo, --after-update).
     application.run_with_args::<&str>(&[])
+}
+
+/// Writes the bundled app icon into a hicolor tree in the cache directory,
+/// beside the bundled fonts, and returns its root. GTK builds the X11 window
+/// icon only from themed sizes, so an unthemed `dbm.png` would be ignored.
+fn icon_directory() -> Option<std::path::PathBuf> {
+    const ICON: &[u8] = include_bytes!("../../icons/icon.png");
+    let root = fonts::cache_directory()?.join("icons");
+    let directory = root.join("hicolor/512x512/apps");
+    let path = directory.join("dbm.png");
+    if std::fs::read(&path).ok().as_deref() != Some(ICON) {
+        std::fs::create_dir_all(&directory).ok()?;
+        std::fs::write(&path, ICON).ok()?;
+    }
+    Some(root)
 }

@@ -265,6 +265,9 @@ impl TableView {
         let inspector = ui::vbox(0);
         inspector.add_css_class("inspector");
         inspector.set_size_request(300, -1);
+        // Fixed width as in egui: hexpand children (entries) would otherwise
+        // make the inspector share the grid's extra space.
+        inspector.set_hexpand(false);
         let inspector_body = ui::vbox(0);
         inspector_body.set_vexpand(true);
         inspector.append(&inspector_body);
@@ -1448,6 +1451,7 @@ impl TableView {
             };
             let empty = ui::label(&message, &["size-12-5", "faint"]);
             empty.set_wrap(true);
+            empty.set_max_width_chars(30);
             empty.set_xalign(0.5);
             empty.set_justify(gtk::Justification::Center);
             empty.set_margin_top(28);

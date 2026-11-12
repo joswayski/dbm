@@ -42,12 +42,18 @@ pub fn prepare() {
 }
 
 fn directory() -> Option<PathBuf> {
+    Some(cache_directory()?.join("fonts"))
+}
+
+/// `$XDG_CACHE_HOME/dbm` (or `~/.cache/dbm`), where bundled assets are
+/// written for GTK to load.
+pub fn cache_directory() -> Option<PathBuf> {
     let cache = std::env::var_os("XDG_CACHE_HOME")
         .map(PathBuf::from)
         .filter(|path| path.is_absolute())
         .or_else(|| std::env::var_os("HOME").map(|home| Path::new(&home).join(".cache")))
         .unwrap_or_else(std::env::temp_dir);
-    Some(cache.join("dbm").join("fonts"))
+    Some(cache.join("dbm"))
 }
 
 fn install(directory: &Path) -> std::io::Result<()> {
