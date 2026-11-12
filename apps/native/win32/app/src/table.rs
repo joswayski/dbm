@@ -420,15 +420,6 @@ pub fn display_prefix(value: &Value, chars: usize) -> String {
     }
 }
 
-/// A grid cell's one-line text.
-pub fn cell_display(value: &Value) -> String {
-    if value.is_null() {
-        "NULL".into()
-    } else {
-        display_prefix(value, 200).replace('\n', " ")
-    }
-}
-
 /// A human-readable size for a value too large to edit in place.
 pub fn large_value_size(value: &Value) -> Option<String> {
     struct Counting(usize);

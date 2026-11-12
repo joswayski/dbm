@@ -458,7 +458,6 @@ impl Workbench {
                         theme::MUTED
                     },
                 );
-                drop(p);
                 if resp.clicked {
                     form.set_engine(engine);
                 }
@@ -539,7 +538,7 @@ impl Workbench {
                     let mut node = dbm_ui::a11y::Node::new(
                         id.0,
                         dbm_ui::a11y::Role::Button,
-                        &format!("Connection color {color}"),
+                        format!("Connection color {color}"),
                         r,
                     );
                     node.focusable = true;
@@ -550,7 +549,6 @@ impl Workbench {
                     if form.color.eq_ignore_ascii_case(color) {
                         p.circle_stroke(r.center(), 11.0, Stroke::new(2.0, theme::TEXT_STRONG));
                     }
-                    drop(p);
                     if resp.clicked {
                         form.color = color.into();
                     }

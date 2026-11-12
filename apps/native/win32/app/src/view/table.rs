@@ -1108,7 +1108,7 @@ fn header_cell(
         let r = ui
             .interact(rect, id.with("expand"), Sense::CLICK)
             .on_hover_text(format!("Expand {name}"));
-        let mut node = Node::new(id.0, Role::Button, &format!("Expand {name}"), rect);
+        let mut node = Node::new(id.0, Role::Button, format!("Expand {name}"), rect);
         node.focusable = true;
         ui.a11y(node);
         let mut p = ui.painter();
@@ -1353,7 +1353,6 @@ fn data_grid(
                         color,
                     );
                 }
-                drop(p);
                 let mut e = events.borrow_mut();
                 if pending.is_some() && ev.hovered {
                     e.hovered_staged = Some((index, rect));
@@ -1815,7 +1814,6 @@ fn change_diff(ui: &mut Ui, name: &str, before: &str, after: &str) {
         theme::TEXT_STRONG,
         Color32::from_rgba_unmultiplied(240, 177, 76, 82),
     );
-    drop(p);
     ui.allocate(vec2(avail.width(), total));
 }
 

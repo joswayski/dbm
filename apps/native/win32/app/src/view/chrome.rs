@@ -307,7 +307,6 @@ impl Workbench {
                     theme::FAINT
                 },
             );
-            drop(p);
             if cr.clicked {
                 self.close_tab(tab.id);
             } else if response.clicked {
@@ -460,7 +459,6 @@ impl Workbench {
                             theme::FAINT
                         },
                     );
-                    drop(p);
                     if pencil.clicked {
                         self.renaming = Some((tab.id, tab.title.clone()));
                         ui.ctx.request_focus(input_id);

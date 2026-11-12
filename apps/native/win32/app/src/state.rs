@@ -391,7 +391,6 @@ pub struct Workbench {
     pub history_widths: HashMap<u64, f32>,
     pub now: f64,
     pub window_width: f32,
-    pub focus_after_update: bool,
 }
 
 impl Workbench {
@@ -438,7 +437,6 @@ impl Workbench {
             history_widths: HashMap::new(),
             now: 0.0,
             window_width: 1280.0,
-            focus_after_update: std::env::args_os().any(|arg| arg == "--after-update"),
         };
         app.send(Command::LoadProfiles, "Loading connections", None);
         app

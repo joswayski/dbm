@@ -8,7 +8,6 @@ use dbm_core::models::DatabaseEngine;
 use dbm_core::sql_text::{
     ExecutionKind, TokenKind, completions, csv_document, execution_target, highlight,
 };
-use dbm_desktop::worker::Command;
 use dbm_ui::a11y::{Node, Role};
 use dbm_ui::icons::{self, Icon};
 use dbm_ui::input::{Key, Modifiers};
@@ -609,21 +608,8 @@ impl Workbench {
             .get(&profile)
             .map(|w| w.profile.default_database.clone())
             .unwrap_or_default();
-        let key = (profile, database.clone());
-        if !self.histories.contains_key(&key)
-            && !self
-                .pending_requests
-                .values()
-                .any(|m| m.label == "Loading history")
-            && self.workspaces.contains_key(&profile)
-        {
-            self.histories.insert(key.clone(), Vec::new());
-            self.send(
-                Command::History(profile, database),
-                "Loading history",
-                Some(profile),
-            );
-        }
+        let key = (profile, database);
+        self.ensure_history(profile);
         let entries = self.histories.get(&key).map_or(&[][..], Vec::as_slice);
         let entries = &entries[..entries.len().min(100)];
         let (head, body) = rect.split_top(36.0);
@@ -726,7 +712,6 @@ impl Workbench {
                         theme::ui(11.0),
                         theme::FAINT,
                     );
-                    drop(p);
                     if response.clicked {
                         picked = Some(entry.sql.clone());
                     }

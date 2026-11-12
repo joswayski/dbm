@@ -1,5 +1,7 @@
 // Release builds are GUI apps: no console window behind Anybase.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+// The app only runs on Windows; elsewhere the crate builds for its tests.
+#![cfg_attr(not(windows), allow(dead_code))]
 
 mod messages;
 mod platform;
@@ -46,7 +48,13 @@ fn main() {
     let _ = std::fs::remove_file(&error_log);
     let panic_log = error_log.clone();
     std::panic::set_hook(Box::new(move |info| {
-        let _ = std::fs::write(&panic_log, format!("panic: {info}\n{}", std::backtrace::Backtrace::force_capture()));
+        let _ = std::fs::write(
+            &panic_log,
+            format!(
+                "panic: {info}\n{}",
+                std::backtrace::Backtrace::force_capture()
+            ),
+        );
     }));
     let args: Vec<std::ffi::OsString> = std::env::args_os().collect();
     let demo = args.iter().any(|a| a == "--demo");

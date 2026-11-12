@@ -255,31 +255,32 @@ impl<'t> TextEdit<'t> {
         let shown = display(self.text);
         let lines = layout_lines(&shown, self.multiline);
         let origin = pos2(inner.left() - st.scroll.x, inner.top() - st.scroll.y);
-        if (response.pressed || response.dragged) && self.interactive {
-            if let Some(p) = ui.ctx.pointer() {
-                let at = map_offset(
-                    &shown,
-                    self.text,
-                    hit(&ui.ctx.fonts, &shown, &lines, font, origin, p),
-                );
-                if response.pressed {
-                    ui.ctx.request_focus(id);
-                    st.blink_from = ui.ctx.time();
-                    if response.double_clicked {
-                        let (a, b) = word_at(self.text, at);
-                        st.selection = (a, b);
-                        st.drag_anchor = None;
-                    } else if ui.ctx.modifiers().shift {
-                        st.selection.1 = at;
-                        st.drag_anchor = Some(st.selection.0);
-                    } else {
-                        st.selection = (at, at);
-                        st.drag_anchor = Some(at);
-                    }
-                    st.goal_x = None;
-                } else if let Some(anchor) = st.drag_anchor {
-                    st.selection = (anchor, at);
+        if (response.pressed || response.dragged)
+            && self.interactive
+            && let Some(p) = ui.ctx.pointer()
+        {
+            let at = map_offset(
+                &shown,
+                self.text,
+                hit(&ui.ctx.fonts, &shown, &lines, font, origin, p),
+            );
+            if response.pressed {
+                ui.ctx.request_focus(id);
+                st.blink_from = ui.ctx.time();
+                if response.double_clicked {
+                    let (a, b) = word_at(self.text, at);
+                    st.selection = (a, b);
+                    st.drag_anchor = None;
+                } else if ui.ctx.modifiers().shift {
+                    st.selection.1 = at;
+                    st.drag_anchor = Some(st.selection.0);
+                } else {
+                    st.selection = (at, at);
+                    st.drag_anchor = Some(at);
                 }
+                st.goal_x = None;
+            } else if let Some(anchor) = st.drag_anchor {
+                st.selection = (anchor, at);
             }
         }
         if response.drag_stopped || !ui.ctx.primary_down() {

@@ -724,7 +724,7 @@ impl Context {
     // ---- accessibility actions -------------------------------------------
 
     fn take_a11y(&mut self, id: Id, f: impl Fn(&A11yAction) -> bool) -> bool {
-        if let Some(i) = self.a11y_actions.iter().position(|a| f(a)) {
+        if let Some(i) = self.a11y_actions.iter().position(f) {
             let _ = id;
             self.a11y_actions.remove(i);
             true
@@ -799,14 +799,14 @@ impl Context {
         }
         let is_active = self.active == Some(id);
         r.is_pointer_down = is_active && self.button_down[0];
-        if let Some((button, _, double)) = self.pressed {
-            if button == Button::Primary {
-                if self.hovered == Some(id) && contains {
-                    r.pressed = true;
-                    r.double_clicked = double && enabled;
-                } else {
-                    r.clicked_elsewhere = true;
-                }
+        if let Some((button, _, double)) = self.pressed
+            && button == Button::Primary
+        {
+            if self.hovered == Some(id) && contains {
+                r.pressed = true;
+                r.double_clicked = double && enabled;
+            } else {
+                r.clicked_elsewhere = true;
             }
         }
         if let Some((button, pos)) = self.released {
@@ -827,26 +827,30 @@ impl Context {
                 }
             }
         }
-        if sense.drag && is_active && self.button_down[0] && enabled {
-            if let (Some(p), Some(last)) = (self.pointer, self.last_pointer) {
-                let delta = p - last;
-                if delta != Vec2::ZERO || self.drag_started {
-                    if !self.drag_started {
-                        self.drag_started = true;
-                        r.drag_started = true;
-                    }
-                    r.dragged = true;
-                    r.drag_delta = delta;
+        if sense.drag
+            && is_active
+            && self.button_down[0]
+            && enabled
+            && let (Some(p), Some(last)) = (self.pointer, self.last_pointer)
+        {
+            let delta = p - last;
+            if delta != Vec2::ZERO || self.drag_started {
+                if !self.drag_started {
+                    self.drag_started = true;
+                    r.drag_started = true;
                 }
+                r.dragged = true;
+                r.drag_delta = delta;
             }
         }
         // Enter or Space on the focused control clicks it.
-        if r.has_focus && enabled && sense.focusable {
-            if self.consume_key(Modifiers::NONE, Key::Enter)
-                || self.consume_key(Modifiers::NONE, Key::Space)
-            {
-                r.clicked = true;
-            }
+        if r.has_focus
+            && enabled
+            && sense.focusable
+            && (self.consume_key(Modifiers::NONE, Key::Enter)
+                || self.consume_key(Modifiers::NONE, Key::Space))
+        {
+            r.clicked = true;
         }
         if self.take_a11y(
             id,

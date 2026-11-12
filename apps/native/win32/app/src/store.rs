@@ -32,14 +32,6 @@ impl Store {
         Store { path, values }
     }
 
-    #[cfg(test)]
-    pub fn memory() -> Self {
-        Store {
-            path: None,
-            values: BTreeMap::new(),
-        }
-    }
-
     pub fn get(&self, key: &str) -> Option<&str> {
         self.values.get(key).map(String::as_str)
     }

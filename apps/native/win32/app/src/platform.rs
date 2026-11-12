@@ -106,13 +106,11 @@ fn choose_color([r, g, b]: [u8; 3]) -> Option<[u8; 3]> {
     // SAFETY: `cc` and `custom` outlive the modal call.
     let ok = unsafe { ChooseColorW(&mut cc) }.as_bool();
     let c = cc.rgbResult.0;
-    ok.then(|| {
-        [
-            (c & 0xff) as u8,
-            (c >> 8 & 0xff) as u8,
-            (c >> 16 & 0xff) as u8,
-        ]
-    })
+    ok.then_some([
+        (c & 0xff) as u8,
+        (c >> 8 & 0xff) as u8,
+        (c >> 16 & 0xff) as u8,
+    ])
 }
 
 #[cfg(not(windows))]

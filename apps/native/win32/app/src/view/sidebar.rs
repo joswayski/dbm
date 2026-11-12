@@ -15,7 +15,7 @@ use dbm_ui::{
 };
 use uuid::Uuid;
 
-use crate::state::{PASSWORD_LOAD, ProfileForm, RequestKind, Workbench, engine_label};
+use crate::state::{ProfileForm, Workbench, engine_label};
 
 pub fn section_label(ui: &mut Ui, text: &str) -> Rect {
     ui.label(text, theme::bold(11.0), theme::MUTED)
@@ -126,10 +126,10 @@ impl Workbench {
             ui.ctx.close_popup();
             ui.ctx.request_focus(id);
         }
-        if r.dragged {
-            if let Some(p) = ui.ctx.pointer() {
-                self.sidebar_width = (p.x - rect.left()).clamp(220.0, 480.0);
-            }
+        if r.dragged
+            && let Some(p) = ui.ctx.pointer()
+        {
+            self.sidebar_width = (p.x - rect.left()).clamp(220.0, 480.0);
         }
         if r.double_clicked {
             self.sidebar_width = 260.0;
@@ -236,14 +236,7 @@ impl Workbench {
             (false, false) => response.clone().on_hover_text("Connect"),
         };
         if response.clicked {
-            if connected {
-                self.activate_profile(id);
-            } else {
-                self.active_profile = Some(id);
-                if !connecting {
-                    self.send(Command::Connect(id), "Connecting", Some(id));
-                }
-            }
+            self.choose_profile(id);
         }
         let more_rect = Rect::from_min_size(
             pos2(rect.right() - 30.0, rect.top() + 1.0),
@@ -268,17 +261,7 @@ impl Workbench {
             false
         });
         if edit {
-            let current = self.workspaces.get(&id).map_or(profile, |w| &w.profile);
-            let form = ProfileForm::from_profile(current);
-            let input = form.input();
-            self.profile_form = Some(form);
-            self.dispatch(
-                Command::ConnectionUrl(input, true),
-                PASSWORD_LOAD,
-                None,
-                Some(id),
-                RequestKind::Form,
-            );
+            self.edit_profile(id);
         }
         if disconnect && self.profile_is_clean(id) {
             self.send(Command::Disconnect(id), "Disconnecting", None);

@@ -261,13 +261,12 @@ pub struct Renderer {
     brush: ID2D1SolidColorBrush,
     round: ID2D1StrokeStyle,
     size: (u32, u32),
-    pub software: bool,
 }
 
 impl Renderer {
     pub fn new(hwnd: Option<HWND>, text: Rc<Text>, width: u32, height: u32) -> Result<Self> {
         unsafe {
-            let (d3d, software) = create_device()?;
+            let (d3d, _software) = create_device()?;
             let dxgi: IDXGIDevice = d3d.cast()?;
             let factory: ID2D1Factory1 =
                 D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)?;
@@ -300,7 +299,6 @@ impl Renderer {
                 brush,
                 round,
                 size: (width.max(1), height.max(1)),
-                software,
             };
             if let Some(hwnd) = hwnd {
                 r.attach(hwnd)?;
@@ -732,14 +730,6 @@ impl Renderer {
         }
         .map(|_| ())
         .inspect(|_| self.text.end_frame())
-    }
-
-    pub fn commit(&self) {
-        if let Some(d) = &self.dcomp {
-            unsafe {
-                let _ = d.Commit();
-            }
-        }
     }
 }
 

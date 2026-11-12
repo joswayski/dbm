@@ -25,7 +25,6 @@ pub struct RowEvents {
     pub double_clicked: bool,
     pub secondary_clicked: bool,
     pub hovered: bool,
-    pub response: dbm_ui::Response,
 }
 
 /// Draws the grid in `rect`. `header(ui, column, rect)` draws a header
@@ -69,7 +68,6 @@ pub fn grid(
                     double_clicked: r.double_clicked,
                     secondary_clicked: r.secondary_clicked,
                     hovered: r.hovered,
-                    response: r.clone(),
                 };
                 {
                     let mut p = ui.painter();
@@ -109,6 +107,7 @@ pub fn grid(
     }
     let mut x = head.left() - offset;
     let resize_id = id.with("resize");
+    #[allow(clippy::needless_range_loop)] // `widths[column]` is written below.
     for column in 0..widths.len() {
         let w = widths[column];
         let cell_rect = Rect::from_min_size(pos2(x, head.top()), vec2(w, head.height()));
