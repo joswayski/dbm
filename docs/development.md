@@ -71,7 +71,11 @@ x86_64-pc-windows-msvc` in `apps/native/win32`), and the `raster` feature
 renders the same snapshot walk in software: `cargo run -p dbm-win32 --features
 raster -- --snapshot-dir shots`. The `Win32 preview` workflow (Run workflow)
 snapshots the real app on a hosted Windows runner and benchmarks it against
-the last egui release.
+the last egui release. Given an `update_from` release tag instead, it installs
+that release with its setup, clicks its own Update and Install and restart
+buttons, and checks that the relaunched `dbm.exe` is the latest
+`DBM-Windows-x64.exe` and that `app.ron` kept its settings
+(`apps/native/win32/bench/update-check.ps1`).
 
 On Linux:
 

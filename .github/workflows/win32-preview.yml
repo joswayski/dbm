@@ -15,6 +15,9 @@ on:
         description: Run the benchmark (off for snapshots only)
         type: boolean
         default: true
+      update_from:
+        description: Instead, install this older release tag and self-update it to the latest release
+        default: ""
   push:
     branches: [win32-preview]
 
@@ -22,7 +25,29 @@ permissions:
   contents: read
 
 jobs:
+  update-check:
+    if: inputs.update_from != ''
+    runs-on: windows-2025
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Self-update an installed release to the latest
+        shell: pwsh
+        run: apps/native/win32/bench/update-check.ps1 -FromTag '${{ inputs.update_from }}' -Out update-check
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: win32-update-check
+          path: |
+            update-check/*.png
+            update-check/*.txt
+            update-check/*.json
+
   preview:
+    if: inputs.update_from == ''
     runs-on: windows-2025
     timeout-minutes: 90
     steps:
