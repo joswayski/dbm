@@ -745,7 +745,9 @@ fn form_dialog(app: &App, state: &State, form: &ProfileForm) -> gtk::Box {
         });
     });
     colors.append(&custom);
-    colors.append(&ui::label("Custom", &["muted"]));
+    let custom_label = ui::label("Custom", &["size-12-5", "muted"]);
+    custom_label.set_margin_start(2);
+    colors.append(&custom_label);
     fields.append(&labeled("Connection color", &colors));
     // Host and port.
     let host = field(app, &preview, &form.host, "", |f, v| f.host = v);

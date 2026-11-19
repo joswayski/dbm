@@ -199,7 +199,7 @@ impl QueryView {
         top.add_css_class("editor-split");
         top.set_margin_start(14);
         top.set_margin_end(14);
-        top.set_margin_bottom(12);
+        // The split's 12 px separator is the gap above the results.
         // Results.
         let message = Slot::new();
         let copy = ui::button(
