@@ -205,7 +205,7 @@ impl TableView {
         buttons.append(&clear);
         buttons.append(&apply);
         controls.append(&buttons);
-        let filter_rows = ui::vbox(4);
+        let filter_rows = ui::vbox(6);
         // The controls share the header's row when both fit, as in the
         // Windows app, and wrap below it otherwise.
         let top = ui::hbox(12);
@@ -297,7 +297,14 @@ impl TableView {
         inspector.set_hexpand(false);
         let inspector_body = ui::vbox(0);
         inspector_body.set_vexpand(true);
-        inspector.append(&inspector_body);
+        // A box reports its content's natural width, so a long header chip
+        // would widen the panel past 300 px; a scrolled window reports only
+        // the minimum.
+        let inspector_clamp = gtk::ScrolledWindow::new();
+        inspector_clamp.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Never);
+        inspector_clamp.set_vexpand(true);
+        inspector_clamp.set_child(Some(&inspector_body));
+        inspector.append(&inspector_clamp);
         let middle = ui::hbox(0);
         middle.set_vexpand(true);
         middle.append(&body);

@@ -583,7 +583,7 @@ fn form_dialog(app: &App, state: &State, form: &ProfileForm) -> gtk::Box {
     // Engine.
     let segmented = ui::hbox(2);
     segmented.add_css_class("segmented");
-    segmented.set_halign(gtk::Align::Start);
+    segmented.set_homogeneous(true);
     for engine in [
         DatabaseEngine::Postgres,
         DatabaseEngine::Mysql,

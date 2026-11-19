@@ -47,7 +47,8 @@ impl Sidebar {
         let header = ui::hbox(8);
         header.set_margin_start(12);
         header.set_margin_end(10);
-        header.set_margin_top(10);
+        // 8 + the 28 px button centers the row on the 44 px top bar.
+        header.set_margin_top(8);
         header.set_margin_bottom(4);
         let title = ui::label("Connections", &["section-label"]);
         title.set_hexpand(true);

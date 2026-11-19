@@ -87,7 +87,8 @@ label { color: inherit; }
 .pending-bar { background-color: @chrome; min-height: 48px; padding: 0 14px;
   border-top: 1px solid @border; }
 .inspector { background-color: @chrome; border-left: 1px solid @border; }
-.inspector-header { min-height: 40px; padding: 0 8px 0 14px; border-bottom: 1px solid @border; }
+/* As tall as the grid's column headers, so their bottom edges line up. */
+.inspector-header { min-height: 34px; padding: 0 8px 0 14px; border-bottom: 1px solid @border; }
 .inspector-footer { padding: 12px 14px; border-top: 1px solid @border; }
 .card { background-color: @bg; border: 1px solid @border; border-radius: 10px; }
 .card.chrome { background-color: @chrome; }
@@ -173,7 +174,7 @@ dropdown > button, menubutton > button, .combo {
   background-color: @control;
   border: 1px solid @border_strong;
   border-radius: 6px;
-  min-height: 26px;
+  min-height: 28px;
   padding: 0 8px;
   color: @text;
   font-size: 12.5px;
@@ -196,7 +197,8 @@ checkbutton check { background-color: @control; border: 1px solid @border_strong
 checkbutton check:checked { background-color: @accent_strong; border-color: @accent_strong; color: white; }
 
 .segmented { background-color: @control; border-radius: 7px; padding: 2px; }
-.segmented button { min-height: 26px; min-width: 120px; color: @muted; border-radius: 5px; }
+.segmented button { min-height: 26px; color: @muted; border-radius: 5px; }
+.segmented button:hover { color: @text; }
 .segmented button.selected { background-color: @control_active; color: @text_strong;
   box-shadow: 0 1px 1px rgba(0,0,0,0.35); }
 
@@ -226,7 +228,8 @@ listview.completion row:selected { background-color: @accent_strong; color: whit
 tooltip { background-color: @popover; border: 1px solid @border_strong; border-radius: 6px; color: @text; }
 tooltip label { font-size: 12px; }
 
-scrollbar { background-color: transparent; }
+scrollbar { background-color: transparent; border: none; box-shadow: none; }
+scrollbar trough { background-color: transparent; border: none; }
 scrollbar slider { background-color: rgba(255,255,255,0.18); border-radius: 6px; min-width: 6px; min-height: 6px; }
 
 paned > separator { background-color: @border; min-width: 1px; min-height: 1px; }
@@ -379,7 +382,11 @@ colorbutton.custom-swatch > button { padding: 0; border: none; background-color:
 colorbutton.custom-swatch colorswatch { border-radius: 5px; box-shadow: inset 0 0 0 1px @border_strong; }
 colorbutton.custom-swatch colorswatch > overlay { border-radius: 5px; box-shadow: inset 0 0 0 1px alpha(white, 0.12); }
 spinbutton { border: 1px solid @border_strong; border-radius: 6px; min-height: 28px; font-size: 12px; }
-spinbutton > button { color: @muted; min-width: 22px; }
+spinbutton > text { min-height: 0; padding: 0 4px 0 8px; }
+/* Flat steppers, so the field is as tall as the entries and dropdowns beside it. */
+spinbutton > button { color: @muted; min-width: 22px; min-height: 0; padding: 0 4px; border: none;
+  border-radius: 0; background: none; }
+spinbutton > button:hover { color: @text; background-color: rgba(255,255,255,0.06); }
 .header-key { color: @modified; }
 
 scrolledwindow > undershoot, scrolledwindow > overshoot { background: none; box-shadow: none; }

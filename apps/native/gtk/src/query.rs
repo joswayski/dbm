@@ -166,9 +166,17 @@ impl QueryView {
         let history_scroller = gtk::ScrolledWindow::new();
         history_scroller.set_hscrollbar_policy(gtk::PolicyType::Never);
         history_scroller.set_child(Some(&history));
-        let empty = ui::label("Run a query to start history.", &["muted"]);
+        let empty = ui::label(
+            if redis {
+                "Run a command to start history."
+            } else {
+                "Run a query to start history."
+            },
+            &["size-12-5", "faint"],
+        );
         empty.set_wrap(true);
         empty.set_margin_start(12);
+        empty.set_margin_end(12);
         empty.set_margin_top(12);
         empty.set_valign(gtk::Align::Start);
         let history_stack = gtk::Stack::new();

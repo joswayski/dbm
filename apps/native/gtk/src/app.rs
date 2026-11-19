@@ -328,6 +328,9 @@ impl App {
         sidebar::connect(self);
         let app = self.clone();
         let expand = ui::button("toolbar-button", Some(Icon::Sidebar), "", "Expand sidebar");
+        // Centered on the 44 px top bar beside it, like the sidebar's own header.
+        expand.set_margin_top(8);
+        expand.set_halign(gtk::Align::Center);
         expand.connect_clicked(move |_| app.update(|state| state.sidebar_collapsed = false));
         self.shell.collapsed_sidebar.append(&expand);
     }
