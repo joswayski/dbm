@@ -638,11 +638,19 @@ impl Workbench {
             );
         }
         if entries.is_empty() {
+            let redis = self
+                .workspaces
+                .get(&profile)
+                .is_some_and(|w| w.profile.engine == DatabaseEngine::Redis);
             let mut c = ui.child(body.shrink(12.0), Dir::Down);
             c.label_wrapped(
-                "Run a query to start history.",
+                if redis {
+                    "Run a command to start history."
+                } else {
+                    "Run a query to start history."
+                },
                 theme::ui(12.5),
-                theme::MUTED,
+                theme::FAINT,
                 false,
             );
             return None;

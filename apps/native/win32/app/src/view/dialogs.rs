@@ -461,7 +461,9 @@ impl Workbench {
             ui.spacing.y = 4.0;
             form_label(ui, "Database engine");
             // A segmented control on the control fill.
-            let seg = ui.allocate(vec2(3.0 * 120.0 + 2.0 * 2.0 + 4.0, 30.0));
+            // As wide as the fields below it, in three equal segments.
+            let seg = ui.allocate(vec2(ui.available_width(), 30.0));
+            let segment = (seg.width() - 4.0 - 2.0 * 2.0) / 3.0;
             ui.painter().rect_filled(seg, 7.0, theme::CONTROL);
             for (i, engine) in [
                 DatabaseEngine::Postgres,
@@ -472,8 +474,11 @@ impl Workbench {
             .enumerate()
             {
                 let r = Rect::from_min_size(
-                    pos2(seg.left() + 2.0 + i as f32 * 122.0, seg.top() + 2.0),
-                    vec2(120.0, 26.0),
+                    pos2(
+                        seg.left() + 2.0 + i as f32 * (segment + 2.0),
+                        seg.top() + 2.0,
+                    ),
+                    vec2(segment, 26.0),
                 );
                 let id = Id::new(("engine", i));
                 let resp = ui.interact(r, id, Sense::CLICK);

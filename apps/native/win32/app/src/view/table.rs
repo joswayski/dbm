@@ -483,7 +483,8 @@ fn filter_panel_height(ui: &Ui, cx: &Cx<'_>, state: &TableState, width: f32) -> 
     let known: f32 = ui.ctx.data(controls_width_id(cx)).unwrap_or(0.0);
     let inner = width - 26.0;
     let wrapped = header_width(ui) + 16.0 + known > inner;
-    14.0 + 30.0 + if wrapped { 32.0 } else { 0.0 } + state.filters.len() as f32 * 32.0
+    // 30 px rows, 6 px apart, as in the GTK filter bar.
+    14.0 + 30.0 + if wrapped { 36.0 } else { 0.0 } + state.filters.len() as f32 * 36.0
 }
 
 fn filter_panel(
@@ -504,7 +505,7 @@ fn filter_panel(
     let known: f32 = ui.ctx.data(controls_width_id(cx)).unwrap_or(0.0);
     let wrapped = header_width(ui) + 16.0 + known > rect.width();
     let mut c = ui.child(rect, Dir::Down);
-    c.spacing.y = 2.0;
+    c.spacing.y = 6.0;
     c.horizontal(30.0, |ui| {
         ui.spacing.x = 8.0;
         widgets::icon(ui, Icon::Filter, 13.0, theme::FAINT);
@@ -1930,8 +1931,9 @@ fn inspector(ui: &mut Ui, rect: Rect, cx: &Cx<'_>, state: &mut TableState, page:
         .filter(|&i| i < page.rows.len());
     let pending = single.and_then(|i| state.pending.get(&i).cloned());
     let deleted = pending.as_ref().is_some_and(|p| p.deleted);
-    // Header: 40 px, like `.row-inspector-header`.
-    let (header, body) = rect.split_top(40.0);
+    // Header: as tall as the grid's column headers, so their bottom edges
+    // line up.
+    let (header, body) = rect.split_top(theme::HEADER_HEIGHT);
     {
         let mut row = ui.child(header.inset(14.0, 0.0, 8.0, 0.0), Dir::Left);
         if icon_button(&mut row, Icon::Close, None, "Hide row inspector").clicked {
