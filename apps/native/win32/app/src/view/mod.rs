@@ -81,8 +81,16 @@ impl View {
         let (top, rest) = main.split_top(44.0);
         app.top_bar(ui, top);
         let rest = app.banner_ui(ui, rest);
-        let (strip, content) = rest.split_top(36.0);
-        app.tab_strip(ui, strip);
+        // Without tabs or a connection to open one on, the strip would be an
+        // empty band above the welcome pane.
+        let show_strip = !app.tabs.is_empty()
+            || app
+                .active_profile
+                .is_some_and(|p| app.workspaces.contains_key(&p));
+        let (strip, content) = rest.split_top(if show_strip { 36.0 } else { 0.0 });
+        if show_strip {
+            app.tab_strip(ui, strip);
+        }
         ui.painter().rect_filled(content, 0.0, theme::BG);
         app.content(ui, content);
         app.dialogs(ui);

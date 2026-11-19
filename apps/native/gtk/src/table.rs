@@ -1694,14 +1694,22 @@ impl TableView {
             self.preview_key.borrow_mut().clear();
         }
         if let Some(bounds) = cell.compute_bounds(&self.view) {
-            self.preview.set_pointing_to(Some(&gtk::gdk::Rectangle::new(
-                16,
-                (bounds.y() + bounds.height()) as i32,
-                1,
-                1,
-            )));
+            self.place_preview((bounds.y() + bounds.height()) as i32);
         }
         self.app.queue_render();
+    }
+
+    /// Points the card at the row's bottom edge, 16 px in from the grid's
+    /// left like the other desktop apps. GTK centers a popover on the
+    /// rectangle it points to, so the rectangle spans the card's width.
+    fn place_preview(&self, y: i32) {
+        // The popover itself measures 0 until shown; its card plus the
+        // contents' padding (12 + 12) and border (1 + 1) is its width.
+        let width = self.preview.child().map_or(1, |card| {
+            card.measure(gtk::Orientation::Horizontal, -1).1 + 26
+        });
+        self.preview
+            .set_pointing_to(Some(&gtk::gdk::Rectangle::new(16, y, width.max(1), 1)));
     }
 
     fn cancel_preview_close(&self) {
@@ -1822,6 +1830,9 @@ impl TableView {
                 }
             }
             self.preview.set_child(Some(&content));
+            if let (true, rect) = self.preview.pointing_to() {
+                self.place_preview(rect.y());
+            }
         }
         if !self.preview.is_visible() {
             self.preview.popup();

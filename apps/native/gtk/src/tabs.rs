@@ -60,6 +60,14 @@ impl TabStrip {
             return;
         }
         *self.signature.borrow_mut() = signature;
+        // Without tabs or a connection to open one on, the strip would be an
+        // empty band above the welcome pane.
+        self.root.set_visible(
+            !state.tabs.is_empty()
+                || state
+                    .active_profile
+                    .is_some_and(|p| state.workspaces.contains_key(&p)),
+        );
         ui::clear(&self.tabs);
         let mut active_widget = None;
         for tab in &state.tabs {
@@ -337,7 +345,7 @@ impl Welcome {
         message.set_xalign(0.5);
         message.set_justify(gtk::Justification::Center);
         message.set_wrap(true);
-        message.set_max_width_chars(60);
+        message.set_max_width_chars(72);
         message.set_margin_top(8);
         column.append(&icon);
         column.append(&title);

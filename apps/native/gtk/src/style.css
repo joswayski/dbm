@@ -125,7 +125,7 @@ button:focus-visible { outline: 2px solid alpha(@accent, 0.35); outline-offset: 
 .danger-button:hover { background-color: rgba(255,107,97,0.16); }
 .accent-button { background-color: alpha(@accent, 0.14); border-color: alpha(@accent, 0.55); color: @accent_text; }
 .small { min-height: 24px; padding: 0 9px; font-size: 12px; }
-.kbd { background-color: rgba(255,255,255,0.2); border-radius: 4px; padding: 0 5px; font-size: 11px; }
+.kbd { background-color: rgba(255,255,255,0.18); border-radius: 4px; padding: 1px 5px; margin-left: 2px; font-size: 11px; font-weight: 400; }
 
 .toolbar-button { min-height: 28px; padding: 0 9px; color: @secondary; font-size: 12.5px; }
 .toolbar-button.icon-only { padding: 0 7px; }
@@ -156,6 +156,10 @@ entry {
   background-image: none;
 }
 entry:focus-within { border-color: @accent; box-shadow: 0 0 0 3px alpha(@accent, 0.18); outline: none; }
+/* The entry draws the fill; its text node would otherwise paint a second,
+   lighter box inside entries with their own fill (inspector, cell editor). */
+entry > text, spinbutton > text { background-color: transparent; }
+entry > image { color: @faint; -gtk-icon-size: 13px; }
 entry placeholder, text placeholder { color: @faint; }
 entry.mono { font-size: 12px; }
 entry selection, text selection, textview selection { background-color: alpha(@accent, 0.25); color: @text_strong; }
@@ -198,6 +202,7 @@ popover > contents, popover.menu > contents {
   box-shadow: 0 4px 10px rgba(0,0,0,0.45);
   color: @text;
 }
+popover.preview > contents { padding: 10px 12px 12px 12px; }
 popover > arrow { background-color: @popover; border-color: @border_strong; }
 .menu-item { min-height: 28px; padding: 0 8px; border-radius: 5px; color: @text; font-size: 12.5px; }
 .menu-item:hover { background-color: @accent_strong; color: white; }
@@ -351,6 +356,10 @@ columnview listview row > cell { padding: 0; min-height: 32px; border-right: 1px
 .diff-rule { background-color: @border; }
 .swatch-button { padding: 2px; border-radius: 999px; }
 .swatch-selected { box-shadow: 0 0 0 2px @popover, 0 0 0 4px @text_strong; }
+/* The custom-color picker is a bare color well, as on macOS and Windows. */
+colorbutton.custom-swatch > button { padding: 0; border: none; background-color: transparent; min-height: 0; margin-left: 2px; }
+colorbutton.custom-swatch colorswatch { border-radius: 5px; box-shadow: inset 0 0 0 1px @border_strong; }
+colorbutton.custom-swatch colorswatch > overlay { border-radius: 5px; box-shadow: inset 0 0 0 1px alpha(white, 0.12); }
 spinbutton { border: 1px solid @border_strong; border-radius: 6px; min-height: 28px; font-size: 12px; }
 spinbutton > button { color: @muted; min-width: 22px; }
 .header-key { color: @modified; }

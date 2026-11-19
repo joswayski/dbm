@@ -257,8 +257,8 @@ impl Workspace {
         let root = ui::vbox(4);
         root.set_margin_start(10);
         root.set_margin_end(8);
-        root.set_margin_top(2);
-        root.set_margin_bottom(6);
+        root.set_margin_top(8);
+        root.set_margin_bottom(10);
         let database_label = ui::label("Database", &["section-label"]);
         let databases = gtk::DropDown::from_strings(&[]);
         databases.set_hexpand(true);

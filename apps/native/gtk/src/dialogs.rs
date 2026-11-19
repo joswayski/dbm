@@ -717,6 +717,12 @@ fn form_dialog(app: &App, state: &State, form: &ProfileForm) -> gtk::Box {
     if let Ok(rgba) = gtk::gdk::RGBA::parse(&form.color) {
         custom.set_rgba(&rgba);
     }
+    custom.add_css_class("custom-swatch");
+    // GTK sizes the swatch inside as a wide bar; use the 28×22 color well
+    // the other desktop apps draw.
+    if let Some(swatch) = custom.first_child().and_then(|button| button.first_child()) {
+        swatch.set_size_request(28, 22);
+    }
     custom.set_tooltip_text(Some("Choose a custom color"));
     let handle = app.clone();
     custom.connect_rgba_notify(move |button| {
@@ -898,7 +904,7 @@ fn form_dialog(app: &App, state: &State, form: &ProfileForm) -> gtk::Box {
         &["note"],
     ));
     let actions = ui::hbox(8);
-    actions.set_margin_top(4);
+    actions.set_margin_top(8);
     if form.id.is_some() {
         let delete = ui::button("danger-button", None, "Delete", "");
         delete.set_sensitive(!busy);

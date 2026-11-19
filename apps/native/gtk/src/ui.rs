@@ -108,6 +108,7 @@ pub fn primary_with_shortcut(icon: Icon, text: &str, shortcut: &str) -> gtk::But
     if let Some(content) = button.child().and_then(|c| c.downcast::<gtk::Box>().ok()) {
         let kbd = gtk::Label::new(Some(shortcut));
         kbd.add_css_class("kbd");
+        kbd.set_valign(gtk::Align::Center);
         content.append(&kbd);
         // The text stays the last label for `set_button_text`.
         if let Some(text) = content.first_child().and_then(|icon| icon.next_sibling()) {
