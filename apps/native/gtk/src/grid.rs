@@ -256,7 +256,28 @@ impl ResultGrid {
             view_column.set_expand(share);
             self.view.append_column(&view_column);
         }
+        align_numeric_headers(&self.view, columns);
         fill(&self.store, rows.len());
+    }
+}
+
+/// Right-aligns numeric columns' titles over their right-aligned values.
+fn align_numeric_headers(view: &gtk::ColumnView, columns: &[QueryColumn]) {
+    let Some(header) = view.first_child() else {
+        return;
+    };
+    let mut title = header.first_child();
+    for column in columns {
+        let Some(widget) = title else {
+            return;
+        };
+        title = widget.next_sibling();
+        if numeric_column(&column.data_type)
+            && let Some(label) = crate::table::find_label(&widget)
+        {
+            label.set_hexpand(true);
+            label.set_xalign(1.0);
+        }
     }
 }
 

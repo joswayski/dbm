@@ -206,9 +206,34 @@ impl TableView {
         buttons.append(&apply);
         controls.append(&buttons);
         let filter_rows = ui::vbox(4);
-        filters.append(&header);
+        // The controls share the header's row when both fit, as in the
+        // Windows app, and wrap below it otherwise.
+        let top = ui::hbox(12);
+        top.append(&header);
+        filters.append(&top);
         filters.append(&controls);
         filters.append(&filter_rows);
+        let (row, wrap) = (top.downgrade(), controls.downgrade());
+        filters.add_tick_callback(move |filters, _| {
+            let (Some(row), Some(controls)) = (row.upgrade(), wrap.upgrade()) else {
+                return glib::ControlFlow::Break;
+            };
+            let natural = |w: &gtk::Widget| w.measure(gtk::Orientation::Horizontal, -1).1;
+            let header = row.first_child().map_or(0, |h| natural(&h));
+            let fits = header + 12 + natural(controls.upcast_ref()) <= filters.width();
+            let inline = controls.parent().as_ref() == Some(row.upcast_ref());
+            if fits != inline {
+                if let Some(parent) = controls.parent().and_downcast::<gtk::Box>() {
+                    parent.remove(&controls);
+                }
+                if fits {
+                    row.append(&controls);
+                } else {
+                    filters.insert_child_after(&controls, Some(&row));
+                }
+            }
+            glib::ControlFlow::Continue
+        });
         let message = Slot::new();
         message.root.set_margin_bottom(8);
         // Grid.
@@ -2167,7 +2192,7 @@ fn decorate_headers(view: &gtk::ColumnView, headers: &[(String, String, bool, bo
             glib::markup_escape_text(name).to_string()
         } else {
             format!(
-                "{}  <span size=\"small\" foreground=\"#5c5c62\">{}</span>",
+                "{} <span size=\"small\" weight=\"normal\" foreground=\"#808087\">{}</span>",
                 glib::markup_escape_text(name),
                 glib::markup_escape_text(data_type)
             )
@@ -2196,7 +2221,7 @@ fn decorate_headers(view: &gtk::ColumnView, headers: &[(String, String, bool, bo
     }
 }
 
-fn find_label(widget: &gtk::Widget) -> Option<gtk::Label> {
+pub fn find_label(widget: &gtk::Widget) -> Option<gtk::Label> {
     let mut child = widget.first_child();
     while let Some(current) = child {
         if let Some(label) = current.downcast_ref::<gtk::Label>() {

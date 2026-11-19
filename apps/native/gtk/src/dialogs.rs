@@ -614,11 +614,13 @@ fn form_dialog(app: &App, state: &State, form: &ProfileForm) -> gtk::Box {
     let copy_url = ui::button("secondary-button", None, "Copy URL", "");
     let handle = app.clone();
     copy_url.connect_clicked(move |_| handle.update(State::copy_profile_url));
+    // As on macOS: the URL with Import beside it, then Copy URL and the
+    // password toggle that changes what the URL shows.
     let url_row = ui::hbox(8);
     url_row.append(&preview);
-    url_row.append(&copy_url);
     fields.append(&labeled("Connection URL", &url_row));
     let url_options = ui::hbox(12);
+    url_options.append(&copy_url);
     let show_url = gtk::CheckButton::with_label("Show password");
     show_url.set_active(form.show_url_password);
     let handle = app.clone();
@@ -641,8 +643,8 @@ fn form_dialog(app: &App, state: &State, form: &ProfileForm) -> gtk::Box {
     import.connect_clicked(move |_| {
         update_form(&handle, |form| form.importing_url = !form.importing_url);
     });
-    url_options.append(&import);
-    fields.append(&url_options);
+    import.set_size_request(112, -1);
+    url_row.append(&import);
     if form.importing_url {
         let row = ui::hbox(8);
         let url = gtk::PasswordEntry::new();
@@ -680,6 +682,7 @@ fn form_dialog(app: &App, state: &State, form: &ProfileForm) -> gtk::Box {
         let on_activate = run_import.clone();
         url.connect_activate(move |_| on_activate());
         import.connect_clicked(move |_| run_import());
+        import.set_size_request(112, -1);
         row.append(&url);
         row.append(&import);
         fields.append(&row);
@@ -690,6 +693,7 @@ fn form_dialog(app: &App, state: &State, form: &ProfileForm) -> gtk::Box {
             }
         });
     }
+    fields.append(&url_options);
     // Name and color.
     let name = field(
         app,
