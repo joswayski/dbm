@@ -367,7 +367,7 @@ final class QueryPane: NSView, NSTextViewDelegate, NSSplitViewDelegate {
     private lazy var selectionRunButton = GButton("Run selection", icon: .play, style: .primary) { [weak self] in self?.runFromEditor() }
     private let historyCount = label("0", font: Graphite.ui(11), color: Graphite.faint)
     private let historyList = vstack([], spacing: 0)
-    private let historyEmpty = label("Run a query to start history.", font: Graphite.ui(13), color: Graphite.muted)
+    private let historyEmpty = label("Run a query to start history.", font: Graphite.ui(12.5), color: Graphite.faint)
     private var historySignature = ""
     private let results = FlippedView()
     private let resultBody = FlippedView()
@@ -458,6 +458,7 @@ final class QueryPane: NSView, NSTextViewDelegate, NSSplitViewDelegate {
         editor.setSelectedRange(tab.selection)
         editor.updateActiveStatement()
 
+        if engine == .redis { historyEmpty.stringValue = "Run a command to start history." }
         hint.stringValue = engine == .redis
             ? "The outlined command or selection will run · Command+Enter · Preview limit: 10,000 rows"
             : "The outlined statement or selected SQL will run · Command+Enter · Preview limit: 10,000 rows"
@@ -503,8 +504,13 @@ final class QueryPane: NSView, NSTextViewDelegate, NSSplitViewDelegate {
         historyScroll.setContentHuggingPriority(.init(1), for: .vertical)
         historyCard.pin(historyColumn, insets: NSEdgeInsets(top: 1, left: 1, bottom: 1, right: 1))
         historyCard.addSubview(historyEmpty)
+        // Wraps inside the 250 pt card instead of running past its edge.
+        historyEmpty.lineBreakMode = .byWordWrapping
+        historyEmpty.maximumNumberOfLines = 0
+        historyEmpty.preferredMaxLayoutWidth = 250 - 24
         NSLayoutConstraint.activate([
             historyEmpty.leadingAnchor.constraint(equalTo: historyCard.leadingAnchor, constant: 12),
+            historyEmpty.trailingAnchor.constraint(lessThanOrEqualTo: historyCard.trailingAnchor, constant: -12),
             historyEmpty.topAnchor.constraint(equalTo: historyCard.topAnchor, constant: 52),
             historyCard.widthAnchor.constraint(equalToConstant: 250),
         ])

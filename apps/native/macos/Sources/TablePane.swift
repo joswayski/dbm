@@ -906,7 +906,8 @@ final class InspectorView: PanelView {
         let title = label("Row", font: Graphite.ui(13, .semibold), color: Graphite.textStrong)
         let header = PanelView(fill: nil, edges: [.bottom])
         header.pin(hstack([title, keySummary, badge, spacer(), close], spacing: 8), insets: NSEdgeInsets(top: 0, left: 14, bottom: 1, right: 8))
-        header.heightAnchor.constraint(equalToConstant: 40).isActive = true
+        // As tall as the grid's column headers, so their bottom edges line up.
+        header.heightAnchor.constraint(equalToConstant: Graphite.headerHeight).isActive = true
         fieldsContainer.pin(fields, insets: NSEdgeInsets(top: 14, left: 14, bottom: 14, right: 14))
         empty.alignment = .center
         empty.maximumNumberOfLines = 3
@@ -929,7 +930,7 @@ final class InspectorView: PanelView {
         pin(column, insets: NSEdgeInsets(top: 0, left: 1, bottom: 0, right: 0))
         addSubview(empty)
         NSLayoutConstraint.activate([
-            empty.topAnchor.constraint(equalTo: topAnchor, constant: 40 + 28),
+            empty.topAnchor.constraint(equalTo: topAnchor, constant: Graphite.headerHeight + 28),
             empty.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 20),
             empty.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -20),
         ])

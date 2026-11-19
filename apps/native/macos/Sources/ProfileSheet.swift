@@ -46,11 +46,15 @@ final class EngineSegment: PanelView {
     init() {
         super.init(fill: Graphite.control)
         radius = 7
+        // Equal segments across the form's full width, like the fields below.
         let row = hstack([], spacing: 2)
+        row.distribution = .fillEqually
         for engine in [Engine.postgres, .mysql, .redis] {
             let button = GButton(engine.label, style: .toolbar) { [weak self] in self?.onSelect?(engine) }
-            button.widthAnchor.constraint(equalToConstant: 120).isActive = true
             button.minHeight = 26
+            // GButton hugs its title; here the segments stretch to the form
+            // rather than pulling the sheet down to their natural width.
+            button.setContentHuggingPriority(.defaultLow, for: .horizontal)
             buttons.append(button)
             row.addArrangedSubview(button)
         }
@@ -258,7 +262,7 @@ final class ProfileSheet: NSWindowController {
         actions += [spacer(), testButton, saveButton]
         let form = vstack([
             header,
-            field("Database engine", engineSegment, fill: false),
+            field("Database engine", engineSegment),
             field("Connection URL", urlSection),
             field("Name", nameField),
             field("Connection color", colorRow, fill: false),
