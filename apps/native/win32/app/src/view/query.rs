@@ -408,7 +408,7 @@ impl Workbench {
         let line_count = lines.len();
         // Gutter: right-aligned numbers left of a hairline.
         let digits = line_count.to_string().len().max(1);
-        let gutter_w = 4.0 + ui.ctx.fonts.width(&"9".repeat(digits), font) + 10.0;
+        let gutter_w = 12.0 + ui.ctx.fonts.width(&"9".repeat(digits), font) + 10.0;
         let (gutter, text_rect) = rect.split_left(gutter_w);
         let st = EditState::load(ui, editor_id).unwrap_or_default();
         let origin = pos2(

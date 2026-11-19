@@ -777,9 +777,36 @@ pub fn modal<R>(
     width: f32,
     f: impl FnOnce(&mut Ui) -> R,
 ) -> ModalOutput<R> {
+    let mut f = Some(f);
+    let out = modal_with_footer(ui, title, width, 0.0, |ui, footer| {
+        if footer {
+            None
+        } else {
+            f.take().map(|f| f(ui))
+        }
+    });
+    ModalOutput {
+        inner: out.inner.flatten(),
+        backdrop_clicked: out.backdrop_clicked,
+    }
+}
+
+/// A [`modal`] whose last `footer` px stay pinned below the scrolling
+/// content, so its actions stay in reach in a short window. `f` runs for
+/// the content with `false`, then for the footer with `true`; the result
+/// is the footer's.
+pub fn modal_with_footer<R>(
+    ui: &mut Ui,
+    title: &str,
+    width: f32,
+    footer: f32,
+    mut f: impl FnMut(&mut Ui, bool) -> R,
+) -> ModalOutput<R> {
     let id = Id::new(("modal", title));
     let screen = ui.ctx.screen_rect();
     let mut backdrop_clicked = false;
+    // The footer band and the gap above it.
+    let band = if footer > 0.0 { footer + 14.0 } else { 0.0 };
     let inner = ui.area(Layer::Modal, screen, |ui| {
         let r = ui.interact(
             screen,
@@ -790,7 +817,7 @@ pub fn modal<R>(
         ui.painter()
             .rect_filled(screen, 0.0, Color32::from_black_alpha(140));
         let height: f32 = ui.ctx.data(id.with("height")).unwrap_or(200.0);
-        let max_h = (screen.height() - 80.0).max(120.0);
+        let max_h = (screen.height() - 80.0).max(120.0 + band);
         let h = height.min(max_h);
         let w = width.min(screen.width() - 32.0);
         let rect = Rect::from_center_size(screen.center(), vec2(w, h));
@@ -807,13 +834,38 @@ pub fn modal<R>(
         p.rect(rect, 14.0, POPOVER, Stroke::new(1.0, BORDER_STRONG));
         let mut measured = 0.0;
         let inner = ui.a11y_group(id, Role::Dialog, title, rect, |ui| {
-            let mut child = ui.child(rect.shrink(18.0), Dir::Down);
-            child.set_clip(rect.shrink(1.0));
+            let (foot, body) = rect.shrink(18.0).split_bottom(band);
+            let mut child = ui.child(body, Dir::Down);
+            child.set_clip(Rect::from_ltrb(
+                rect.left() + 1.0,
+                rect.top() + 1.0,
+                rect.right() - 1.0,
+                body.bottom() + if band > 0.0 { 4.0 } else { 17.0 },
+            ));
             let out = crate::scroll::ScrollArea::vertical(id.with("scroll"))
                 .solid_bar()
-                .show(&mut child, f);
-            measured = out.state.content.y + 36.0;
-            out.inner
+                .show(&mut child, |ui| f(ui, false));
+            measured = out.state.content.y + 36.0 + band;
+            if band == 0.0 {
+                return out.inner;
+            }
+            // A hairline marks content scrolled under the footer.
+            if out.state.content.y > body.height() + 0.5 {
+                ui.painter().hline(
+                    rect.left() + 1.0..=rect.right() - 1.0,
+                    foot.top() + 6.5,
+                    Stroke::new(1.0, BORDER),
+                );
+            }
+            // Right-aligned with the content, beside its scrollbar.
+            let foot = Rect::from_ltrb(
+                foot.left(),
+                foot.bottom() - footer,
+                foot.left() + out.state.viewport.x,
+                foot.bottom(),
+            );
+            let mut child = ui.child(foot, Dir::Down);
+            f(&mut child, true)
         });
         if (measured - height).abs() > 0.5 {
             ui.ctx.insert_data(id.with("height"), measured);

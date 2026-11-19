@@ -90,7 +90,7 @@ const STEPS: &[(&str, fn(&mut Workbench))] = &[
                 title: "Faster Windows app".into(),
                 body: "Anybase now draws with Direct2D instead of egui.".into(),
             }]),
-            released: Some("2026-11-12T03:15:58Z".into()),
+            released: Some("November 12, 2026".into()),
             commit: Some("2937930046c2f0e986a1b71dc2faf2fbda55e4ba".into()),
             patch: None,
         });

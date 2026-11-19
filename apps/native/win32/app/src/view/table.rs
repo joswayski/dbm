@@ -1094,6 +1094,22 @@ fn collapse_button_rect(header: Rect) -> Rect {
     Rect::from_center_size(header.right_center() - vec2(16.0, 0.0), Vec2::splat(24.0))
 }
 
+/// A column's starting width: its type's default, widened so the header's
+/// key glyph, name and type fit beside the sort and collapse controls
+/// instead of eliding (`id big…`), up to a cap for very long names.
+fn header_fit_width(ui: &Ui, name: &str, data_type: &str, primary_key: bool) -> f32 {
+    let fonts = &ui.ctx.fonts;
+    // header_cell: 10 px inset, 16 px key glyph, the name, a 5 px gap, the
+    // type, then 53 px for the sort indicator and the collapse button.
+    let header = 10.0
+        + if primary_key { 16.0 } else { 0.0 }
+        + fonts.width(name, theme::ui(12.0))
+        + 5.0
+        + fonts.width(data_type, theme::ui(11.0))
+        + 53.0;
+    default_column_width(data_type).max(header.ceil().min(360.0))
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum HeaderClick {
     Sort,
@@ -1267,18 +1283,21 @@ fn data_grid(
     let order = state.effective_order();
     let action_id = cx.id("column-action");
     let action: Option<usize> = ui.ctx.data(action_id);
-    let mut widths: Vec<f32> = columns
+    let defaults: Vec<f32> = columns
+        .iter()
+        .map(|c| {
+            let key = page.metadata.primary_key.contains(&c.name);
+            header_fit_width(ui, &c.name, &c.data_type, key)
+        })
+        .collect();
+    let mut widths: Vec<f32> = defaults
         .iter()
         .enumerate()
-        .map(|(i, c)| {
+        .map(|(i, default)| {
             if state.collapsed_columns.contains(&i) {
                 COLLAPSED_COLUMN_WIDTH
             } else {
-                state
-                    .widths
-                    .get(&i)
-                    .copied()
-                    .unwrap_or_else(|| default_column_width(&c.data_type))
+                state.widths.get(&i).copied().unwrap_or(*default)
             }
         })
         .collect();
@@ -1453,9 +1472,7 @@ fn data_grid(
     state.focus_editor = focus_editor;
     // Widths dragged this frame persist; collapsed columns keep theirs.
     for (i, w) in widths.iter().enumerate() {
-        if !state.collapsed_columns.contains(&i)
-            && (*w - default_column_width(&columns[i].data_type)).abs() > 0.5
-        {
+        if !state.collapsed_columns.contains(&i) && (*w - defaults[i]).abs() > 0.5 {
             state.widths.insert(i, *w);
         }
     }

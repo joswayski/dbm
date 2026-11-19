@@ -10,12 +10,14 @@ use dbm_desktop::worker::Command;
 use dbm_ui::input::Key;
 use dbm_ui::text_edit::TextEdit;
 use dbm_ui::widgets::{
-    self, danger_button, dialog_title, icon_button_in, modal, primary_button, secondary_button,
+    self, danger_button, dialog_title, icon_button_in, modal, modal_with_footer, primary_button,
+    secondary_button,
 };
 use dbm_ui::{Color32, Dir, Id, Rect, Sense, Stroke, Ui, Vec2, pos2, theme, vec2};
 
 use crate::state::{
-    FeedbackKind, PASSWORD_LOAD, RequestKind, Workbench, engine_label, engine_preset_name,
+    FeedbackKind, PASSWORD_LOAD, ProfileForm, RequestKind, Workbench, engine_label,
+    engine_preset_name,
 };
 
 /// The colour the system picker returned, picked up on the next frame.
@@ -427,7 +429,11 @@ impl Workbench {
         let mut url_enter = false;
         let mut field_enter = false;
         let mut pick_color = false;
-        let out = modal(ui, "Connection", 600.0, |ui| {
+        let out = modal_with_footer(ui, "Connection", 600.0, 30.0, |ui, footer| {
+            if footer {
+                profile_buttons(ui, &form, busy, &mut save, &mut test, &mut delete);
+                return;
+            }
             let top = ui.cursor();
             let w = ui.available_width();
             dialog_title(
@@ -513,29 +519,24 @@ impl Workbench {
             } else {
                 "Loading connection URL…".into()
             };
+            // As on macOS: the URL with Import beside it, then Copy URL and
+            // the password toggle that changes what the URL shows.
             ui.horizontal(32.0, |ui| {
                 let mut text = preview.clone();
-                let w = (ui.available_width() - 108.0).max(1.0);
+                let import = secondary_button(if form.importing_url {
+                    "Cancel import"
+                } else {
+                    "Import URL"
+                })
+                .min_width(112.0);
+                let w = (ui.available_width() - import.width(ui) - ui.spacing.x).max(1.0);
                 TextEdit::singleline(Id::new("profile-url-preview"), &mut text)
                     .read_only()
                     .margin(9.0, 7.0)
                     .width(w)
                     .name("Connection URL")
                     .show(ui);
-                if secondary_button("Copy URL").show(ui).clicked {
-                    copy_url = true;
-                }
-            });
-            ui.horizontal(32.0, |ui| {
-                widgets::checkbox(ui, &mut form.show_url_password, "Show password");
-                if secondary_button(if form.importing_url {
-                    "Cancel import"
-                } else {
-                    "Import URL"
-                })
-                .show(ui)
-                .clicked
-                {
+                if import.show(ui).clicked {
                     form.importing_url = !form.importing_url;
                 }
             });
@@ -546,12 +547,16 @@ impl Workbench {
                         .password(true)
                         .hint("Paste a connection URL")
                         .margin(9.0, 7.0)
-                        .width(400.0)
+                        .width((ui.available_width() - 120.0).max(1.0))
                         .name("Connection URL to import")
                         .show(ui);
                     url_enter = o.submitted;
                     let can = !form.url.trim().is_empty();
-                    let clicked = secondary_button("Import").enabled(can).show(ui).clicked;
+                    let clicked = secondary_button("Import")
+                        .min_width(112.0)
+                        .enabled(can)
+                        .show(ui)
+                        .clicked;
                     // A paste imports at once; a URL typed by hand waits for
                     // Enter or the button instead of importing half of itself.
                     let pasted = o.response.changed
@@ -562,6 +567,13 @@ impl Workbench {
                     }
                 });
             }
+            ui.horizontal(32.0, |ui| {
+                if secondary_button("Copy URL").show(ui).clicked {
+                    copy_url = true;
+                }
+                ui.add_space(4.0);
+                widgets::checkbox(ui, &mut form.show_url_password, "Show password");
+            });
             ui.add_space(8.0);
             form_label(ui, "Name");
             field_enter |= field(
@@ -691,7 +703,10 @@ impl Workbench {
                 if i == 0 {
                     form_label(c, "Password");
                     c.horizontal(32.0, |ui| {
-                        let w = (ui.available_width() - 72.0).max(1.0);
+                        let toggle =
+                            secondary_button(if form.show_password { "Hide" } else { "Show" })
+                                .min_width(64.0);
+                        let w = (ui.available_width() - toggle.width(ui) - ui.spacing.x).max(1.0);
                         let o =
                             TextEdit::singleline(Id::new("profile-password"), &mut form.password)
                                 .password(!form.show_password)
@@ -706,10 +721,7 @@ impl Workbench {
                             form.password_loaded = true;
                             form.password_load_failed = false;
                         }
-                        if secondary_button(if form.show_password { "Hide" } else { "Show" })
-                            .show(ui)
-                            .clicked
-                        {
+                        if toggle.show(ui).clicked {
                             form.show_password = !form.show_password;
                         }
                     });
@@ -790,42 +802,6 @@ impl Workbench {
             ui.frame(dbm_ui::Frame::new().fill(Color32::from_white_alpha(10)).radius(7.0).inner_margin(dbm_ui::Margin::symmetric(12.0, 10.0)), |ui| {
                 ui.label_wrapped("Passwords are stored in your operating system credential manager and are never written to Anybase's profile database.", theme::ui(11.5), theme::FAINT, false);
             });
-            ui.add_space(12.0);
-            let rect = ui.allocate_row(30.0);
-            {
-                let mut row = ui.child(rect, Dir::Left);
-                row.spacing.x = 8.0;
-                let label = match (&form.feedback, form.saving) {
-                    (Some((FeedbackKind::Info, _)), true) => "Testing…",
-                    (_, true) => "Connecting…",
-                    _ => "Save & connect",
-                };
-                if primary_button(label).enabled(!busy).show(&mut row).clicked {
-                    save = true;
-                }
-                let testing = busy && !form.saving;
-                if secondary_button(if testing {
-                    "Testing…"
-                } else {
-                    "Test connection"
-                })
-                .enabled(!busy)
-                .show(&mut row)
-                .clicked
-                {
-                    test = true;
-                }
-            }
-            if form.id.is_some() {
-                let mut row = ui.child(rect, Dir::Right);
-                if danger_button("Delete")
-                    .enabled(!busy)
-                    .show(&mut row)
-                    .clicked
-                {
-                    delete = true;
-                }
-            }
         });
         // Escape and a backdrop click belong to the delete confirmation while
         // it is open over this editor; they cancel it, not the editor.
@@ -907,5 +883,52 @@ impl Workbench {
             return;
         }
         self.profile_form = Some(form);
+    }
+}
+
+/// The connection editor's pinned footer: Delete on the left for a saved
+/// profile, Test connection and Save & connect on the right.
+fn profile_buttons(
+    ui: &mut Ui,
+    form: &ProfileForm,
+    busy: bool,
+    save: &mut bool,
+    test: &mut bool,
+    delete: &mut bool,
+) {
+    let rect = ui.allocate_row(30.0);
+    {
+        let mut row = ui.child(rect, Dir::Left);
+        row.spacing.x = 8.0;
+        let label = match (&form.feedback, form.saving) {
+            (Some((FeedbackKind::Info, _)), true) => "Testing…",
+            (_, true) => "Connecting…",
+            _ => "Save & connect",
+        };
+        if primary_button(label).enabled(!busy).show(&mut row).clicked {
+            *save = true;
+        }
+        let testing = busy && !form.saving;
+        if secondary_button(if testing {
+            "Testing…"
+        } else {
+            "Test connection"
+        })
+        .enabled(!busy)
+        .show(&mut row)
+        .clicked
+        {
+            *test = true;
+        }
+    }
+    if form.id.is_some() {
+        let mut row = ui.child(rect, Dir::Right);
+        if danger_button("Delete")
+            .enabled(!busy)
+            .show(&mut row)
+            .clicked
+        {
+            *delete = true;
+        }
     }
 }
