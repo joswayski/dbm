@@ -98,10 +98,10 @@ jobs:
         # commit-based notes; they never stop a release.
         continue-on-error: true
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          # Empty variables fall back to the generator defaults (Opus 5.5, high effort).
-          ANTHROPIC_MODEL: ${{ vars.DBM_RELEASE_NOTES_MODEL }}
-          ANTHROPIC_EFFORT: ${{ vars.DBM_RELEASE_NOTES_EFFORT }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          # Empty variables fall back to the generator defaults (Gemini 4 Neon, medium thinking).
+          GEMINI_MODEL: ${{ vars.DBM_RELEASE_NOTES_MODEL }}
+          GEMINI_THINKING_LEVEL: ${{ vars.DBM_RELEASE_NOTES_THINKING_LEVEL }}
           DBM_RELEASE_SHA: ${{ github.sha }}
           PREVIOUS_TAG: ${{ steps.notes.outputs.previous_tag }}
           PREVIOUS_MANIFEST: ${{ runner.temp }}/previous/native-latest.json

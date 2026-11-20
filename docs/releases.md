@@ -201,8 +201,8 @@ their releases, so older releases keep serving as bases.
 
 ## Release highlights
 
-`scripts/release-highlights.mjs` asks Anthropic for up to five short,
-user-facing highlights, using Caper's and Captures' editorial prompt and Opus
+`scripts/release-highlights.mjs` asks Gemini for up to five short,
+user-facing highlights, using Caper's and Captures' editorial prompt and Gemini
 request configuration. It reads the first-parent commits since the previous
 release tag, keeping only desktop app sources (`apps/native/macos`,
 `apps/native/bridge`, `apps/native/win32`, `apps/native/gtk`,
@@ -224,16 +224,17 @@ with nothing user-facing has an empty list. Missing credentials, provider
 errors, or rejected output leave this release out and keep the commit-based
 notes; they never fail the release.
 
-Set the repository Actions secret `ANTHROPIC_API_KEY` (it prompts privately):
+Set the repository Actions secret `GEMINI_API_KEY` (it prompts privately), a
+Gemini API key from Google AI Studio whose project uses the paid tier:
 
 ```sh
-gh secret set ANTHROPIC_API_KEY --repo joswayski/dbm
+gh secret set GEMINI_API_KEY --repo joswayski/dbm
 ```
 
 Optional repository variables `DBM_RELEASE_NOTES_MODEL` and
-`DBM_RELEASE_NOTES_EFFORT` (`low` to `max`) override `claude-opus-5-5` and
-`high`. Generation sends filtered source diffs and commit messages to
-Anthropic, never connection profiles, history, or data, and the apps make no
+`DBM_RELEASE_NOTES_THINKING_LEVEL` (`low`, `medium`, `high` or `xhigh`)
+override `gemini-4-neon` and `medium`. Generation sends filtered source diffs
+and commit messages to Google, never connection profiles, history, or data, and the apps make no
 request for it.
 
 Development builds never check for updates. Debug builds can test the updater

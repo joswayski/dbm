@@ -30,15 +30,10 @@ function fixture() {
   return { cwd, git, commit, base: commit({ "README.md": "Anybase" }, "Base") };
 }
 
-function reply(highlights, extra = {}) {
-  return Response.json({
-    type: "message",
-    stop_reason: "end_turn",
-    content: [{ type: "text", text: JSON.stringify({ highlights }) }],
-    ...extra,
-  });
+function reply(highlights, { parts = [{ text: JSON.stringify({ highlights }) }], finishReason = "STOP" } = {}) {
+  return Response.json({ candidates: [{ content: { role: "model", parts }, finishReason }] });
 }
-const env = { ANTHROPIC_API_KEY: "test-key" };
+const env = { GEMINI_API_KEY: "test-key" };
 const highlight = (commit) => ({
   title: "Copy rows as CSV",
   body: "Select rows and copy them straight into a spreadsheet.",
@@ -64,7 +59,7 @@ test("only desktop app sources count, each tagged with the apps it reaches", () 
     assert.deepEqual(pathApps(path), [], path);
 });
 
-test("summarizes desktop changes, including merged pull requests, for Opus", async () => {
+test("summarizes desktop changes, including merged pull requests, for Gemini", async () => {
   const f = fixture();
   f.commit({ "apps/web/src/page.tsx": "WEB-ONLY" }, "Improve the website");
   f.commit({ "crates/dbm-core/Cargo.toml": "DEPENDENCY" }, "Bump serde from 1.0.0 to 1.0.1");
@@ -89,15 +84,13 @@ test("summarizes desktop changes, including merged pull requests, for Opus", asy
     env,
     recentHighlights,
     fetch: async (url, options) => {
-      assert.equal(url, "https://api.anthropic.com/v1/messages");
-      assert.equal(options.headers["x-api-key"], "test-key");
-      assert.equal(options.headers["anthropic-beta"], "server-side-fallback-2026-07-01");
+      assert.equal(url, "https://generativelanguage.googleapis.com/v1beta/models/gemini-4-neon:generateContent");
+      assert.equal(options.headers["x-goog-api-key"], "test-key");
       request = JSON.parse(options.body);
       return reply([highlight(after)], {
-        content: [
-          { type: "thinking", thinking: "not release prose" },
-          { type: "fallback" },
-          { type: "text", text: JSON.stringify({ highlights: [highlight(after)] }) },
+        parts: [
+          { text: "not release prose", thought: true },
+          { text: JSON.stringify({ highlights: [highlight(after)] }), thoughtSignature: "x" },
         ],
       });
     },
@@ -105,18 +98,18 @@ test("summarizes desktop changes, including merged pull requests, for Opus", asy
   assert.deepEqual(highlights, [
     { title: "Copy rows as CSV", body: "Select rows and copy them straight into a spreadsheet." },
   ]);
-  assert.equal(request.model, "claude-opus-5-5");
-  assert.equal(request.output_config.effort, "high");
-  assert.equal(request.max_tokens, 16000);
-  assert.equal(request.fallbacks, "default");
-  const source = JSON.parse(request.messages[0].content);
+  assert.equal(request.generationConfig.thinkingConfig.thinkingLevel, "MEDIUM");
+  assert.equal(request.generationConfig.maxOutputTokens, 32768);
+  assert.equal(request.generationConfig.responseMimeType, "application/json");
+  assert.equal(request.systemInstruction.parts.length, 1);
+  const source = JSON.parse(request.contents[0].parts[0].text);
   assert.deepEqual(source.recentHighlights, recentHighlights);
   assert.equal(source.commits.length, 1);
   assert.equal(source.commits[0].commit, after);
   assert.equal(source.commits[0].subject, "Copy rows as CSV");
   assert.deepEqual(source.commits[0].apps, ["Linux", "Windows"]);
   assert.match(source.commits[0].diff, /COPY-AS-CSV/u);
-  assert.doesNotMatch(request.messages[0].content, /WEB-ONLY|DEPENDENCY|TEST-ONLY|MOBILE-ONLY|FUTURE-CHANGE/u);
+  assert.doesNotMatch(request.contents[0].parts[0].text, /WEB-ONLY|DEPENDENCY|TEST-ONLY|MOBILE-ONLY|FUTURE-CHANGE/u);
 });
 
 test("oversized diffs keep every commit and mark truncation within the request budget", async () => {
@@ -126,13 +119,13 @@ test("oversized diffs keep every commit and mark truncation within the request b
   let source;
   const highlights = await releaseHighlights(f.base, after, {
     cwd: f.cwd,
-    env: { ...env, ANTHROPIC_MODEL: "custom-model", ANTHROPIC_EFFORT: "medium" },
-    fetch: async (_, options) => {
+    env: { ...env, GEMINI_MODEL: "custom-model", GEMINI_THINKING_LEVEL: "high" },
+    fetch: async (url, options) => {
       assert.ok(options.body.length <= 400_000);
       const request = JSON.parse(options.body);
-      assert.equal(request.model, "custom-model");
-      assert.equal(request.output_config.effort, "medium");
-      source = JSON.parse(request.messages[0].content);
+      assert.match(url, /\/models\/custom-model:generateContent$/u);
+      assert.equal(request.generationConfig.thinkingConfig.thinkingLevel, "HIGH");
+      source = JSON.parse(request.contents[0].parts[0].text);
       return reply([]);
     },
   });
@@ -155,8 +148,11 @@ test("invalid or unavailable editorial output returns null without leaking error
     async () => new Response("sensitive provider body", { status: 429 }),
     async () => new Response("x".repeat(128 * 1024 + 1)),
     async () => new Response("malformed JSON"),
-    async () => reply([good], { stop_reason: "max_tokens" }),
-    async () => reply([good], { content: [{ type: "tool_use" }] }),
+    async () => reply([good], { finishReason: "MAX_TOKENS" }),
+    async () => reply([good], { finishReason: "SAFETY" }),
+    async () => reply([good], { parts: [{ text: "secret summary", thought: true }] }),
+    async () => Response.json({ promptFeedback: { blockReason: "PROHIBITED_CONTENT" } }),
+    async () => reply([good], { parts: [{ functionCall: { name: "run" } }] }),
     async () => reply([{ ...good, commits: [f.base] }]),
     async () => reply([{ ...good, commits: [after, after] }]),
     async () => reply([{ ...good, body: "<script>unsafe</script>" }]),
@@ -198,7 +194,14 @@ test("quiet ranges skip the API; missing key, baseline or budget return null", a
   assert.deepEqual(await releaseHighlights(f.base, after, options), []);
   assert.equal(await releaseHighlights(null, after, options), null);
   assert.equal(await releaseHighlights(f.base, after, { ...options, env: {} }), null);
-  f.commit({ "crates/dbm-core/src/lib.rs": "code" }, "Faster queries");
+  const changed = f.commit({ "crates/dbm-core/src/lib.rs": "code" }, "Faster queries");
+  for (const setting of [
+    { GEMINI_MODEL: "../files/x" },
+    { GEMINI_MODEL: "Gemini 4 Neon" },
+    { GEMINI_THINKING_LEVEL: "minimal" },
+    { GEMINI_THINKING_LEVEL: "max" },
+  ])
+    assert.equal(await releaseHighlights(f.base, changed, { ...options, env: { ...env, ...setting } }), null);
   // Feed the message over stdin rather than the OS's argument-size limit.
   execFileSync("git", ["commit", "--amend", "-F", "-"], {
     cwd: f.cwd,
