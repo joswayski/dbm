@@ -1,4 +1,4 @@
-//! The UI-free part of the Windows and Linux desktop apps: the serialized
+//! The UI-free part of the Windows and Linux desktop apps: the per-connection
 //! database worker and the self-updater. Each UI toolkit supplies a [`Wake`]
 //! that schedules its next frame or main-loop turn when work finishes.
 

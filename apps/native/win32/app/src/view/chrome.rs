@@ -45,7 +45,7 @@ impl Workbench {
                 "Isolated deterministic data; profiles and edits are not persisted.",
             );
         }
-        if let Some(label) = self.pending_requests.values().next().map(|m| m.label) {
+        if let Some(label) = self.activity() {
             widgets::spinner(&mut row, 14.0);
             row.label(label, theme::ui(12.5), theme::MUTED);
         }

@@ -1,8 +1,13 @@
-//! The serialized database worker: one thread with a small Tokio runtime owns
-//! the shared core state (or the isolated demo fixture) and answers UI
-//! commands in order.
+//! The database worker: a small Tokio runtime owns the shared core state (or
+//! the isolated demo fixture) and answers UI commands. Commands for one
+//! connection run in the order they were sent, because they share its
+//! session; different connections run at the same time, so a slow query or
+//! an unreachable host never holds up the others.
 
+use std::collections::HashMap;
+use std::future::Future;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::{self, Receiver, Sender};
 
@@ -36,11 +41,42 @@ pub enum Command {
     ExportCsv(ExportRequest),
 }
 
+/// Commands in one lane run one at a time, in the order sent; lanes run
+/// concurrently.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Lane {
+    /// Work that belongs to no saved connection: listing profiles, and the
+    /// connection editor's tests and new saves.
+    App,
+    /// Everything that uses or replaces one connection's session.
+    Profile(Uuid),
+}
+
+impl Command {
+    pub fn lane(&self) -> Lane {
+        match self {
+            Self::LoadProfiles | Self::TestProfile(_) | Self::ConnectionUrl(..) => Lane::App,
+            // Saving an existing profile closes its session.
+            Self::SaveProfile(input) => input.id.map_or(Lane::App, Lane::Profile),
+            Self::DeleteProfile(id)
+            | Self::Connect(id)
+            | Self::SwitchDatabase(id, _)
+            | Self::Disconnect(id)
+            | Self::Schema(id)
+            | Self::History(id, _) => Lane::Profile(*id),
+            Self::Query(request) => Lane::Profile(request.profile_id),
+            Self::Table(request) => Lane::Profile(request.profile_id),
+            Self::Mutate(batch) => Lane::Profile(batch.profile_id),
+            Self::ExportCsv(request) => Lane::Profile(request.page.profile_id),
+        }
+    }
+}
+
 pub struct ExportRequest {
     pub page: TablePageRequest,
     pub columns: Vec<String>,
     /// Chosen on the UI side before the request is sent, so the dialog never
-    /// holds up the serialized worker.
+    /// holds up the worker.
     pub path: PathBuf,
     /// Rows written so far, for the "Exporting N / total…" label.
     pub progress: std::sync::Arc<std::sync::atomic::AtomicU64>,
@@ -79,36 +115,57 @@ pub struct Worker {
 
 impl Worker {
     pub fn start(wake: crate::Wake, demo: bool) -> Self {
+        Self::serve(wake, move || {
+            let backend = Arc::new(if demo {
+                Backend::Demo(tokio::sync::Mutex::new(DemoBackend::new()))
+            } else {
+                match AppState::new() {
+                    Ok(state) => Backend::Live(state),
+                    Err(error) => Backend::Unavailable(error.to_string()),
+                }
+            });
+            move |command| {
+                let backend = backend.clone();
+                async move { backend.execute(command).await }
+            }
+        })
+    }
+
+    /// Answers commands with the executor `open` returns, each lane in order
+    /// and the lanes concurrently. `open` runs on the worker thread, so
+    /// opening the local store never delays the first frame.
+    fn serve<Open, Execute, Answer>(wake: crate::Wake, open: Open) -> Self
+    where
+        Open: FnOnce() -> Execute + Send + 'static,
+        Execute: Fn(Command) -> Answer + Send + Sync + 'static,
+        Answer: Future<Output = Result<Payload, String>> + Send + 'static,
+    {
         let (work_tx, work_rx) = mpsc::channel::<Work>();
         let (done_tx, done_rx) = mpsc::channel();
         std::thread::Builder::new()
-            .name("dbm-serialized-worker".into())
+            .name("dbm-database-worker".into())
             .spawn(move || {
                 let runtime = tokio::runtime::Builder::new_multi_thread()
                     .worker_threads(2)
                     .enable_all()
                     .build()
                     .expect("database runtime");
-                let mut backend = if demo {
-                    Backend::Demo(DemoBackend::new())
-                } else {
-                    match AppState::new() {
-                        Ok(state) => Backend::Live(state),
-                        Err(error) => Backend::Unavailable(error.to_string()),
-                    }
-                };
+                let execute = Arc::new(open());
+                let mut lanes = HashMap::new();
                 while let Ok(work) = work_rx.recv() {
-                    let result = runtime.block_on(backend.execute(work.command));
-                    if done_tx
-                        .send(Completion {
-                            id: work.id,
-                            result,
-                        })
-                        .is_err()
-                    {
-                        break;
-                    }
-                    wake();
+                    let lane = work.command.lane();
+                    let queue = lanes.entry(lane).or_insert_with(|| {
+                        let (queue, waiting) = tokio::sync::mpsc::unbounded_channel();
+                        runtime.spawn(run_lane(
+                            waiting,
+                            execute.clone(),
+                            done_tx.clone(),
+                            wake.clone(),
+                        ));
+                        queue
+                    });
+                    // A lane only closes with the runtime.
+                    let _ = queue.send(work);
                 }
             })
             .expect("start database worker");
@@ -119,17 +176,42 @@ impl Worker {
     }
 }
 
+/// Answers one lane's commands in order.
+async fn run_lane<Execute, Answer>(
+    mut waiting: tokio::sync::mpsc::UnboundedReceiver<Work>,
+    execute: Arc<Execute>,
+    done: Sender<Completion>,
+    wake: crate::Wake,
+) where
+    Execute: Fn(Command) -> Answer,
+    Answer: Future<Output = Result<Payload, String>> + Send + 'static,
+{
+    while let Some(Work { id, command }) = waiting.recv().await {
+        // On its own task, so a panic fails this request instead of ending
+        // the lane and leaving the UI waiting on every later one.
+        let result = tokio::spawn(execute(command))
+            .await
+            .unwrap_or_else(|_| Err(WORKER_PANIC.into()));
+        if done.send(Completion { id, result }).is_err() {
+            break;
+        }
+        wake();
+    }
+}
+
+const WORKER_PANIC: &str = "The request stopped unexpectedly. A submitted write may have completed; check before retrying.";
+
 enum Backend {
     Live(AppState),
-    Demo(DemoBackend),
+    Demo(tokio::sync::Mutex<DemoBackend>),
     Unavailable(String),
 }
 
 impl Backend {
-    async fn execute(&mut self, command: Command) -> Result<Payload, String> {
+    async fn execute(&self, command: Command) -> Result<Payload, String> {
         match self {
             Self::Live(state) => execute_live(state, command).await,
-            Self::Demo(backend) => backend.execute(command).await,
+            Self::Demo(backend) => backend.lock().await.execute(command).await,
             Self::Unavailable(error) => Err(error.clone()),
         }
     }
@@ -345,5 +427,109 @@ impl DemoBackend {
                 Payload::Exported(path, rows)
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Mutex;
+    use std::time::Duration;
+
+    use super::*;
+
+    const WAIT: Duration = Duration::from_secs(10);
+
+    #[test]
+    fn connections_run_side_by_side_and_each_keeps_its_order() {
+        let slow = Uuid::from_u128(1);
+        let fast = Uuid::from_u128(2);
+        // The slow connection's first request waits until the test lets it go.
+        let (release, held) = tokio::sync::oneshot::channel::<()>();
+        let held = Arc::new(Mutex::new(Some(held)));
+        let started = Arc::new(Mutex::new(Vec::new()));
+        let seen = started.clone();
+        let worker = Worker::serve(Arc::new(|| {}), move || {
+            move |command: Command| {
+                let held = held.clone();
+                let seen = seen.clone();
+                async move {
+                    match command {
+                        Command::Schema(id) => {
+                            seen.lock().unwrap().push("schema");
+                            let held = (id == slow).then(|| held.lock().unwrap().take()).flatten();
+                            if let Some(held) = held {
+                                let _ = held.await;
+                            }
+                            Ok(Payload::Schema(id, Vec::new()))
+                        }
+                        Command::Disconnect(id) => {
+                            seen.lock().unwrap().push("disconnect");
+                            Ok(Payload::Disconnected(id))
+                        }
+                        Command::Connect(_) => panic!("fixture"),
+                        _ => Err("unexpected".into()),
+                    }
+                }
+            }
+        });
+        let send = |id, command| {
+            worker
+                .tx
+                .send(Work {
+                    id: RequestId(id),
+                    command,
+                })
+                .unwrap()
+        };
+        send(1, Command::Schema(slow));
+        send(2, Command::Disconnect(slow));
+        send(3, Command::Schema(fast));
+        // The other connection answers while the first is still busy.
+        assert_eq!(worker.rx.recv_timeout(WAIT).unwrap().id, RequestId(3));
+        assert!(worker.rx.try_recv().is_err());
+        assert!(!started.lock().unwrap().contains(&"disconnect"));
+        release.send(()).unwrap();
+        assert_eq!(worker.rx.recv_timeout(WAIT).unwrap().id, RequestId(1));
+        assert_eq!(worker.rx.recv_timeout(WAIT).unwrap().id, RequestId(2));
+        // A request that panics reports an error and its connection carries on.
+        send(4, Command::Connect(slow));
+        send(5, Command::Schema(slow));
+        let failed = worker.rx.recv_timeout(WAIT).unwrap();
+        assert_eq!(failed.id, RequestId(4));
+        assert!(failed.result.is_err());
+        assert_eq!(worker.rx.recv_timeout(WAIT).unwrap().id, RequestId(5));
+    }
+
+    #[test]
+    fn commands_wait_behind_the_connection_they_use() {
+        let id = Uuid::from_u128(7);
+        let input = |id| SaveProfileInput {
+            id,
+            name: "Local".into(),
+            color: None,
+            engine: dbm_core::models::DatabaseEngine::Postgres,
+            host: "127.0.0.1".into(),
+            port: 5432,
+            username: "postgres".into(),
+            default_database: "postgres".into(),
+            tls_mode: dbm_core::models::TlsMode::Disabled,
+            ca_cert_path: None,
+            ssh: None,
+            read_only: false,
+            open_on_startup: false,
+            password: None,
+        };
+        assert_eq!(Command::Connect(id).lane(), Lane::Profile(id));
+        assert_eq!(Command::DeleteProfile(id).lane(), Lane::Profile(id));
+        // Saving an existing profile closes its session; a new one has none.
+        assert_eq!(
+            Command::SaveProfile(input(Some(id))).lane(),
+            Lane::Profile(id)
+        );
+        assert_eq!(Command::SaveProfile(input(None)).lane(), Lane::App);
+        // A connection test never touches the open session, so it does not
+        // wait behind that connection's running query.
+        assert_eq!(Command::TestProfile(input(Some(id))).lane(), Lane::App);
+        assert_eq!(Command::LoadProfiles.lane(), Lane::App);
     }
 }

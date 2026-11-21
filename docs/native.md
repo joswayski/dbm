@@ -41,7 +41,9 @@ mobile contract, and [releases](releases.md) for desktop packaging and updates.
   keyring entries, so a Linux install that updates from egui keeps its
   profiles, passwords, window size, sidebar state, and What's new history.
 - `apps/native/desktop` (`dbm-desktop`) is the UI-free part of the Windows and
-  Linux apps: the serialized database worker and the self-updater. A UI
+  Linux apps: the database worker and the self-updater. The worker runs each
+  connection's requests in the order they were sent, since they share its
+  session, and different connections at the same time. A UI
   toolkit passes it a wake callback that schedules its next frame; Win32 and
   GTK both use it unchanged.
 - `apps/native/android` and `apps/native/ios` use Compose and UIKit. They call

@@ -152,6 +152,12 @@ What the app does today, what is deliberately not built yet, and what it stores 
   `SELECT` can have side effects. A connection error after submission attempts
   reconnection for the next explicit run but still reports the failed command;
   check its effects before running it again. Table writes are not retried.
+- On Windows and Linux, connections work independently: a long query, a large
+  export, or an unreachable host on one connection does not hold up browsing,
+  queries, or connecting on another, and **Open on startup** connections open
+  at the same time. Requests to the same connection still run one after
+  another. On macOS every request still waits for the one before it,
+  whichever connection it belongs to.
 - Refresh on table previews and query results: reload the current page and
   filters, or re-run the last executed statement, without re-authoring them.
 

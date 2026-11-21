@@ -1,5 +1,5 @@
 //! Everything the GTK app knows, without widgets: profiles, workspaces, tabs,
-//! requests to the serialized worker and their replies, the connection form,
+//! requests to the database worker and their replies, the connection form,
 //! table paging and staged edits, and message surfaces. It follows the egui
 //! app's `workbench.rs` and `table_view.rs` rule for rule; the widgets in the
 //! other modules render it and turn input into the methods below.
@@ -21,7 +21,7 @@ use dbm_core::sql_text::{
     safe_file_name,
 };
 use dbm_desktop::updates;
-use dbm_desktop::worker::{Command, ExportRequest, Payload, RequestId, Work, Worker};
+use dbm_desktop::worker::{Command, ExportRequest, Lane, Payload, RequestId, Work, Worker};
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -752,6 +752,8 @@ pub struct RequestMeta {
     pub kind: RequestKind,
     /// Set when the profile or tab was closed; the reply is then ignored.
     pub stale: bool,
+    /// The connection whose requests this one waits behind.
+    pub lane: Lane,
 }
 
 pub struct Queued {
@@ -874,8 +876,9 @@ impl State {
         self.dispatch(command, label, None, profile, RequestKind::Other);
     }
 
-    /// Sends now when the worker is idle, otherwise queues behind the current
-    /// request. Replies go to the initiating tab, never the selected one.
+    /// Sends now when the request's connection is idle, otherwise queues
+    /// behind that connection's requests; other connections are not held up.
+    /// Replies go to the initiating tab, never the selected one.
     pub fn dispatch(
         &mut self,
         command: Command,
@@ -890,11 +893,12 @@ impl State {
             profile,
             kind,
             stale: false,
+            lane: command.lane(),
         };
-        if self.pending_requests.is_empty() {
-            self.submit(command, meta);
-        } else {
+        if self.requests().any(|waiting| waiting.lane == meta.lane) {
             self.queued.push_back(Queued { command, meta });
+        } else {
+            self.submit(command, meta);
         }
     }
 
@@ -911,6 +915,21 @@ impl State {
     pub fn busy(&self, kind: RequestKind, tab: Option<u64>) -> bool {
         self.requests()
             .any(|meta| meta.kind == kind && (tab.is_none() || meta.tab == tab))
+    }
+
+    /// What the top bar reports as running: the active connection's oldest
+    /// request, else the oldest of any connection.
+    pub fn activity(&self) -> Option<&'static str> {
+        let oldest = |active_only: bool| {
+            self.pending_requests
+                .iter()
+                .filter(|(_, meta)| {
+                    !active_only || (meta.profile.is_some() && meta.profile == self.active_profile)
+                })
+                .min_by_key(|(id, _)| id.0)
+                .map(|(_, meta)| meta.label)
+        };
+        oldest(true).or_else(|| oldest(false))
     }
 
     /// Sent and queued requests.
@@ -939,11 +958,15 @@ impl State {
                 Err(error) => self.fail(error, &meta),
             }
         }
-        while self.pending_requests.is_empty() {
-            let Some(next) = self.queued.pop_front() else {
-                break;
-            };
-            self.submit(next.command, next.meta);
+        // Start each waiting request whose connection is free. A connection's
+        // requests stay in order: one still waiting holds back those after it.
+        let mut busy: HashSet<Lane> = self.pending_requests.values().map(|m| m.lane).collect();
+        for next in std::mem::take(&mut self.queued) {
+            if busy.insert(next.meta.lane) {
+                self.submit(next.command, next.meta);
+            } else {
+                self.queued.push_back(next);
+            }
         }
     }
 
@@ -2203,6 +2226,7 @@ pub mod tests {
             profile: Some(Uuid::from_u128(1)),
             kind,
             stale: false,
+            lane: Lane::Profile(Uuid::from_u128(1)),
         }
     }
 
@@ -2232,11 +2256,38 @@ pub mod tests {
         assert!(app.pending_requests.is_empty() && app.queued.is_empty());
         app.demo = false;
         app.apply(Payload::Profiles(profiles), &meta(None, RequestKind::Other));
-        let pending: Vec<_> = app.pending_requests.values().map(|r| r.profile).collect();
-        assert_eq!(pending, vec![Some(expected[0])]);
-        assert_eq!(app.queued.len(), 1);
-        assert!(matches!(app.queued[0].command, Command::Connect(id) if id == expected[1]));
+        // Each connection opens on its own, so an unreachable host does not
+        // delay the others.
+        let mut pending: Vec<_> = app.pending_requests.values().map(|r| r.profile).collect();
+        pending.sort();
+        let mut expected = expected.map(Some).to_vec();
+        expected.sort();
+        assert_eq!(pending, expected);
+        assert!(app.queued.is_empty());
         assert!(app.active_profile.is_none());
+    }
+
+    #[test]
+    fn a_busy_connection_holds_back_only_its_own_requests() {
+        let mut app = app();
+        let slow = Uuid::from_u128(1);
+        let other = Uuid::from_u128(2);
+        let waiting = |app: &State| -> Vec<_> { app.queued.iter().map(|q| q.meta.label).collect() };
+        app.send(Command::Schema(slow), "first", Some(slow));
+        app.send(Command::Disconnect(slow), "second", Some(slow));
+        app.send(Command::Schema(slow), "third", Some(slow));
+        app.send(Command::Schema(other), "other", Some(other));
+        // The other connection starts at once; the busy one keeps its order.
+        assert_eq!(waiting(&app), ["second", "third"]);
+        let mut running: Vec<_> = app.pending_requests.values().map(|m| m.label).collect();
+        running.sort_unstable();
+        assert_eq!(running, ["first", "other"]);
+        // When the first finishes, only the next request of that connection
+        // starts; "third" still waits behind "second".
+        app.pending_requests.retain(|_, meta| meta.label != "first");
+        app.drain();
+        assert_eq!(waiting(&app), ["third"]);
+        assert!(app.pending_requests.values().any(|m| m.label == "second"));
     }
 
     #[test]
@@ -2456,6 +2507,7 @@ pub mod tests {
             profile: Some(profile.id),
             kind: RequestKind::Form,
             stale: false,
+            lane: Lane::App,
         };
         app.profile_form = Some(ProfileForm::from_profile(&profile));
         app.fail("Keychain locked".into(), &request);
@@ -2479,8 +2531,9 @@ pub mod tests {
         app.pending_requests.insert(
             RequestId(900),
             RequestMeta {
-                label: "Running query",
-                ..meta(None, RequestKind::Query)
+                label: "Testing connection",
+                lane: Lane::App,
+                ..meta(None, RequestKind::Other)
             },
         );
         app.profiles = vec![profile.clone()];

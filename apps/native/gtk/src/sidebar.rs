@@ -383,7 +383,9 @@ fn refresh_workspace(app: &App, state: &State, id: Uuid, workspace: &Workspace) 
     workspace
         .databases
         .set_sensitive(!state.has_label(id, &["Switching database"]));
-    let refreshing = state.pending_requests.values().any(|m| {
+    // Queued refreshes count too, or each click behind a long query would
+    // queue another.
+    let refreshing = state.requests().any(|m| {
         m.profile == Some(id) && matches!(m.label, "Loading schema" | "Refreshing schema")
     });
     workspace.refresh.set_sensitive(!refreshing);

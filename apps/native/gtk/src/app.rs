@@ -521,12 +521,12 @@ impl App {
             set_text(&bar.target, &target);
             bar.read_only.set_visible(profile.read_only);
         }
-        let pending = state.pending_requests.values().next();
-        bar.spinner.set_visible(pending.is_some());
-        bar.spinner.set_spinning(pending.is_some());
-        bar.busy.set_visible(pending.is_some());
-        if let Some(meta) = pending {
-            set_text(&bar.busy, meta.label);
+        let activity = state.activity();
+        bar.spinner.set_visible(activity.is_some());
+        bar.spinner.set_spinning(activity.is_some());
+        bar.busy.set_visible(activity.is_some());
+        if let Some(label) = activity {
+            set_text(&bar.busy, label);
         }
         bar.demo.set_visible(state.demo);
         self.render_updates(state);

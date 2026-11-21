@@ -1,5 +1,5 @@
 //! The workbench's state and behavior, independent of drawing: the request
-//! queue in front of the serialized database worker, replies routed to the
+//! queue in front of the database worker, replies routed to the
 //! tab that asked, profiles, workspaces, tabs, queries, table loads, saves
 //! and exports. Ported from the egui app's `workbench.rs` so both clients
 //! follow the same rules (AGENTS.md "Product behavior to preserve").
@@ -16,7 +16,7 @@ use dbm_core::sql_text::{
     describe_schema_refresh, requires_confirmation, resolve_full_table_select, safe_file_name,
 };
 use dbm_desktop::updates;
-use dbm_desktop::worker::{Command, ExportRequest, Payload, RequestId, Work, Worker};
+use dbm_desktop::worker::{Command, ExportRequest, Lane, Payload, RequestId, Work, Worker};
 use dbm_ui::Color32;
 use dbm_ui::theme;
 use uuid::Uuid;
@@ -312,6 +312,8 @@ pub struct RequestMeta {
     pub kind: RequestKind,
     /// Set when the profile or tab closed; the reply is then ignored.
     pub stale: bool,
+    /// The connection whose requests this one waits behind.
+    pub lane: Lane,
 }
 
 pub struct Queued {
@@ -448,8 +450,9 @@ impl Workbench {
         self.dispatch(command, label, None, profile, RequestKind::Other);
     }
 
-    /// Sends now when the worker is idle, otherwise queues. Replies are
-    /// routed to the initiating tab, never the selected one.
+    /// Sends now when the request's connection is idle, otherwise queues
+    /// behind that connection's requests; other connections are not held up.
+    /// Replies are routed to the initiating tab, never the selected one.
     pub fn dispatch(
         &mut self,
         command: Command,
@@ -464,11 +467,12 @@ impl Workbench {
             profile,
             kind,
             stale: false,
+            lane: command.lane(),
         };
-        if self.pending_requests.is_empty() {
-            self.submit(command, meta);
-        } else {
+        if self.metas().any(|waiting| waiting.lane == meta.lane) {
             self.queued.push_back(Queued { command, meta });
+        } else {
+            self.submit(command, meta);
         }
     }
 
@@ -485,6 +489,21 @@ impl Workbench {
     pub fn busy(&self, kind: RequestKind, tab: Option<u64>) -> bool {
         self.metas()
             .any(|meta| meta.kind == kind && (tab.is_none() || meta.tab == tab))
+    }
+
+    /// What the top bar reports as running: the active connection's oldest
+    /// request, else the oldest of any connection.
+    pub fn activity(&self) -> Option<&'static str> {
+        let oldest = |active_only: bool| {
+            self.pending_requests
+                .iter()
+                .filter(|(_, meta)| {
+                    !active_only || (meta.profile.is_some() && meta.profile == self.active_profile)
+                })
+                .min_by_key(|(id, _)| id.0)
+                .map(|(_, meta)| meta.label)
+        };
+        oldest(true).or_else(|| oldest(false))
     }
 
     /// Requests running and waiting.
@@ -507,11 +526,15 @@ impl Workbench {
                 Err(error) => self.fail(error, &meta),
             }
         }
-        while self.pending_requests.is_empty() {
-            let Some(next) = self.queued.pop_front() else {
-                break;
-            };
-            self.submit(next.command, next.meta);
+        // Start each waiting request whose connection is free. A connection's
+        // requests stay in order: one still waiting holds back those after it.
+        let mut busy: HashSet<Lane> = self.pending_requests.values().map(|m| m.lane).collect();
+        for next in std::mem::take(&mut self.queued) {
+            if busy.insert(next.meta.lane) {
+                self.submit(next.command, next.meta);
+            } else {
+                self.queued.push_back(next);
+            }
         }
         self.export_chosen();
         self.results_saved();
@@ -1501,6 +1524,7 @@ mod tests {
             profile: None,
             kind,
             stale: false,
+            lane: Lane::App,
         }
     }
 
@@ -1611,6 +1635,30 @@ mod tests {
         assert_eq!(form.input().password, None);
         form.password_loaded = true;
         assert_eq!(form.input().password, Some(String::new()));
+    }
+
+    #[test]
+    fn a_busy_connection_holds_back_only_its_own_requests() {
+        let mut app = app();
+        let slow = Uuid::from_u128(1);
+        let other = Uuid::from_u128(2);
+        let waiting =
+            |app: &Workbench| -> Vec<_> { app.queued.iter().map(|q| q.meta.label).collect() };
+        app.send(Command::Schema(slow), "first", Some(slow));
+        app.send(Command::Disconnect(slow), "second", Some(slow));
+        app.send(Command::Schema(slow), "third", Some(slow));
+        app.send(Command::Schema(other), "other", Some(other));
+        // The other connection starts at once; the busy one keeps its order.
+        assert_eq!(waiting(&app), ["second", "third"]);
+        let mut running: Vec<_> = app.pending_requests.values().map(|m| m.label).collect();
+        running.sort_unstable();
+        assert_eq!(running, ["first", "other"]);
+        // When the first finishes, only the next request of that connection
+        // starts; "third" still waits behind "second".
+        app.pending_requests.retain(|_, meta| meta.label != "first");
+        app.drain();
+        assert_eq!(waiting(&app), ["third"]);
+        assert!(app.pending_requests.values().any(|m| m.label == "second"));
     }
 
     #[test]

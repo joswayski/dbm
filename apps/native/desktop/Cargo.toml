@@ -9,7 +9,7 @@ publish = false
 [dependencies]
 dbm-core = { path = "../../../crates/dbm-core" }
 dbm-update = { path = "../../../crates/dbm-update" }
-tokio = { version = "1", features = ["rt-multi-thread", "time"] }
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time"] }
 uuid = { version = "1", features = ["v4"] }
 
 [lints]
