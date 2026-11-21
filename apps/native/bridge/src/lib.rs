@@ -25,8 +25,9 @@ use dbm_core::{
     },
     session::DbSession,
     sql_text::{
-        byte_to_utf16, completions, csv_document, describe_schema_refresh, execution_target,
-        highlight, inline_diff, requires_confirmation, resolve_full_table_select, utf16_to_byte,
+        Utf16Offsets, byte_to_utf16, completions, csv_document, describe_schema_refresh,
+        execution_target, highlight, inline_diff, requires_confirmation, resolve_full_table_select,
+        utf16_to_byte,
     },
     state::AppState,
 };
@@ -454,18 +455,22 @@ fn helper_value(request: Request) -> Result<Value, String> {
                 |(schema, table)| json!({ "schema": schema, "table": table }),
             ))
         }
-        Request::Highlight { engine, text } => Ok(Value::Array(
-            highlight(engine, &text)
-                .into_iter()
-                .map(|token| {
-                    json!({
-                        "from": byte_to_utf16(&text, token.from),
-                        "to": byte_to_utf16(&text, token.to),
-                        "kind": token.kind,
+        Request::Highlight { engine, text } => {
+            // Tokens come back in order, so each offset is counted on from the
+            // previous one. Counting each from the start of the text made a
+            // long script quadratic on every keystroke.
+            let mut utf16 = Utf16Offsets::new(&text);
+            Ok(Value::Array(
+                highlight(engine, &text)
+                    .into_iter()
+                    .map(|token| {
+                        let from = utf16.at(token.from);
+                        let to = utf16.at(token.to);
+                        json!({ "from": from, "to": to, "kind": token.kind })
                     })
-                })
-                .collect(),
-        )),
+                    .collect(),
+            ))
+        }
         Request::ParseCell {
             text,
             column,

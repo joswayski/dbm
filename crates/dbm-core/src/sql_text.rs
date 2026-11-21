@@ -1129,6 +1129,37 @@ pub fn byte_to_utf16(text: &str, offset: usize) -> usize {
         .count()
 }
 
+/// Converts byte offsets to UTF-16 code units for callers that ask in
+/// ascending order, such as highlight tokens: each answer continues from the
+/// previous one instead of re-reading the text from its start.
+pub struct Utf16Offsets<'a> {
+    text: &'a str,
+    byte: usize,
+    units: usize,
+}
+
+impl<'a> Utf16Offsets<'a> {
+    pub fn new(text: &'a str) -> Self {
+        Self {
+            text,
+            byte: 0,
+            units: 0,
+        }
+    }
+
+    /// The same answer as [`byte_to_utf16`]. An offset before the previous
+    /// one is still correct, only counted from the start.
+    pub fn at(&mut self, offset: usize) -> usize {
+        let offset = floor_char_boundary(self.text, offset);
+        if offset < self.byte {
+            return byte_to_utf16(self.text, offset);
+        }
+        self.units += self.text[self.byte..offset].encode_utf16().count();
+        self.byte = offset;
+        self.units
+    }
+}
+
 /// The notice after refreshing a schema or keyspace tree, as the desktop app
 /// words it. Returns whether anything changed and the message.
 pub fn describe_schema_refresh(
@@ -1714,6 +1745,12 @@ mod tests {
         assert_eq!(utf16_to_byte(text, 99), text.len());
         assert_eq!(byte_to_utf16(text, 5), 3);
         assert_eq!(byte_to_utf16(text, text.len()), 6);
+        // The running conversion agrees at every offset, including inside a
+        // character, past the end, and after stepping back.
+        let mut running = Utf16Offsets::new(text);
+        for offset in (0..=text.len() + 2).chain([3, 0]) {
+            assert_eq!(running.at(offset), byte_to_utf16(text, offset), "{offset}");
+        }
     }
 
     #[test]
