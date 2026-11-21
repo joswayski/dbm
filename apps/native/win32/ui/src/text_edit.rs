@@ -544,6 +544,12 @@ impl<'t> TextEdit<'t> {
         editable: bool,
     ) -> KeyResult {
         let text = &mut *self.text;
+        // AltGr arrives as Ctrl+Alt and types a character (ą, ż, €, @ on many
+        // layouts); it must not also run Ctrl+A, Ctrl+Z, Ctrl+X, or Ctrl+C.
+        let m = Modifiers {
+            ctrl: m.ctrl && !m.alt,
+            ..m
+        };
         let word = m.ctrl;
         let caret = st.selection.1;
         let moved = |st: &mut EditState, to: usize, keep_goal: bool| {
