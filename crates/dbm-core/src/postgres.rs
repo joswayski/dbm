@@ -502,7 +502,8 @@ impl PgSession {
                     assignments.join(", ")
                 )
             };
-            let changed = match self.client.execute(&statement, &[]).await {
+            // Unprepared, so each row costs one round trip instead of two.
+            let changed = match self.client.execute_typed(&statement, &[]).await {
                 Ok(changed) => changed,
                 Err(error) => {
                     let _ = self.client.batch_execute(scope.rollback()).await;
@@ -869,9 +870,9 @@ fn build_predicate(metadata: &TableMetadata, filters: &[FilterCondition]) -> App
         let text_column = format!("{column}::text");
         let value = filter.value.as_deref().unwrap_or_default();
         let clause = match filter.operator {
-            FilterOperator::Equals => {
-                format!("{column} IS NOT DISTINCT FROM {}", quote_literal(value))
-            }
+            // `=` rather than IS NOT DISTINCT FROM, which matches the same rows
+            // for a non-null value but can never use an index.
+            FilterOperator::Equals => format!("{column} = {}", quote_literal(value)),
             FilterOperator::NotEquals => {
                 format!("{column} IS DISTINCT FROM {}", quote_literal(value))
             }
@@ -962,17 +963,18 @@ fn mutation_predicate(metadata: &TableMetadata, mutation: &RowMutation) -> AppRe
             "primary key values do not match table".into(),
         ));
     }
+    // Primary keys are never NULL, so plain `=` finds the row through the
+    // key's index; IS NOT DISTINCT FROM would scan the table for every edit.
+    if mutation.primary_key.iter().any(Value::is_null) {
+        return Err(AppError::InvalidInput(
+            "primary key values cannot be NULL".into(),
+        ));
+    }
     let mut clauses = metadata
         .primary_key
         .iter()
         .zip(&mutation.primary_key)
-        .map(|(column, value)| {
-            format!(
-                "{} IS NOT DISTINCT FROM {}",
-                quote_identifier(column),
-                json_to_sql(value)
-            )
-        })
+        .map(|(column, value)| format!("{} = {}", quote_identifier(column), json_to_sql(value)))
         .collect::<Vec<_>>();
     if let Some(xmin) = mutation.xmin.as_deref() {
         clauses.push(format!("xmin::text = {}", quote_literal(xmin)));
@@ -1390,6 +1392,80 @@ mod tests {
                 }),
                 include_total: Some(true),
             }
+        }
+
+        #[tokio::test]
+        async fn saves_and_equals_filters_find_rows_through_the_primary_key_index() {
+            let Some(profile) = profile(false) else {
+                return;
+            };
+            let session = PgSession::connect(profile, None).await.expect("connect");
+            session
+                .client
+                .batch_execute(
+                    "CREATE TEMP TABLE indexed_rows (id bigint PRIMARY KEY, label text);
+                     INSERT INTO indexed_rows VALUES (1, 'one'), (2, 'two');
+                     -- A two-row table would be scanned whatever the predicate; this
+                     -- leaves the index as the only plan when the predicate can use it.
+                     SET enable_seqscan = off",
+                )
+                .await
+                .expect("fixture");
+            let schema: String = session
+                .client
+                .query_one(
+                    "SELECT nspname FROM pg_namespace WHERE oid = pg_my_temp_schema()",
+                    &[],
+                )
+                .await
+                .expect("temporary schema")
+                .get(0);
+            let metadata = session
+                .table_metadata(&schema, "indexed_rows")
+                .await
+                .expect("metadata");
+            let row = RowMutation {
+                original: vec![Value::from(2), Value::from("two")],
+                changes: vec![Value::from(2), Value::from("edited")],
+                primary_key: vec![Value::from(2)],
+                xmin: None,
+                deleted: false,
+            };
+            let filter = build_predicate(
+                &metadata,
+                &[FilterCondition {
+                    column: "id".into(),
+                    operator: FilterOperator::Equals,
+                    value: Some("2".into()),
+                }],
+            )
+            .expect("filter");
+            for predicate in [
+                format!(" WHERE {}", mutation_predicate(&metadata, &row).unwrap()),
+                filter,
+            ] {
+                let plan = session
+                    .client
+                    .simple_query(&format!(
+                        "EXPLAIN (COSTS OFF) SELECT * FROM indexed_rows{predicate}"
+                    ))
+                    .await
+                    .expect("plan")
+                    .into_iter()
+                    .filter_map(|message| match message {
+                        SimpleQueryMessage::Row(row) => row.get(0).map(str::to_owned),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                assert!(plan.contains("Index Cond"), "{predicate}: {plan}");
+            }
+            // A key cannot be NULL, and `= NULL` would silently match nothing.
+            let null_key = RowMutation {
+                primary_key: vec![Value::Null],
+                ..row
+            };
+            assert!(mutation_predicate(&metadata, &null_key).is_err());
         }
 
         #[tokio::test]
