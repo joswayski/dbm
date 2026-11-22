@@ -190,7 +190,7 @@ approval.
 
 Every merge to `main` that changes the app runs the release workflow and
 publishes a GitHub release for macOS, Windows, and Linux. Install Anybase once from
-the [latest release](https://github.com/joswayski/dbm/releases/latest); after
+the [latest release](https://github.com/joswayski/anybase/releases/latest); after
 that, release builds update themselves. The macOS app is signed and notarized;
 Windows builds are not Authenticode-signed. Versioning, the workflow's steps,
 required secrets, and the update flow are documented in

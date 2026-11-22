@@ -25,7 +25,7 @@ ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
 EGUI=${EGUI:-$ROOT/target/bench/dbm-egui-v2026.11.11.5}
 if [[ ! -x $EGUI && $EGUI == "$ROOT/target/bench/"* ]]; then
   mkdir -p "$(dirname "$EGUI")"
-  gh release download v2026.11.11.5 --repo joswayski/dbm --pattern DBM-Linux-x64 --output "$EGUI"
+  gh release download v2026.11.11.5 --repo joswayski/anybase --pattern DBM-Linux-x64 --output "$EGUI"
   chmod +x "$EGUI"
 fi
 GTK=${GTK:-$ROOT/apps/native/gtk/target/release/dbm-gtk}

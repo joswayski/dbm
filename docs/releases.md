@@ -105,7 +105,7 @@ to `CFBundleVersion`; the display version is compiled in as
 ## In-app updates
 
 Release builds check
-`https://github.com/joswayski/dbm/releases/latest/download/native-latest.json`
+`https://github.com/joswayski/anybase/releases/latest/download/native-latest.json`
 five seconds after launch and every 30 minutes. **Check for updates…** checks
 on demand from the Anybase menu on macOS or the top bar's Help menu on
 Windows and Linux. The top bar normally shows a small, non-clickable **Version
@@ -245,7 +245,7 @@ Set the repository Actions secret `GEMINI_API_KEY` (it prompts privately), a
 Gemini API key from Google AI Studio whose project uses the paid tier:
 
 ```sh
-gh secret set GEMINI_API_KEY --repo joswayski/dbm
+gh secret set GEMINI_API_KEY --repo joswayski/anybase
 ```
 
 Optional repository variables `DBM_RELEASE_NOTES_MODEL` and
@@ -422,7 +422,7 @@ profile can serve both Anybase and Captures.
 7. Add a GitHub OIDC federated credential restricted to:
 
    ```text
-   repo:joswayski/dbm:environment:release
+   repo:joswayski@22891173/anybase@1300057641:environment:release
    ```
 
    OIDC avoids storing a long-lived Azure client secret in GitHub.
@@ -477,7 +477,7 @@ Verify a download on a clean Ubuntu system:
 
 ```sh
 sha256sum --check --ignore-missing SHA256SUMS
-gh attestation verify ./Anybase-Linux-x86_64.AppImage --repo joswayski/dbm
+gh attestation verify ./Anybase-Linux-x86_64.AppImage --repo joswayski/anybase
 chmod +x ./Anybase-Linux-x86_64.AppImage
 ./Anybase-Linux-x86_64.AppImage
 ```

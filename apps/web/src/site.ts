@@ -3,7 +3,7 @@ export const SITE_URL = "https://anyba.se";
 export const SITE_DESCRIPTION = "A fast database client for PostgreSQL, MySQL, and Redis.";
 
 /** The repository keeps its old name until the GitHub rename (docs/anybase-migration.md). */
-export const REPOSITORY = "joswayski/dbm";
+export const REPOSITORY = "joswayski/anybase";
 export const REPO_URL = `https://github.com/${REPOSITORY}`;
 export const AUTHOR_URL = "https://josevalerio.com";
 export const CONTACT_EMAIL = "contact@josevalerio.com";

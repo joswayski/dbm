@@ -48,7 +48,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
             **os.environ,
             "PATH": f"{self.bin}:{os.environ['PATH']}",
             "GITHUB_SHA": SHA,
-            "GITHUB_REPOSITORY": "joswayski/dbm",
+            "GITHUB_REPOSITORY": "joswayski/anybase",
             "GITHUB_SERVER_URL": "https://github.com",
             "GITHUB_API_URL": "https://api.github.com",
             "GITHUB_OUTPUT": str(self.directory / "output"),
@@ -196,7 +196,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
             (self.directory / "calls").read_text().splitlines(),
-            [f"workflow run mobile-release.yml --repo joswayski/dbm --ref main -f git_sha={SHA}"],
+            [f"workflow run mobile-release.yml --repo joswayski/anybase --ref main -f git_sha={SHA}"],
         )
         (self.directory / "calls").unlink()
         result = self.run_step(script, GIT_SHA="main; touch unsafe", GITHUB_STEP_SUMMARY=summary)

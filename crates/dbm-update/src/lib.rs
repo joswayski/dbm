@@ -19,11 +19,11 @@ mod patch;
 pub use patch::{apply, bundle_tar, diff};
 
 /// Commits behind each release, for its version link.
-pub const REPOSITORY_URL: &str = "https://github.com/joswayski/dbm";
+pub const REPOSITORY_URL: &str = "https://github.com/joswayski/anybase";
 
 /// The latest release's manifest.
 pub const MANIFEST_URL: &str =
-    "https://github.com/joswayski/dbm/releases/latest/download/native-latest.json";
+    "https://github.com/joswayski/anybase/releases/latest/download/native-latest.json";
 
 /// The release updater public key: base64 of a minisign public key. It is the
 /// key the former Tauri app shipped with, so its installs accept native builds.
@@ -613,7 +613,7 @@ mod tests {
         assert_eq!(
             commit_url(commit).as_deref(),
             Some(
-                "https://github.com/joswayski/dbm/commit/0123456789abcdef0123456789abcdef01234567"
+                "https://github.com/joswayski/anybase/commit/0123456789abcdef0123456789abcdef01234567"
             )
         );
         assert_eq!(commit_url("abc1234"), None);
@@ -692,7 +692,7 @@ mod tests {
     #[test]
     fn signatures_are_bound_to_the_artifact_name() {
         let data = b"dbm native build";
-        let base = "https://github.com/joswayski/dbm/releases/download/v2026.10.11.1";
+        let base = "https://github.com/joswayski/anybase/releases/download/v2026.10.11.1";
         let (public, signature) = signed_as(data, "timestamp:1760000000\tfile:DBM-Linux-x64");
         let check = |url: &str| verify_artifact(data, &signature, &public, url);
         assert_eq!(check(&format!("{base}/DBM-Linux-x64")), Ok(()));

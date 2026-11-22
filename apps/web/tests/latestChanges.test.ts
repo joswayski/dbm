@@ -7,7 +7,7 @@ import {
   type FeedEntry,
 } from "../src/latestChanges";
 
-const REPOSITORY = "joswayski/dbm";
+const REPOSITORY = "joswayski/anybase";
 const SHA = "8d64073752c2aede7004bf0126ad825414d8401d";
 
 function feedEntry(title: string, author = "joswayski", sha = SHA): string {

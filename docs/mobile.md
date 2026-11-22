@@ -10,12 +10,12 @@ Anybase has no server, account, pairing service, telemetry, or connection sync.
 
 ## Distribution status
 
-The [mobile release on 7 October 2026 (UTC)](https://github.com/joswayski/dbm/actions/runs/37552184568)
+The [mobile release on 7 October 2026 (UTC)](https://github.com/joswayski/anybase/actions/runs/37552184568)
 completed both platform jobs:
 
 - **Android:** version code 1001 rolled out to Google Play internal testers.
   Enrolled testers can use [Google Play](https://play.google.com/apps/testing/com.dbm.nativeapp),
-  or download the [signed APK](https://github.com/joswayski/dbm/releases/download/mobile-latest/DBM-Android.apk).
+  or download the [signed APK](https://github.com/joswayski/anybase/releases/download/mobile-latest/DBM-Android.apk).
 - **iPhone:** build 10.1 uploaded, finished processing, and became available to
   the internal TestFlight group. Testers need an invitation; this does not
   establish external beta-review approval or public App Store availability.
@@ -182,7 +182,7 @@ The release reads `production/signing/release` through GitHub OIDC role
   and `SHA256SUMS` go in the `mobile-latest` **prerelease**, never GitHub's
   desktop `releases/latest` target. This is an alternative to Play testing.
   Once published, the APK is at
-  https://github.com/joswayski/dbm/releases/download/mobile-latest/DBM-Android.apk.
+  https://github.com/joswayski/anybase/releases/download/mobile-latest/DBM-Android.apk.
   The signed Play AAB is retained as the run's `google-play-bundle` artifact for
   30 days, including when the subsequent Play upload fails during first-app setup.
 - **iPhone:** `apps/native/ios/upload-testflight.sh` builds a Release device
@@ -214,7 +214,7 @@ stores. See
 1. Apply the DBM signer role in `joswayski/infrastructure` following its
    `docs/release-signing.md`. Reuse the stored Apple/Android signing material;
    do not regenerate or rotate Caper's keys. This creates no hosted DBM services.
-2. Add `joswayski/dbm` to the existing Godis deploy GitHub App installation
+2. Add `joswayski/anybase` to the existing Godis deploy GitHub App installation
    with **Actions: write** only, deploy Godis's `dbm-mobile` dispatch support,
    and sync the existing notification secret from the infrastructure checkout:
    `./scripts/store-deploy-notification-webhook.sh --profile production`.
@@ -254,9 +254,9 @@ stores. See
 
    ```sh
    git fetch origin main
-   gh workflow run mobile-release.yml --repo joswayski/dbm --ref main \
+   gh workflow run mobile-release.yml --repo joswayski/anybase --ref main \
      -f git_sha="$(git rev-parse origin/main)"
-   gh run list --repo joswayski/dbm --workflow mobile-release.yml --limit 5
+   gh run list --repo joswayski/anybase --workflow mobile-release.yml --limit 5
    ```
 
 6. For a new Play app, download that run's **google-play-bundle** artifact and

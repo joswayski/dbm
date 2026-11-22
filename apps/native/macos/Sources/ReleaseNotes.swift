@@ -83,7 +83,7 @@ enum ReleaseNotes {
         let line = NSMutableAttributedString(string: "Version \(version)", attributes: [
             .font: Graphite.ui(12), .foregroundColor: Graphite.muted,
         ])
-        if let url = URL(string: "https://github.com/joswayski/dbm/releases/tag/v\(version)") {
+        if let url = URL(string: "https://github.com/joswayski/anybase/releases/tag/v\(version)") {
             line.addAttribute(.link, value: url, range: NSRange(location: 0, length: line.length))
         }
         return line

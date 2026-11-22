@@ -12,13 +12,13 @@ when, and which identifiers must never change.
 | 1. Website and branding | anyba.se site in `apps/web`; README; josevalerio.com links to anyba.se | Done |
 | 2. App display name | What users see inside and around the installed app | Done, except store listings |
 | 3. Download names | Anybase-named first-install downloads | Done |
-| 4. Repository rename (optional) | `joswayski/dbm` to `joswayski/anybase`, and every hard-coded reference | Planned |
+| 4. Repository rename | `joswayski/dbm` to `joswayski/anybase`, and every hard-coded reference | Done |
 | 5. Internal names | Crates, env vars, script names | Optional |
 
 ### 1. Website and branding
 
 - `apps/web` builds anyba.se. See [Website](#website).
-- The README leads with Anybase and says the repository still has the DBM name.
+- The README leads with Anybase.
 - josevalerio.com lists Anybase and links to anyba.se.
 
 ### 2. App display name
@@ -65,37 +65,32 @@ before the rename.
 
 ### 4. Repository rename
 
-Optional: the product name doesn't depend on it. GitHub redirects git, web, and
-release-download URLs from a renamed repository as long as nothing new is ever
-created at `joswayski/dbm`, so installed apps keep updating through the old
-manifest URL (the updater follows redirects). Repository settings, secrets,
-runners, and GitHub App installations follow the repository.
+The repository is now `joswayski/anybase` (formerly `joswayski/dbm`, same
+repository ID 1300057641). GitHub redirects git, web, and release-download URLs
+from the old name as long as nothing new is ever created at `joswayski/dbm`, so
+installs from before the rename keep updating through the old manifest URL (the
+updater follows redirects). Repository settings, secrets, runners, and GitHub App
+installations followed the repository.
 
-These match the repository **name** and break on rename. Make each accept both
-names and roll it out **before** renaming:
+Two things matched the repository **name** and were changed to accept both names
+before the rename:
 
 - **Mobile release signing.** The AWS trust policy in the infrastructure repo's
-  `infra/environments/production/release-signing.tf` only accepts
-  `repo:joswayski@22891173/dbm@1300057641`. After a rename GitHub sends the new
-  name, AWS refuses the role, and Play/TestFlight releases fail. Add the new
-  subject and `tofu apply`.
+  `infra/environments/production/release-signing.tf` trusts
+  `repo:joswayski@22891173/anybase@1300057641` as well as the old `dbm` subject.
 - **Self-hosted runners.** The job hooks written by the infrastructure repo's
   `scripts/mac-ci-runner.sh`, `scripts/windows-ci-runner.ps1`, and
-  `scripts/windows-ci/linux-runner.sh` only allow `joswayski/dbm`, so jobs routed
-  to `josemac`, `josewin`, and `joselinux` fail. Add the new name and rerun each
-  machine's setup.
+  `scripts/windows-ci/linux-runner.sh` allow `joswayski/anybase` as well as
+  `joswayski/dbm`.
 
-After the rename, update the remaining references (these keep working through
-redirects meanwhile):
+Every hard-coded `joswayski/dbm` reference in this repository now says
+`joswayski/anybase`, including the updater's manifest URL (new builds only).
 
-- `apps/web/src/site.ts` (`REPOSITORY`) and the download URLs in
-  `apps/web/src/downloads.ts`.
-- `crates/dbm-update/src/lib.rs` manifest URL (new installs only; old ones rely on
-  the redirect).
-- Infrastructure `scripts/store-release-signing-secrets.sh` and
-  `scripts/store-deploy-notification-webhook.sh`, plus their docs and tests.
+Still to do:
+
 - Local clones: `git remote set-url origin https://github.com/joswayski/anybase`.
-- Remove the old name from the signing trust policy and runner hook.
+- After a release and a mobile release have run under the new name, remove the
+  old name from the signing trust policy and the runner hooks.
 
 ### 5. Internal names
 
@@ -148,7 +143,7 @@ to pan while zoomed; swipe between screenshots when zoomed out.
 **One-time setup** (Cloudflare dashboard, the account that holds the anyba.se
 zone):
 
-1. Workers & Pages → Create → Import a repository → `joswayski/dbm`.
+1. Workers & Pages → Create → Import a repository → `joswayski/anybase`.
 2. Root directory `apps/web`, build command `npm run build`, deploy command
    `npx wrangler deploy`, production branch `main`. No build variables are
    needed: **Latest changes** comes from GitHub's public commit feed.
