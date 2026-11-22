@@ -63,14 +63,13 @@ for it and then releases everything merged since.
 | `Anybase-macOS.dmg`, `Anybase-Windows-x64-setup.exe`, `Anybase-Linux-x86_64.AppImage` | First install, linked from anyba.se and the README. Byte-identical copies of the DBM-named files below |
 | `DBM-macOS.dmg` | First install on macOS (signed, notarized, stapled), for links made before the rename |
 | `DBM-macOS.zip` | Native updater on macOS |
-| `DBM-macOS.app.tar` | The uncompressed bundle tar macOS patch updates rebuild; kept as the base for later patches |
 | `DBM.app.tar.gz` | Updates for installs of the former Tauri app on macOS |
 | `DBM-Windows-x64-setup.exe` | First install on Windows; also what former Tauri installs run to update |
 | `DBM-Windows-x64.exe` | Native updater on Windows (bare executable) |
-| `DBM-Linux-x86_64.AppImage` | Install on Linux, and updates for AppImage copies (native and former Tauri) |
+| `DBM-Linux-x86_64.AppImage` | Install on Linux (zstd-compressed), and updates for AppImage copies (native and former Tauri) |
 | `DBM-Linux-x64` | Native updater for a bare Linux executable |
-| `*.patch` | Patch updates from the five newest earlier releases (see [Patch updates](#patch-updates)) |
-| `*.sig` | Updater signature for each updater artifact |
+| `*.dbmpatch` | Patch updates from the 20 newest earlier releases (see [Patch updates](#patch-updates)) |
+| `*.sig` | Updater signature for each updater artifact (patches' signatures are in the manifest) |
 | `native-latest.json` | Native updater manifest |
 | `latest.json` | Tauri-updater-format manifest, for installs of the former Tauri app |
 | `SHA256SUMS` | Checksums of every asset |
@@ -182,39 +181,71 @@ the restarted app doesn't repeat them.
 
 ### Patch updates
 
-Each platform in `native-latest.json` may list `patches`: `{fromBuild, url,
-size, target, signature}`. A patch is a bsdiff (`qbsdiff`) that rebuilds the
-release file `target` from an earlier build's installed copy, so an update
-from a recent build downloads kilobytes instead of the whole app. Builds
-before patch support ignore the field.
+Each platform in `native-latest.json` may list `filePatches`: `{fromBuild,
+url, size, signature}`. A copy of `fromBuild` downloads the patch instead of
+the full file and rebuilds the release from its own installed files, as
+Captures' updater does. Builds before file patches ignore the field (their
+`patches` held whole-file bsdiffs, which this replaced), so they take one
+full download onto the first build that has it.
 
-- **Windows and bare Linux executables:** the patch starts from the running
-  executable and rebuilds `DBM-Windows-x64.exe` or `DBM-Linux-x64`.
-- **AppImage:** it starts from `$APPIMAGE` and rebuilds the AppImage. Its
-  squashfs is uncompressed (`apps/native/gtk/appimage.sh`), because compressed
-  blocks all change with a new binary; the image is larger (about the size of
-  the bare executable) but its patches are as small as the executable's.
-  Installs of a compressed image get one full download first.
-- **macOS:** zip entries are compressed, so patches target
-  `DBM-macOS.app.tar` instead: a deterministic, uncompressed tar of the
-  notarized bundle (`dbm_update::bundle_tar`: sorted entries, links kept,
-  no owners, times or extended attributes, root folder `Anybase.app`). The
-  client builds the same tar from the installed bundle, patches it, and the
-  updater unpacks the result with `tar` before the usual `codesign` check.
+A patch (`<asset>-<from>-to-<to>.dbmpatch`, format in
+`crates/dbm-update/src/patch.rs`) lists every folder, file (path, mode, size,
+SHA-256) and link of the new release. Each file is copied from the installed
+copy when unchanged, rebuilt from the installed file with a bsdiff patch, or
+carried whole when new. The patch data is xz-compressed, with long zero runs
+in bsdiff's diff stream stored as lengths; that measured 8–24% smaller than
+bsdiff's bzip2, and smaller than zstd `--patch-from`, on every release pair
+tried.
 
-The rebuilt file must match `signature`, the release key's signature of
-`target` (bound to that file name like every artifact). A missing base, a
-failed download, or a mismatch falls back to the full download in the same
-attempt, so a patch can only make an update smaller, never different.
+- **Windows and bare Linux executables:** the one file, from the running
+  executable.
+- **macOS:** the app bundle, from the installed bundle. The updater swaps the
+  rebuilt `Anybase.app` in after the usual `codesign --verify --deep
+  --strict` check.
+- **AppImage:** the runtime and the files inside the image, from `$APPIMAGE`.
+  The updater writes the rebuilt files into a new image (zstd squashfs via
+  `backhand`) and reads it back to check it. That image holds exactly the
+  release's files, but is not byte-identical to the published one. Because
+  patches don't diff the image itself, the published AppImage is
+  zstd-compressed (`apps/native/gtk/appimage.sh`: level 19, 1 MiB blocks),
+  7.5 MB instead of the former 21.6 MB uncompressed image.
 
-Release tooling: the macOS job writes the bundle tar with `tools/dbm-delta
-bundle`, checks that it unpacks into an app that passes `codesign --verify
---deep --strict`, and signs it. **publish** downloads
-those files from the five newest published releases and runs `dbm-delta
-diff` for each, which checks that the patch rebuilds the new file exactly.
-Patches over half the full file are dropped. The step never fails a release;
-without patches, apps download full files. Patches and bundle tars stay on
-their releases, so older releases keep serving as bases.
+The patch must carry the release key's signature for its own file name, so
+the hashes it lists are trusted. The updater rebuilds the release in a fresh
+folder, verifies every installed file it patches from and every file it
+writes, and finally rereads the result: exactly the listed entries, modes and
+links, with every file's size and SHA-256. A missing base, a failed download,
+or any mismatch falls back to the full download in the same attempt.
+
+Release tooling: the `patches` job runs `scripts/patch-updates.sh` for each
+updater asset, which runs `dbm-delta diff` from each of the 20 newest
+published releases. Releases come in bursts of up to about 20 a day, so that
+window covers a copy that updated at any point in the previous busy day.
+`dbm-delta` proves each patch by rebuilding the new release from the old one
+exactly as a client does. Patches over half the full download are dropped, and
+the rest are signed with `dbm-sign`. The macOS job also rebuilds its app from
+the previous release with `dbm-delta apply` and runs the codesign check on the
+result. None of this can fail a release: without patches, apps download full
+files. Patches stay on their releases, and every release's full files serve as
+bases for later patches.
+
+Patch sizes from real releases to v2026.11.22.1, before (whole-file bsdiff)
+and after:
+
+| Installed build | macOS | Windows | Linux | AppImage |
+| --- | --- | --- | --- | --- |
+| 2026.11.21.9 (previous) | 20.1 → 20.3 KB | 418 → 369 KB | 293 → 266 KB | 297 → 267 KB |
+| 2026.11.21.5 | 848 → 733 KB | 1.16 → 0.87 MB | 1.42 → 1.08 MB | 1.42 → 1.08 MB |
+| 2026.11.21.1 | 1.88 → 1.42 MB | 1.21 → 0.92 MB | 1.56 → 1.19 MB | 1.56 → 1.19 MB |
+| 2026.11.20.3 | 1.90 → 1.45 MB | 1.80 → 1.43 MB | 1.67 → 1.27 MB | 1.69 → 1.27 MB |
+| 2026.11.12.7 (17 releases back) | 1.91 → 1.46 MB | 1.85 → 1.48 MB | 1.63 → 1.25 MB | 1.62 → 1.25 MB |
+| Full download | 12.8 MB | 12.7 MB | 20.6 MB | 21.6 → 7.5 MB |
+
+The AppImage "after" figures use images repacked, compressed, from those
+releases' executables. The old five-release window gave the last three rows
+no patch at all, so those copies downloaded the full file. A whole-file
+bsdiff between two compressed AppImages would be about 6.0 MB of the 7.5 MB
+image.
 
 ## Release highlights
 

@@ -178,17 +178,18 @@ final class Updater {
     /// Unpacks and verifies the new bundle, then starts a script that swaps
     /// it in and reopens it once this process exits.
     private static func scheduleSwap(archive: String, in directory: URL, current: URL) throws {
-        let unpacked = directory.appendingPathComponent("unpacked")
-        if archive.hasSuffix(".tar") {
-            // A patch update rebuilds the release's uncompressed bundle tar.
-            try FileManager.default.createDirectory(at: unpacked, withIntermediateDirectories: true)
-            try run("/usr/bin/tar", ["-xf", archive, "-C", unpacked.path])
+        let app: URL
+        if archive.hasSuffix(".app") {
+            // A patch update rebuilt the app itself from this copy, file by file.
+            app = URL(fileURLWithPath: archive, isDirectory: true)
         } else {
+            let unpacked = directory.appendingPathComponent("unpacked")
             try run("/usr/bin/ditto", ["-x", "-k", archive, unpacked.path])
-        }
-        let contents = try FileManager.default.contentsOfDirectory(at: unpacked, includingPropertiesForKeys: nil)
-        guard let app = contents.first(where: { $0.pathExtension == "app" }) else {
-            throw BridgeFailure(message: "The update archive does not contain the app.")
+            let contents = try FileManager.default.contentsOfDirectory(at: unpacked, includingPropertiesForKeys: nil)
+            guard let found = contents.first(where: { $0.pathExtension == "app" }) else {
+                throw BridgeFailure(message: "The update archive does not contain the app.")
+            }
+            app = found
         }
         // Apple's signature on top of the release key's: the new bundle must
         // be intact and Developer ID signed.

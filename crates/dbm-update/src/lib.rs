@@ -15,8 +15,7 @@ use std::time::Duration;
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 
-mod patch;
-pub use patch::{apply, bundle_tar, diff};
+pub mod patch;
 
 /// Commits behind each release, for its version link.
 pub const REPOSITORY_URL: &str = "https://github.com/joswayski/anybase";
@@ -109,18 +108,20 @@ pub struct Day {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct Artifact {
     pub url: String,
     /// `tools/dbm-sign` output: base64 of a minisign signature file.
     pub signature: String,
     /// Patches from recent earlier builds, which copies of those builds
-    /// download instead of `url`. Older manifests have none.
+    /// download instead of `url`. Older manifests have none. (Their
+    /// `patches` field held whole-file patches, which builds since ignore.)
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub patches: Vec<Patch>,
+    pub file_patches: Vec<Patch>,
 }
 
-/// A bsdiff patch that rebuilds a release file from an earlier build's
-/// installed copy (see `patch.rs`).
+/// A patch that rebuilds this release from an earlier build's installed copy,
+/// file by file (see `patch.rs`).
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Patch {
@@ -128,10 +129,7 @@ pub struct Patch {
     pub url: String,
     /// The patch's size in bytes.
     pub size: u64,
-    /// The release file the patch rebuilds, e.g. `DBM-macOS.app.tar`.
-    pub target: String,
-    /// That file's `tools/dbm-sign` signature, which the rebuilt bytes must
-    /// match.
+    /// The patch file's own `tools/dbm-sign` signature.
     pub signature: String,
 }
 
@@ -195,7 +193,7 @@ pub fn select(manifest: &Manifest, current: u64, platform: &str) -> Option<Avail
         .find(|release| release.build == manifest.build && is_commit(&release.commit))
         .map(|release| release.commit.clone());
     let patch = artifact
-        .patches
+        .file_patches
         .iter()
         .find(|patch| patch.from_build == current)
         .map(|patch| Box::new(patch.clone()));
@@ -400,17 +398,18 @@ fn url_file_name(url: &str) -> Option<&str> {
     path.rsplit('/').next().filter(|name| !name.is_empty())
 }
 
-/// Downloads `update` into `directory`, verifies its signature, and returns
-/// the file's path. Nothing is written unless the signature verifies. With a
-/// patch from this build, it downloads the patch and rebuilds the release
-/// file from the installed copy; if anything about that fails, it downloads
-/// the whole file.
+/// Downloads `update` into `directory`, verifies it, and returns what
+/// replaces this install: the executable, the AppImage, the macOS app
+/// archive, or, after a patch update, the rebuilt macOS app folder. Nothing
+/// is written unless the signature verifies. With a patch from this build, it
+/// downloads the patch and rebuilds the release from the installed copy; if
+/// anything about that fails, it downloads the whole file.
 pub fn download(update: &Available, directory: &Path) -> Result<PathBuf, String> {
     let public_key = debug_override("DBM_UPDATE_PUBLIC_KEY", PUBLIC_KEY);
     if let Some(patch) = &update.patch
-        && let Ok(data) = patched(patch, &public_key)
+        && let Ok(path) = patched(update.build, patch, &public_key, directory)
     {
-        return save(directory, &patch.target, &data);
+        return Ok(path);
     }
     let data = fetch(&update.url, MAX_DOWNLOAD_BYTES)?;
     verify_artifact(&data, &update.signature, &public_key, &update.url)?;
@@ -421,18 +420,47 @@ pub fn download(update: &Available, directory: &Path) -> Result<PathBuf, String>
     )
 }
 
-/// The release file `patch` rebuilds from this installed copy, verified
-/// against that file's signature.
-fn patched(patch: &Patch, public_key: &str) -> Result<Vec<u8>, String> {
-    if url_file_name(&patch.target) != Some(patch.target.as_str()) {
-        return Err("The patch names an invalid file.".into());
+/// Rebuilds build `to_build` from this installed copy with `patch`, in
+/// `directory`. The patch must carry the release key's signature for its own
+/// file name, which makes the hashes it lists trusted.
+fn patched(
+    to_build: u64,
+    patch: &Patch,
+    public_key: &str,
+    directory: &Path,
+) -> Result<PathBuf, String> {
+    let data = fetch(&patch.url, patch.size.min(MAX_DOWNLOAD_BYTES))?;
+    verify_artifact(&data, &patch.signature, public_key, &patch.url)?;
+    let (layout, install) = installed().map_err(|error| error.to_string())?;
+    let expected = patch::Expected {
+        layout,
+        from_build: patch.from_build,
+        to_build,
+    };
+    patch::apply(&data, &expected, &install, &directory.join("patched"))
+        .map_err(|error| error.to_string())
+}
+
+/// This copy as a patch rebuilds it: the outermost app bundle on macOS
+/// (helpers can be apps nested inside it), the AppImage it runs from, or
+/// its executable.
+fn installed() -> std::io::Result<(patch::Layout, PathBuf)> {
+    let exe = std::env::current_exe()?;
+    if cfg!(target_os = "macos") {
+        let app = exe
+            .ancestors()
+            .filter(|path| path.extension().is_some_and(|extension| extension == "app"))
+            .last()
+            .ok_or_else(|| std::io::Error::other("this copy is not inside an app bundle"))?;
+        return Ok((patch::Layout::Bundle, app.to_path_buf()));
     }
-    let delta = fetch(&patch.url, patch.size.min(MAX_DOWNLOAD_BYTES))?;
-    let base = patch::base(&patch.target).map_err(|error| error.to_string())?;
-    let data =
-        patch::apply(&base, &delta, MAX_DOWNLOAD_BYTES).map_err(|error| error.to_string())?;
-    verify_artifact(&data, &patch.signature, public_key, &patch.target)?;
-    Ok(data)
+    if cfg!(target_os = "linux")
+        && let Some(image) = std::env::var_os("APPIMAGE").map(PathBuf::from)
+        && image.is_file()
+    {
+        return Ok((patch::Layout::AppImage, image));
+    }
+    Ok((patch::Layout::File, exe))
 }
 
 /// Downloads `url`, refusing more than `limit` bytes.
@@ -480,7 +508,7 @@ mod tests {
                 Artifact {
                     url: "https://example.com/dbm-workbench.exe".into(),
                     signature: "sig".into(),
-                    patches: Vec::new(),
+                    file_patches: Vec::new(),
                 },
             )]),
             releases: Vec::new(),
@@ -515,20 +543,19 @@ mod tests {
 
     #[test]
     fn only_a_patch_from_the_installed_build_is_offered() {
+        // Whole-file `patches` from before file patches are ignored.
         let text = r#"{"build":9,"version":"v9","notes":"","platforms":{"darwin-aarch64":{
-            "url":"https://x/DBM-macOS.zip","signature":"zip-sig","patches":[
-              {"fromBuild":8,"url":"https://x/DBM-macOS.app.tar-8-to-9.patch","size":4096,
-               "target":"DBM-macOS.app.tar","signature":"tar-sig"},
-              {"fromBuild":6,"url":"https://x/DBM-macOS.app.tar-6-to-9.patch","size":9000,
-               "target":"DBM-macOS.app.tar","signature":"tar-sig"}]}}}"#;
+            "url":"https://x/DBM-macOS.zip","signature":"zip-sig",
+            "patches":[{"fromBuild":7,"url":"https://x/DBM-macOS.app.tar-7-to-9.patch","size":1,
+               "target":"DBM-macOS.app.tar","signature":"tar-sig"}],
+            "filePatches":[
+              {"fromBuild":8,"url":"https://x/DBM-macOS-8-to-9.patch","size":4096,"signature":"p8"},
+              {"fromBuild":6,"url":"https://x/DBM-macOS-6-to-9.patch","size":9000,"signature":"p6"}]}}}"#;
         let manifest: Manifest = serde_json::from_str(text).unwrap();
         let from_six = select(&manifest, 6, "darwin-aarch64").unwrap();
         let patch = from_six.patch.unwrap();
-        assert_eq!(patch.url, "https://x/DBM-macOS.app.tar-6-to-9.patch");
-        assert_eq!(
-            (patch.target.as_str(), patch.size),
-            ("DBM-macOS.app.tar", 9000)
-        );
+        assert_eq!(patch.url, "https://x/DBM-macOS-6-to-9.patch");
+        assert_eq!((patch.signature.as_str(), patch.size), ("p6", 9000));
         // The full download stays the fallback.
         assert_eq!(from_six.url, "https://x/DBM-macOS.zip");
         assert_eq!(from_six.signature, "zip-sig");

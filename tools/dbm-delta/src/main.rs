@@ -1,12 +1,17 @@
 //! Builds the patch updates the native DBM apps download
 //! (`crates/dbm-update/src/patch.rs`).
 //!
-//!   dbm-delta bundle APP OUT        writes APP's bundle tar, the macOS file
-//!                                   that patches rebuild
-//!   dbm-delta diff OLD NEW OUT      writes a bsdiff patch from OLD to NEW,
-//!                                   after checking it rebuilds NEW exactly
+//!   dbm-delta diff OLD FROM NEW TO OUT
+//!       writes the patch from build FROM to build TO at OUT, after checking
+//!       that it rebuilds NEW from OLD exactly. OLD and NEW are both
+//!       executables, AppImages, or unpacked macOS app bundles.
+//!   dbm-delta apply PATCH FROM TO INSTALL STAGE
+//!       rebuilds build TO from INSTALL (build FROM) into the folder STAGE as
+//!       an installed copy does, and prints what would replace INSTALL.
 
 use std::path::Path;
+
+use dbm_update::patch;
 
 fn main() {
     if let Err(error) = run() {
@@ -18,38 +23,48 @@ fn main() {
 fn run() -> Result<(), String> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.iter().map(String::as_str).collect::<Vec<_>>()[..] {
-        ["bundle", app, out] => {
-            let tar = dbm_update::bundle_tar(Path::new(app))
-                .map_err(|error| format!("couldn't archive {app}: {error}"))?;
-            write(out, &tar)
+        ["diff", old, from, new, to, out] => {
+            let work = format!("{out}.work");
+            let partial = format!("{out}.partial");
+            let result = patch::generate(
+                Path::new(old),
+                build(from)?,
+                Path::new(new),
+                build(to)?,
+                Path::new(&partial),
+                Path::new(&work),
+            );
+            let _ = std::fs::remove_dir_all(&work);
+            let summary = result.map_err(|error| format!("couldn't patch {old} to {new}: {error}"))?;
+            // Renamed last, so a failed run never leaves a patch behind.
+            std::fs::rename(&partial, out).map_err(|error| format!("couldn't write {out}: {error}"))?;
+            println!(
+                "{}",
+                serde_json::to_string(&summary).map_err(|error| error.to_string())?
+            );
+            Ok(())
         }
-        ["diff", old, new, out] => {
-            let old = read(old)?;
-            let new = read(new)?;
-            let patch =
-                dbm_update::diff(&old, &new).map_err(|error| format!("couldn't diff: {error}"))?;
-            let rebuilt = dbm_update::apply(&old, &patch, u64::MAX)
-                .map_err(|error| format!("the patch doesn't apply: {error}"))?;
-            if rebuilt != new {
-                return Err("the patch doesn't rebuild the new file".into());
-            }
-            write(out, &patch)
+        ["apply", patch_file, from, to, install, stage] => {
+            let data = std::fs::read(patch_file)
+                .map_err(|error| format!("couldn't read {patch_file}: {error}"))?;
+            let expected = patch::Expected {
+                layout: patch::layout_of(Path::new(install)),
+                from_build: build(from)?,
+                to_build: build(to)?,
+            };
+            let rebuilt = patch::apply(&data, &expected, Path::new(install), Path::new(stage))
+                .map_err(|error| format!("couldn't apply {patch_file}: {error}"))?;
+            println!("{}", rebuilt.display());
+            Ok(())
         }
-        _ => Err("usage: dbm-delta bundle APP OUT | dbm-delta diff OLD NEW OUT".into()),
+        _ => Err(
+            "usage: dbm-delta diff OLD FROM NEW TO OUT | dbm-delta apply PATCH FROM TO INSTALL STAGE"
+                .into(),
+        ),
     }
 }
 
-fn read(path: &str) -> Result<Vec<u8>, String> {
-    std::fs::read(path).map_err(|error| format!("couldn't read {path}: {error}"))
-}
-
-/// Writes `data` beside `path` first, so a failed run never leaves a partial
-/// file where the release looks for one.
-fn write(path: &str, data: &[u8]) -> Result<(), String> {
-    let partial = format!("{path}.partial");
-    std::fs::write(&partial, data)
-        .and_then(|()| std::fs::rename(&partial, path))
-        .map_err(|error| format!("couldn't write {path}: {error}"))?;
-    println!("Wrote {path} ({} bytes)", data.len());
-    Ok(())
+fn build(text: &str) -> Result<u64, String> {
+    text.parse()
+        .map_err(|_| format!("{text:?} is not a build number"))
 }
