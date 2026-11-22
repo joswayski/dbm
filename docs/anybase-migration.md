@@ -80,13 +80,11 @@ Three things in the infrastructure repo matched the repository **name**:
   The role keeps its name, `production-dbm-release-signer`.
 - **Self-hosted runner hooks.** The job hooks written by `scripts/mac-ci-runner.sh`,
   `scripts/windows-ci-runner.ps1`, and `scripts/windows-ci/linux-runner.sh` now
-  allow only `joswayski/anybase`. The Windows PC still runs hooks that allow
-  both names until its setup is run again.
+  allow only `joswayski/anybase`.
 - **Runner registration.** The runner's own registration (`config.sh --url`)
-  does not follow GitHub's rename redirect. The Mac script registers against
-  `joswayski/anybase`. `scripts/windows-ci-runner.ps1` and `linux-runner.sh`
-  still use the `dbm` name: their registered runners keep working, but their
-  next setup needs the same rename plus removal of the old `dbm` runners.
+  does not follow GitHub's rename redirect, so the runner scripts register
+  against `joswayski/anybase` (`ci-mac-2-anybase`, `desktop-anybase-1`,
+  `ci-linux-anybase-1`). The old `dbm` runners are removed.
 
 Every hard-coded `joswayski/dbm` reference in this repository now says
 `joswayski/anybase`, including the updater's manifest URL (new builds only).
