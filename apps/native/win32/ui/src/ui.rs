@@ -561,8 +561,8 @@ impl<'a> Ui<'a> {
     ) -> R {
         let mut node = Node::new(id.0, role, name, rect);
         node.parent = self.a11y_parent;
-        self.ctx.a11y_node(node);
-        let previous = self.a11y_parent.replace(id.0);
+        let id = self.ctx.a11y_node(node);
+        let previous = self.a11y_parent.replace(id);
         let inner = f(self);
         self.a11y_parent = previous;
         inner

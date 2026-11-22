@@ -180,8 +180,9 @@ pub(crate) struct State {
     placement_file: Option<PathBuf>,
     frames: u64,
     /// `DBM_FRAME_LOG`: a file holding the presented frame count, rewritten
-    /// at most every 250 ms (for the benchmark).
-    frame_log: Option<(PathBuf, f64)>,
+    /// at most every 250 ms and when the loop goes idle (for the benchmark),
+    /// with when it was last written and the count it holds.
+    frame_log: Option<(PathBuf, f64, u64)>,
 }
 
 thread_local! {
@@ -316,7 +317,7 @@ pub fn run(options: Options, make: impl FnOnce(Waker) -> Box<dyn App>) -> Result
                 closing: false,
                 placement_file: options.placement_file.clone(),
                 frames: 0,
-                frame_log: std::env::var_os("DBM_FRAME_LOG").map(|p| (PathBuf::from(p), 0.0)),
+                frame_log: std::env::var_os("DBM_FRAME_LOG").map(|p| (PathBuf::from(p), 0.0, 0)),
             })
         });
         // The first frame renders before the window shows, so it never
@@ -327,6 +328,12 @@ pub fn run(options: Options, make: impl FnOnce(Waker) -> Box<dyn App>) -> Result
             if options.focus {
                 let _ = SetForegroundWindow(hwnd);
             }
+        }
+        // The toolkit assumes the window has the keyboard. One that opened
+        // behind another window never gets WM_KILLFOCUS to say otherwise,
+        // and a focused field's caret would redraw it twice a second.
+        if GetForegroundWindow() != hwnd {
+            with_state(|s| s.push(Event::FocusLost));
         }
         let mut msg = MSG::default();
         loop {
@@ -354,13 +361,18 @@ pub fn run(options: Options, make: impl FnOnce(Waker) -> Box<dyn App>) -> Result
                     let _ = DestroyWindow(s.hwnd);
                     return Some(0);
                 }
-                Some(match s.next_frame {
+                let wait = match s.next_frame {
                     _ if s.dirty => 0,
                     Some(t) => t
                         .saturating_duration_since(Instant::now())
                         .as_millis()
                         .min(u32::MAX as u128) as u32,
                     None => INFINITE,
+                };
+                Some(if wait > 0 {
+                    wait.min(s.write_frame_log())
+                } else {
+                    wait
                 })
             });
             let Some(wait) = wait.flatten() else {
@@ -437,13 +449,7 @@ impl State {
             eprintln!("present failed: {e}");
         }
         self.frames += 1;
-        let now = self.start.elapsed().as_secs_f64();
-        if let Some((path, written)) = &mut self.frame_log
-            && now - *written >= 0.25
-        {
-            *written = now;
-            let _ = std::fs::write(path, self.frames.to_string());
-        }
+        self.write_frame_log();
         if let Some(path) = self.app.snapshot_path() {
             let (w, h) = self.size_px;
             if let Err(e) = self
@@ -486,6 +492,27 @@ impl State {
         if out.repaint_after == Some(0.0) {
             self.dirty = true;
         }
+    }
+
+    /// Rewrites the `DBM_FRAME_LOG` file at most every 250 ms. Returns how
+    /// many milliseconds the loop may wait before calling again to write a
+    /// count still pending, so the file is exact once the app goes idle.
+    fn write_frame_log(&mut self) -> u32 {
+        let now = self.start.elapsed().as_secs_f64();
+        let Some((path, written, count)) = &mut self.frame_log else {
+            return INFINITE;
+        };
+        if *count == self.frames {
+            return INFINITE;
+        }
+        let due = *written + 0.25 - now;
+        if due > 0.0 {
+            return (due * 1000.0).ceil() as u32;
+        }
+        *written = now;
+        *count = self.frames;
+        let _ = std::fs::write(path, self.frames.to_string());
+        INFINITE
     }
 
     fn close(&mut self) {
@@ -676,7 +703,9 @@ unsafe fn handle(s: &mut State, msg: u32, wp: WPARAM, lp: LPARAM) -> Option<LRES
             WM_SIZE => {
                 let w = (lp.0 & 0xffff) as u32;
                 let h = ((lp.0 >> 16) & 0xffff) as u32;
-                if w > 0 && h > 0 {
+                if wp.0 == SIZE_MINIMIZED as usize {
+                    s.renderer.park();
+                } else if w > 0 && h > 0 {
                     s.size_px = (w, h);
                     s.renderer.resize(w, h);
                     // Resizing runs a modal loop: draw now.

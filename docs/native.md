@@ -198,6 +198,69 @@ scrolling sends a wheel notch every 16 ms over the grid for 15 s.
 egui has no frame counter to read from outside; the Win32 app writes one when
 `DBM_FRAME_LOG` is set.
 
+### Measurements: Win32 against PostgreSQL on real hardware (Windows, 2026-11-22)
+
+`apps/native/win32/bench/states.ps1` walks the Win32 release build through
+each state against a local PostgreSQL 17 (`events`: 300,000 rows, 8 columns
+with wide text and JSON) and records memory per state. It drives the app only
+through UI Automation and wheel messages posted to its window, with a
+throwaway profile store, and was run on a separate desktop so it took no one's
+foreground. Machine: Ryzen 7 5800X, RTX 3080 Ti, one 3840×2160 monitor at
+150%, Windows 11. Median (min–max) of 3 runs each, alternating builds, no
+compiler running. "Before" is `721c39c`.
+
+| State | Private before | Private after | Working set before | Working set after |
+| --- | ---: | ---: | ---: | ---: |
+| Launch, no connection | 60.8 MB (60.3–62.0) | 57.9 MB (57.0–58.4) | 56.7 MB | 53.7 MB |
+| Connected, query tab | 67.8 MB | 62.7 MB | 75.7 MB | 70.7 MB |
+| `events` table tab open | 68.9 MB | 63.1 MB | 76.7 MB | 72.1 MB |
+| After scrolling it 15 s | 69.4 MB | 63.8 MB | 77.3 MB | 72.7 MB |
+| 10,000-row wide result | 91.9 MB | 87.0 MB | 99.8 MB | 95.5 MB |
+| Six tabs (three 10,000-row results, three tables) | 138.2 MB | 133.1 MB | 145.1 MB | 140.4 MB |
+| All tabs closed | 72.7 MB* | 67.5 MB | 80.4 MB | 76.3 MB |
+| Disconnected, then idle 60 s | 73.3 MB | 67.9 MB | 80.1 MB | 76.1 MB |
+
+| | Before | After |
+| --- | ---: | ---: |
+| GPU dedicated memory, window at monitor size (3840×2160 px) | 52.7 MB | 43.3 MB |
+| GPU dedicated memory, then minimized | 75.0 MB | 11.5 MB |
+| Threads, launch / table open | 62 / 74 | 28 / 39 |
+| Context switches/s while wheel-scrolling | 361 (346–376) | 190 (182–216) |
+| Frames per 10 s, editor focused in a window opened behind others | 26 | 0 |
+| Time to first window (5 launches) | 175 ms (172–196) | 186 ms (174–191) |
+| Idle CPU, table open | 0% | 0% |
+| CPU while wheel-scrolling | 6.0% (5.9–6.1) | 8.2% (4.6–8.2) |
+| Frames presented while scrolling | 38 fps | 39 fps |
+
+\* Only because the benchmark avoids walking the accessibility tree. Before
+the fix, two labels drawn with the same text (the connection name in the top
+bar and on the welcome pane, shown once the last tab closes) got the same
+accessibility id, and UI Automation's sibling walk looped forever: any client
+that walked the window (Narrator, the benchmark) hung, and Anybase's memory
+climbed past 3 GB within a minute. Ids are now unique within a frame.
+
+What else changed:
+
+- Minimizing shrinks the swap chain to one pixel and stops presenting until
+  the window is restored; resizing flushes so old buffers are freed at once.
+- The D3D11 device is created with `PREVENT_INTERNAL_THREADING_OPTIMIZATIONS`:
+  one thread draws, and NVIDIA's driver no longer starts ~34 worker threads.
+- A window that opens without the keyboard now knows it, so a focused editor's
+  caret does not redraw it twice a second.
+- The text layout cache drops layouts the last two frames did not use once it
+  holds well over what a frame draws (it used to grow to 6,000 entries):
+  scrolling a 10,000-row result 1,200 notches grew private bytes 6 MB before,
+  1 MB after.
+
+Checked and left alone: the swap chain and Direct2D targets are 8-bit BGRA on
+this display (no HDR format); menus and dropdowns draw into the window's one
+swap chain, so they keep no surfaces; the extra bitmaps in `render.rs` exist
+only while writing a `--snapshot-dir` PNG; the glyph-advance cache holds one
+entry per distinct character and size. With WARP instead of the GPU, private
+bytes at launch are 9.8 MB: most of the rest is the NVIDIA driver. A
+10,000-row result costs about 23 MB, held as JSON values by the shared
+worker's response. The release exe is 12.8 MB and the installer 4.1 MB.
+
 ### Measurements: egui vs GTK (Linux, 2026-11-12)
 
 `apps/native/gtk/bench.sh` runs release builds of both apps on the demo

@@ -70,6 +70,8 @@ pub struct Text {
 struct LayoutCache {
     map: HashMap<(String, u32, u8), (IDWriteTextLayout, u64)>,
     frame: u64,
+    /// Layouts this frame has used.
+    used: usize,
 }
 
 fn style_bits(font: Font) -> u8 {
@@ -183,8 +185,11 @@ impl Text {
         let mut cache = self.layouts.borrow_mut();
         let frame = cache.frame;
         if let Some((l, used)) = cache.map.get_mut(&key) {
+            let first_use = *used != frame;
             *used = frame;
-            return Ok(l.clone());
+            let l = l.clone();
+            cache.used += first_use as usize;
+            return Ok(l);
         }
         let w = wide(text);
         let layout = unsafe {
@@ -204,17 +209,21 @@ impl Text {
             l
         };
         cache.map.insert(key, (layout.clone(), frame));
+        cache.used += 1;
         Ok(layout)
     }
 
-    /// Drops layouts no frame used lately.
+    /// Drops layouts the last two frames did not use once the cache holds
+    /// well over what a frame draws: scrolling a grid otherwise kept a
+    /// layout for every cell it passed, up to megabytes after scrolling.
     pub fn end_frame(&self) {
         let mut cache = self.layouts.borrow_mut();
-        cache.frame += 1;
-        if cache.map.len() > 6000 {
-            let keep = cache.frame.saturating_sub(2);
+        if cache.map.len() > 2 * cache.used + 256 {
+            let keep = cache.frame.saturating_sub(1);
             cache.map.retain(|_, (_, used)| *used >= keep);
         }
+        cache.frame += 1;
+        cache.used = 0;
     }
 }
 
@@ -261,6 +270,8 @@ pub struct Renderer {
     brush: ID2D1SolidColorBrush,
     round: ID2D1StrokeStyle,
     size: (u32, u32),
+    /// Minimized: the swap chain is one pixel and nothing is presented.
+    parked: bool,
 }
 
 impl Renderer {
@@ -299,6 +310,7 @@ impl Renderer {
                 brush,
                 round,
                 size: (width.max(1), height.max(1)),
+                parked: false,
             };
             if let Some(hwnd) = hwnd {
                 r.attach(hwnd)?;
@@ -346,6 +358,7 @@ impl Renderer {
 
     pub fn resize(&mut self, width: u32, height: u32) {
         let size = (width.max(1), height.max(1));
+        self.parked = false;
         if size == self.size {
             return;
         }
@@ -360,8 +373,20 @@ impl Renderer {
                     DXGI_FORMAT_UNKNOWN,
                     DXGI_SWAP_CHAIN_FLAG(0),
                 );
+                // Old buffers are destroyed lazily, on the next flush.
+                if let Ok(context) = self.d3d.GetImmediateContext() {
+                    context.Flush();
+                }
             }
         }
+    }
+
+    /// Shrinks the swap chain to one pixel while the window is minimized
+    /// and stops presenting until the next `resize`: nothing shows the
+    /// buffers, and a maximized 4K window's two take 66 MB of video memory.
+    pub fn park(&mut self) {
+        self.resize(1, 1);
+        self.parked = true;
     }
 
     fn target_props(scale: f32, target_only: bool) -> D2D1_BITMAP_PROPERTIES1 {
@@ -383,7 +408,7 @@ impl Renderer {
 
     /// Draws `list` into the swap chain and presents it.
     pub fn present(&mut self, list: &DisplayList, scale: f32, clear: Color32) -> Result<()> {
-        let Some(swap) = self.swap.clone() else {
+        let Some(swap) = self.swap.clone().filter(|_| !self.parked) else {
             return Ok(());
         };
         unsafe {
@@ -754,7 +779,10 @@ unsafe fn create_device() -> Result<(ID3D11Device, bool)> {
                 None,
                 driver,
                 HMODULE::default(),
-                D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+                // One thread draws; without the flag NVIDIA's driver starts
+                // about 30 worker threads of its own.
+                D3D11_CREATE_DEVICE_BGRA_SUPPORT
+                    | D3D11_CREATE_DEVICE_PREVENT_INTERNAL_THREADING_OPTIMIZATIONS,
                 Some(&levels),
                 D3D11_SDK_VERSION,
                 Some(&mut device),

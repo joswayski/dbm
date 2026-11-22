@@ -8,7 +8,7 @@
 
 use std::any::Any;
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
@@ -277,6 +277,8 @@ pub struct Context {
     // Frame output.
     pub(crate) list: DisplayList,
     a11y: Vec<Node>,
+    /// The ids `a11y` already holds this frame.
+    a11y_ids: HashSet<u64>,
     cursor: CursorIcon,
     cursor_set: bool,
     repaint_after: Option<f64>,
@@ -329,6 +331,7 @@ impl Context {
             close_cancelled: false,
             list: DisplayList::default(),
             a11y: Vec::new(),
+            a11y_ids: HashSet::new(),
             cursor: CursorIcon::Default,
             cursor_set: false,
             repaint_after: None,
@@ -420,6 +423,7 @@ impl Context {
         }
         self.list = DisplayList::default();
         self.a11y.clear();
+        self.a11y_ids.clear();
         self.cursor = CursorIcon::Default;
         self.cursor_set = false;
         self.repaint_after = None;
@@ -622,8 +626,7 @@ impl Context {
                 Color32::from_rgb(0xe8, 0xe8, 0xea),
             );
         }
-        self.a11y
-            .push(Node::new(Id::new("tooltip").0, Role::ToolTip, text, rect));
+        self.a11y_node(Node::new(Id::new("tooltip").0, Role::ToolTip, text, rect));
     }
 
     // ---- queries ----------------------------------------------------------
@@ -835,8 +838,19 @@ impl Context {
         }
     }
 
-    pub fn a11y_node(&mut self, node: Node) {
+    /// Records a node and returns its id. UI Automation finds nodes, and
+    /// walks from one sibling to the next, by id, so a node whose id another
+    /// node already has this frame (two labels with the same text in one Ui)
+    /// gets a new one; a repeated id made sibling walks loop forever.
+    pub fn a11y_node(&mut self, mut node: Node) -> u64 {
+        let mut n = 0u64;
+        while !self.a11y_ids.insert(node.id) {
+            n += 1;
+            node.id = Id(node.id).with(n).0;
+        }
+        let id = node.id;
         self.a11y.push(node);
+        id
     }
 
     // ---- interaction ------------------------------------------------------
@@ -1243,5 +1257,49 @@ mod tests {
         frame(&mut c, vec![Event::PointerMoved(q)], f);
         frame(&mut c, vec![press(q, true)], f);
         assert_eq!(c.focused(), None);
+    }
+
+    /// The same text twice in one Ui (a connection's name in the top bar
+    /// and on the welcome pane) and a group id used twice still give every
+    /// node its own id, and children belong to the group they were drawn in.
+    /// UI Automation walks siblings by id, so a repeated one looped forever.
+    #[test]
+    fn accessibility_ids_are_unique_within_a_frame() {
+        use crate::ui::Ui;
+        let mut c = ctx();
+        let area = Rect::from_ltrb(0.0, 0.0, 400.0, 300.0);
+        let font = crate::text::Font::regular(12.0);
+        c.begin_frame(RawInput {
+            screen: area.size(),
+            ..Default::default()
+        });
+        {
+            let mut ui = Ui::root(&mut c, area, Layer::Background);
+            ui.label("bench", font, Color32::WHITE);
+            ui.label("bench", font, Color32::WHITE);
+            for _ in 0..2 {
+                ui.a11y_group(Id::new("group"), Role::Group, "Group", area, |ui| {
+                    ui.label("inside", font, Color32::WHITE);
+                });
+            }
+        }
+        let tree = c.end_frame().a11y;
+        let mut ids: Vec<u64> = tree.nodes.iter().map(|n| n.id).collect();
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(ids.len(), tree.nodes.len(), "{:?}", tree.nodes);
+        let groups: Vec<u64> = tree
+            .nodes
+            .iter()
+            .filter(|n| n.role == Role::Group)
+            .map(|n| n.id)
+            .collect();
+        let insides: Vec<Option<u64>> = tree
+            .nodes
+            .iter()
+            .filter(|n| n.name == "inside")
+            .map(|n| n.parent)
+            .collect();
+        assert_eq!(insides, vec![Some(groups[0]), Some(groups[1])]);
     }
 }
