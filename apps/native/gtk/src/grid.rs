@@ -95,10 +95,19 @@ impl HoverCopy {
             }
         });
         let (slot, weak) = (copy.clone(), root.downgrade());
-        motion.connect_leave(move |_| {
-            if let Some(root) = weak.upgrade() {
-                slot.hide(&root);
-            }
+        motion.connect_leave(move |motion| {
+            // Not now: GTK is still delivering this crossing and next walks
+            // up from the widget the pointer left. When that is the button,
+            // removing it here leaves that walk without a parent to reach,
+            // and GTK crashes.
+            let (slot, weak, motion) = (slot.clone(), weak.clone(), motion.clone());
+            glib::idle_add_local_once(move || {
+                if let Some(root) = weak.upgrade()
+                    && !motion.contains_pointer()
+                {
+                    slot.hide(&root);
+                }
+            });
         });
         root.add_controller(motion);
         copy
