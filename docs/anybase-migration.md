@@ -72,25 +72,24 @@ installs from before the rename keep updating through the old manifest URL (the
 updater follows redirects). Repository settings, secrets, runners, and GitHub App
 installations followed the repository.
 
-Two things matched the repository **name** and were changed to accept both names
-before the rename:
+Three things in the infrastructure repo matched the repository **name**:
 
-- **Mobile release signing.** The AWS trust policy in the infrastructure repo's
-  `infra/environments/production/release-signing.tf` trusts
-  `repo:joswayski@22891173/anybase@1300057641` as well as the old `dbm` subject.
-- **Self-hosted runners.** The job hooks written by the infrastructure repo's
-  `scripts/mac-ci-runner.sh`, `scripts/windows-ci-runner.ps1`, and
-  `scripts/windows-ci/linux-runner.sh` allow `joswayski/anybase` as well as
-  `joswayski/dbm`.
+- **Mobile release signing.** The AWS trust policy in
+  `infra/environments/production/release-signing.tf` accepted both names during
+  the rename and now trusts only `repo:joswayski@22891173/anybase@1300057641`.
+  The role keeps its name, `production-dbm-release-signer`.
+- **Self-hosted runner hooks.** The job hooks written by `scripts/mac-ci-runner.sh`,
+  `scripts/windows-ci-runner.ps1`, and `scripts/windows-ci/linux-runner.sh` now
+  allow only `joswayski/anybase`. The Windows PC still runs hooks that allow
+  both names until its setup is run again.
+- **Runner registration.** The runner's own registration (`config.sh --url`)
+  does not follow GitHub's rename redirect. The Mac script registers against
+  `joswayski/anybase`. `scripts/windows-ci-runner.ps1` and `linux-runner.sh`
+  still use the `dbm` name: their registered runners keep working, but their
+  next setup needs the same rename plus removal of the old `dbm` runners.
 
 Every hard-coded `joswayski/dbm` reference in this repository now says
 `joswayski/anybase`, including the updater's manifest URL (new builds only).
-
-Still to do:
-
-- Local clones: `git remote set-url origin https://github.com/joswayski/anybase`.
-- After a release and a mobile release have run under the new name, remove the
-  old name from the signing trust policy and the runner hooks.
 
 ### 5. Internal names
 
