@@ -1334,12 +1334,11 @@ impl Workbench {
 
     /// Export all: warns before very large tables, then asks for a file.
     pub fn request_export(&mut self, tab_id: u64) {
-        let total = self
+        if self
             .tables
             .get(&tab_id)
-            .and_then(TableState::total_rows)
-            .unwrap_or(0);
-        if total > LARGE_EXPORT_WARNING_ROWS {
+            .is_some_and(TableState::large_export)
+        {
             self.confirm_export = Some(tab_id);
         } else {
             self.start_export(tab_id);

@@ -194,6 +194,7 @@ mod tests {
             columns: vec!["id".into(), "note".into(), "__dbm_xmin".into()],
             rows,
             total_rows: None,
+            total_is_estimate: false,
             offset: request.offset,
             limit: request.limit,
             has_more: request.offset + request.limit < total,

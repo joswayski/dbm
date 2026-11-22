@@ -424,13 +424,39 @@ pub struct TablePageRequest {
     pub include_total: Option<bool>,
 }
 
+/// The most rows a table page counts exactly. Counting every row of a large
+/// table on each page, sort, and filter kept the page waiting for the count.
+pub const COUNTED_ROWS_LIMIT: u64 = 100_000;
+
+/// A row count for a table page: exact up to `limit` (the adapters pass
+/// [`COUNTED_ROWS_LIMIT`]), else `estimate` when it is plausible, else
+/// unknown. Returns the total and whether it is an estimate.
+pub fn page_total(counted: Option<u64>, estimate: Option<u64>, limit: u64) -> (Option<u64>, bool) {
+    match counted {
+        Some(counted) if counted <= limit => (Some(counted), false),
+        // More rows than the limit were just seen, so a smaller estimate is
+        // stale (never analyzed, or the table grew).
+        Some(_) => match estimate.filter(|estimate| *estimate > limit) {
+            Some(estimate) => (Some(estimate), true),
+            None => (None, false),
+        },
+        None => (None, false),
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TablePage {
     pub metadata: TableMetadata,
     pub columns: Vec<String>,
     pub rows: Vec<Vec<Value>>,
+    /// Rows matching the filters, when known. SQL tables are counted only up
+    /// to [`COUNTED_ROWS_LIMIT`]; beyond it this is the database's estimate
+    /// for an unfiltered table, or `None`.
     pub total_rows: Option<u64>,
+    /// `total_rows` is an estimate, to be shown as "~N".
+    #[serde(default)]
+    pub total_is_estimate: bool,
     pub offset: u32,
     pub limit: u32,
     pub has_more: bool,
@@ -600,6 +626,18 @@ mod tests {
             json_unsigned(u64::MAX),
             Value::String("18446744073709551615".into())
         );
+    }
+
+    #[test]
+    fn page_totals_are_exact_up_to_the_limit_then_estimated_or_unknown() {
+        // The count stops one past the limit, so `limit + 1` means "more".
+        assert_eq!(page_total(Some(100), Some(7), 100), (Some(100), false));
+        assert_eq!(page_total(Some(101), Some(5_000), 100), (Some(5_000), true));
+        // A filtered table has no estimate; a stale one would undercount.
+        assert_eq!(page_total(Some(101), None, 100), (None, false));
+        assert_eq!(page_total(Some(101), Some(100), 100), (None, false));
+        // Not counted (the caller did not ask, or the count failed).
+        assert_eq!(page_total(None, Some(5_000), 100), (None, false));
     }
 
     #[test]

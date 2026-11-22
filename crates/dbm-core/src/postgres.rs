@@ -5,10 +5,10 @@ use std::time::{Duration, Instant};
 use crate::error::{AppError, AppResult};
 use crate::export::RowSink;
 use crate::models::{
-    ConnectionProfile, DatabaseEngine, DatabaseRef, FilterCondition, FilterOperator, MutationBatch,
-    MutationResult, OrderSpec, QueryColumn, QueryResponse, RowMutation, SchemaNode, TableColumn,
-    TableMetadata, TablePage, TablePageRequest, TlsMode, escape_like, json_integer,
-    reenables_writes, sql_statement_words,
+    COUNTED_ROWS_LIMIT, ConnectionProfile, DatabaseEngine, DatabaseRef, FilterCondition,
+    FilterOperator, MutationBatch, MutationResult, OrderSpec, QueryColumn, QueryResponse,
+    RowMutation, SchemaNode, TableColumn, TableMetadata, TablePage, TablePageRequest, TlsMode,
+    escape_like, json_integer, page_total, reenables_writes, sql_statement_words,
 };
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
 use futures_util::TryStreamExt;
@@ -205,6 +205,15 @@ impl PgSession {
     }
 
     pub async fn table_page(&self, request: &TablePageRequest) -> AppResult<TablePage> {
+        self.table_page_counting(request, COUNTED_ROWS_LIMIT).await
+    }
+
+    /// [`Self::table_page`], counting rows exactly only up to `counted_limit`.
+    async fn table_page_counting(
+        &self,
+        request: &TablePageRequest,
+        counted_limit: u64,
+    ) -> AppResult<TablePage> {
         let metadata = self.table_metadata(&request.schema, &request.table).await?;
         let limit = request.limit.clamp(1, MAX_PAGE_SIZE);
         let offset = request.offset;
@@ -251,7 +260,12 @@ impl PgSession {
             if !request.include_total.unwrap_or(true) {
                 return None;
             }
-            let count_sql = format!("SELECT COUNT(*)::bigint FROM {table_name}{predicate}");
+            // Stop counting just past the limit instead of reading every row.
+            let count_sql = format!(
+                "SELECT COUNT(*)::bigint FROM \
+                 (SELECT 1 FROM {table_name}{predicate} LIMIT {}) AS counted",
+                counted_limit + 1
+            );
             self.client
                 .query_typed(&count_sql, &[])
                 .await
@@ -260,8 +274,28 @@ impl PgSession {
                 .and_then(|count| u64::try_from(count).ok())
         };
         // The page and the count are pipelined on the connection.
-        let (rows, total_rows) = futures_util::future::join(page, count).await;
+        let (rows, counted) = futures_util::future::join(page, count).await;
         let rows = rows?;
+        // Past the limit, an unfiltered table shows the planner's row estimate.
+        let estimate = if counted.is_some_and(|counted| counted > counted_limit)
+            && request.filters.is_empty()
+        {
+            self.client
+                .query_typed(
+                    "SELECT c.reltuples::bigint
+                     FROM pg_class c
+                     JOIN pg_namespace n ON n.oid = c.relnamespace
+                     WHERE n.nspname = $1 AND c.relname = $2",
+                    &[(&request.schema, Type::NAME), (&request.table, Type::NAME)],
+                )
+                .await
+                .ok()
+                .and_then(|rows| rows.first()?.try_get::<_, i64>(0).ok())
+                .and_then(|estimate| u64::try_from(estimate).ok())
+        } else {
+            None
+        };
+        let (total_rows, total_is_estimate) = page_total(counted, estimate, counted_limit);
         let has_more = rows.len() > usize::try_from(limit).unwrap_or(usize::MAX);
         let rows = rows
             .into_iter()
@@ -283,6 +317,7 @@ impl PgSession {
             columns,
             rows,
             total_rows,
+            total_is_estimate,
             offset,
             limit,
             has_more,
@@ -1506,6 +1541,80 @@ mod tests {
                 ..row
             };
             assert!(mutation_predicate(&metadata, &null_key).is_err());
+        }
+
+        #[tokio::test]
+        async fn large_tables_are_counted_to_a_limit_then_estimated() {
+            let Some(profile) = profile(false) else {
+                return;
+            };
+            let session = PgSession::connect(profile, None).await.expect("connect");
+            session
+                .client
+                .batch_execute(
+                    "CREATE TEMP TABLE counted_rows (id integer PRIMARY KEY, bucket integer);
+                     INSERT INTO counted_rows SELECT n, n % 2 FROM generate_series(1, 50) AS n",
+                )
+                .await
+                .expect("fixture");
+            let schema: String = session
+                .client
+                .query_one(
+                    "SELECT nspname FROM pg_namespace WHERE oid = pg_my_temp_schema()",
+                    &[],
+                )
+                .await
+                .expect("temporary schema")
+                .get(0);
+            let request = |column: Option<(&str, &str)>| TablePageRequest {
+                profile_id: Uuid::nil(),
+                schema: schema.clone(),
+                table: "counted_rows".into(),
+                offset: 0,
+                limit: 5,
+                filters: column
+                    .into_iter()
+                    .map(|(column, value)| FilterCondition {
+                        column: column.into(),
+                        operator: FilterOperator::Equals,
+                        value: Some(value.into()),
+                    })
+                    .collect(),
+                order_by: None,
+                include_total: Some(true),
+            };
+            let total = |page: TablePage| (page.total_rows, page.total_is_estimate);
+
+            // Never analyzed: there is no estimate to show yet.
+            let page = session
+                .table_page_counting(&request(None), 10)
+                .await
+                .expect("page");
+            assert_eq!((page.rows.len(), page.has_more), (5, true));
+            assert_eq!(total(page), (None, false));
+
+            session
+                .client
+                .batch_execute("ANALYZE counted_rows")
+                .await
+                .expect("analyze");
+            for (filter, limit, expected) in [
+                // Past the limit, the whole table shows the planner's estimate.
+                (None, 10, (Some(50), true)),
+                (None, 49, (Some(50), true)),
+                // Up to the limit, counts are exact.
+                (None, 50, (Some(50), false)),
+                (Some(("id", "3")), 10, (Some(1), false)),
+                (Some(("bucket", "0")), 25, (Some(25), false)),
+                // A filtered count past the limit is unknown.
+                (Some(("bucket", "0")), 24, (None, false)),
+            ] {
+                let page = session
+                    .table_page_counting(&request(filter), limit)
+                    .await
+                    .expect("page");
+                assert_eq!(total(page), expected, "{filter:?} counted to {limit}");
+            }
         }
 
         #[tokio::test]

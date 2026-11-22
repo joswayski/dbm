@@ -60,6 +60,13 @@ What the app does today, what is deliberately not built yet, and what it stores 
   streams) that each show up to 250 keys, sampled in one SCAN pass. The pass
   stops after inspecting about 20,000 keys, so on a larger keyspace a rare
   type's folder can be short or missing; **Keys › all** still lists every key.
+- PostgreSQL and MySQL table pages count matching rows exactly up to 100,000.
+  Past that, an unfiltered table shows the database's own estimate with a
+  leading `~` (for example `~2,400,000 rows`; PostgreSQL has none until the
+  table has been analyzed), and a filtered table shows no total. Paging still
+  works, and Windows and Linux ask before exporting such a table. macOS does
+  not mark the estimate with `~` yet, and asks before an export only when a
+  total above 100,000 is shown.
 - CSV exports of PostgreSQL and MySQL tables stream every matching row from
   one statement, so tables without a primary key export each row exactly once
   (PostgreSQL reads one consistent snapshot). Redis exports read the key list,

@@ -3,10 +3,10 @@ use std::time::{Duration, Instant};
 use crate::error::{AppError, AppResult};
 use crate::export::RowSink;
 use crate::models::{
-    ConnectionProfile, DatabaseEngine, DatabaseRef, FilterCondition, FilterOperator, MutationBatch,
-    MutationResult, OrderSpec, QueryColumn, QueryResponse, RowMutation, SchemaNode, TableColumn,
-    TableMetadata, TablePage, TablePageRequest, TlsMode, escape_like, json_integer, json_unsigned,
-    reenables_writes, sql_statement_words,
+    COUNTED_ROWS_LIMIT, ConnectionProfile, DatabaseEngine, DatabaseRef, FilterCondition,
+    FilterOperator, MutationBatch, MutationResult, OrderSpec, QueryColumn, QueryResponse,
+    RowMutation, SchemaNode, TableColumn, TableMetadata, TablePage, TablePageRequest, TlsMode,
+    escape_like, json_integer, json_unsigned, page_total, reenables_writes, sql_statement_words,
 };
 use mysql_async::consts::ColumnType;
 use mysql_async::prelude::Queryable;
@@ -140,6 +140,15 @@ impl MysqlSession {
     }
 
     pub async fn table_page(&self, request: &TablePageRequest) -> AppResult<TablePage> {
+        self.table_page_counting(request, COUNTED_ROWS_LIMIT).await
+    }
+
+    /// [`Self::table_page`], counting rows exactly only up to `counted_limit`.
+    async fn table_page_counting(
+        &self,
+        request: &TablePageRequest,
+        counted_limit: u64,
+    ) -> AppResult<TablePage> {
         // One pooled connection serves the metadata, the page, and the count.
         let mut conn = self.conn().await?;
         let metadata = load_table_metadata(&mut conn, &request.schema, &request.table).await?;
@@ -166,8 +175,13 @@ impl MysqlSession {
             .take(usize::try_from(limit).unwrap_or_default())
             .map(json_row)
             .collect::<Vec<_>>();
-        let total_rows = if request.include_total.unwrap_or(true) {
-            let count_sql = format!("SELECT COUNT(*) FROM {table_name}{predicate}");
+        let counted = if request.include_total.unwrap_or(true) {
+            // Stop counting just past the limit instead of reading every row.
+            let count_sql = format!(
+                "SELECT COUNT(*) FROM \
+                 (SELECT 1 FROM {table_name}{predicate} LIMIT {}) AS counted",
+                counted_limit + 1
+            );
             conn.exec_first::<Value, _, _>(count_sql, params)
                 .await
                 .ok()
@@ -176,6 +190,23 @@ impl MysqlSession {
         } else {
             None
         };
+        // Past the limit, an unfiltered table shows the engine's row estimate.
+        let estimate = if counted.is_some_and(|counted| counted > counted_limit)
+            && request.filters.is_empty()
+        {
+            conn.exec_first::<Value, _, _>(
+                "SELECT TABLE_ROWS FROM information_schema.TABLES
+                 WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?",
+                (&request.schema, &request.table),
+            )
+            .await
+            .ok()
+            .flatten()
+            .and_then(value_as_u64)
+        } else {
+            None
+        };
+        let (total_rows, total_is_estimate) = page_total(counted, estimate, counted_limit);
         let columns = metadata
             .columns
             .iter()
@@ -186,6 +217,7 @@ impl MysqlSession {
             columns,
             rows,
             total_rows,
+            total_is_estimate,
             offset,
             limit,
             has_more,
@@ -1522,6 +1554,86 @@ mod tests {
                 .expect("connection remains usable");
             assert_eq!(response.rows, vec![vec![JsonValue::from("7")]]);
             session.close().await;
+        }
+
+        #[tokio::test]
+        async fn large_tables_are_counted_to_a_limit_then_estimated() {
+            let Some(admin) = profile("mysql", false) else {
+                return;
+            };
+            let database = format!("dbm_test_{}", Uuid::new_v4().simple());
+            let admin = MysqlSession::connect(admin, None).await.expect("connect");
+            admin
+                .run_query(&format!("CREATE DATABASE {database}"), None)
+                .await
+                .expect("create database");
+            let session = MysqlSession::connect(profile(&database, false).expect("profile"), None)
+                .await
+                .expect("connect to test database");
+            let values = (1..=50)
+                .map(|n| format!("({n}, {})", n % 2))
+                .collect::<Vec<_>>()
+                .join(", ");
+            for sql in [
+                "CREATE TABLE counted_rows (id INT PRIMARY KEY, bucket INT)".to_owned(),
+                format!("INSERT INTO counted_rows VALUES {values}"),
+                "ANALYZE TABLE counted_rows".to_owned(),
+            ] {
+                session.run_query(&sql, None).await.expect("fixture");
+            }
+            let request = |column: Option<(&str, &str)>| TablePageRequest {
+                profile_id: Uuid::nil(),
+                schema: database.clone(),
+                table: "counted_rows".into(),
+                offset: 0,
+                limit: 5,
+                filters: column
+                    .into_iter()
+                    .map(|(column, value)| FilterCondition {
+                        column: column.into(),
+                        operator: FilterOperator::Equals,
+                        value: Some(value.into()),
+                    })
+                    .collect(),
+                order_by: None,
+                include_total: Some(true),
+            };
+
+            // Past the limit, the whole table shows the engine's estimate,
+            // which InnoDB does not promise is exact.
+            let page = session
+                .table_page_counting(&request(None), 10)
+                .await
+                .expect("page");
+            assert_eq!((page.rows.len(), page.has_more), (5, true));
+            assert!(page.total_is_estimate);
+            assert!(page.total_rows.is_some_and(|rows| rows > 10), "{page:?}");
+
+            for (filter, limit, expected) in [
+                // Up to the limit, counts are exact.
+                (None, 50, (Some(50), false)),
+                (Some(("id", "3")), 10, (Some(1), false)),
+                (Some(("bucket", "0")), 25, (Some(25), false)),
+                // A filtered count past the limit is unknown.
+                (Some(("bucket", "0")), 24, (None, false)),
+            ] {
+                let page = session
+                    .table_page_counting(&request(filter), limit)
+                    .await
+                    .expect("page");
+                assert_eq!(
+                    (page.total_rows, page.total_is_estimate),
+                    expected,
+                    "{filter:?} counted to {limit}"
+                );
+            }
+
+            session.close().await;
+            admin
+                .run_query(&format!("DROP DATABASE {database}"), None)
+                .await
+                .expect("cleanup");
+            admin.close().await;
         }
 
         #[tokio::test]

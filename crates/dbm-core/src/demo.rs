@@ -909,6 +909,7 @@ pub fn table_page(request: &TablePageRequest) -> TablePage {
             .take(request.limit as usize)
             .collect(),
         total_rows: Some(u64::from(total)),
+        total_is_estimate: false,
         offset: request.offset,
         limit: request.limit,
         has_more: request.offset + request.limit < total,

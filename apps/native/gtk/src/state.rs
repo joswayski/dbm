@@ -104,6 +104,31 @@ pub fn count(value: impl Into<u64>) -> String {
     out
 }
 
+/// A page's row total for display, or `None` when it is unknown. "~" marks
+/// the database's estimate for a table too large to count on every page.
+pub fn total_text(page: &TablePage) -> Option<String> {
+    let total = count(page.total_rows?);
+    Some(if page.total_is_estimate {
+        format!("~{total}")
+    } else {
+        total
+    })
+}
+
+/// The body of the large-export confirmation; `total` is [`total_text`].
+pub fn large_export_message(total: Option<&str>) -> String {
+    match total {
+        Some(total) => {
+            format!("This export contains {total} rows and may take a while. Continue?")
+        }
+        // Too many matching rows to count.
+        None => format!(
+            "This export may contain more than {} rows and take a while. Continue?",
+            count(LARGE_EXPORT_WARNING_ROWS)
+        ),
+    }
+}
+
 pub fn plural(n: usize, one: &str, many: &str) -> String {
     format!("{n} {}", if n == 1 { one } else { many })
 }
@@ -518,8 +543,17 @@ impl TableState {
         !self.pending.is_empty()
     }
 
-    pub fn total_rows(&self) -> Option<u64> {
-        self.page.as_ref().and_then(|p| p.total_rows)
+    pub fn total_text(&self) -> Option<String> {
+        self.page.as_deref().and_then(total_text)
+    }
+
+    /// Whether Export all asks first: the table is large, or too large to
+    /// have been counted.
+    pub fn large_export(&self) -> bool {
+        self.page.as_ref().is_some_and(|page| {
+            page.total_rows
+                .is_none_or(|rows| rows > LARGE_EXPORT_WARNING_ROWS)
+        })
     }
 
     /// Rows shown on the page, with staged edits applied, as CSV.
@@ -2014,7 +2048,7 @@ impl State {
             self.table_error(tab_id, PENDING_EXPORT_ERROR);
             return;
         }
-        if state.total_rows().unwrap_or(0) > LARGE_EXPORT_WARNING_ROWS {
+        if state.large_export() {
             self.confirm_export = Some(tab_id);
         } else {
             self.start_export(tab_id);
@@ -2240,6 +2274,39 @@ pub mod tests {
             truncated: false,
             notices: vec![],
         }
+    }
+
+    #[test]
+    fn totals_mark_estimates_and_uncounted_tables_warn_before_export() {
+        let mut state = TableState::default();
+        // Nothing loaded: nothing to warn about.
+        assert!(!state.large_export());
+        let mut load = |total_rows, total_is_estimate| {
+            let request = state.request(Uuid::nil(), "public", "customers");
+            let page = TablePage {
+                total_rows,
+                total_is_estimate,
+                ..page()
+            };
+            state.loaded(page, request);
+            (state.total_text(), state.large_export())
+        };
+        assert_eq!(load(Some(100_000), false), (Some("100,000".into()), false));
+        assert_eq!(load(Some(100_001), false), (Some("100,001".into()), true));
+        assert_eq!(
+            load(Some(2_400_000), true),
+            (Some("~2,400,000".into()), true)
+        );
+        // Too many filtered rows to count: no "0 rows", and still a warning.
+        assert_eq!(load(None, false), (None, true));
+        assert_eq!(
+            large_export_message(Some("~2,400,000")),
+            "This export contains ~2,400,000 rows and may take a while. Continue?"
+        );
+        assert_eq!(
+            large_export_message(None),
+            "This export may contain more than 100,000 rows and take a while. Continue?"
+        );
     }
 
     #[test]

@@ -21,7 +21,7 @@ use crate::messages::Slot;
 use crate::state::{
     FILTER_OPERATORS, FilterDraft, MAX_PREVIEW_ROWS, RequestKind, State, TableState, count,
     display_prefix, editable, editable_column, filter_needs_value, large_value_size, plural,
-    stage_cell, toggle_delete,
+    stage_cell, toggle_delete, total_text,
 };
 use crate::ui;
 
@@ -838,7 +838,7 @@ impl TableView {
         self.title
             .set_tooltip_text(Some(&format!("{schema}.{name}")));
         let counts = table.page.as_ref().map_or_else(String::new, |page| {
-            let rows = page.total_rows.map_or_else(|| "—".to_owned(), count);
+            let rows = total_text(page).unwrap_or_else(|| "—".to_owned());
             format!("{rows} rows · {} columns", page.metadata.columns.len())
         });
         set_text(&self.counts, &counts);
@@ -865,14 +865,14 @@ impl TableView {
                 .export_progress
                 .as_ref()
                 .map_or(0, |rows| rows.load(std::sync::atomic::Ordering::Relaxed));
-            match table.total_rows() {
-                Some(total) => format!("Exporting {} / {}…", count(done), count(total)),
+            match table.total_text() {
+                Some(total) => format!("Exporting {} / {total}…", count(done)),
                 None => format!("Exporting {}…", count(done)),
             }
         } else {
             let total = table
-                .total_rows()
-                .map_or_else(String::new, |n| format!(" ({})", count(n)));
+                .total_text()
+                .map_or_else(String::new, |total| format!(" ({total})"));
             format!("Export all{total}")
         };
         ui::set_button_text(&self.export, &export);
@@ -1663,9 +1663,7 @@ impl TableView {
     }
 
     fn refresh_status(&self, table: &TableState, page: &TablePage) {
-        let total = page
-            .total_rows
-            .map_or_else(String::new, |n| format!(" of {}", count(n)));
+        let total = total_text(page).map_or_else(String::new, |total| format!(" of {total}"));
         let rows = if page.rows.is_empty() {
             format!("No rows{total}")
         } else {
@@ -1690,10 +1688,11 @@ impl TableView {
         let pages = page
             .total_rows
             .map(|n| n.div_ceil(u64::from(page.limit.max(1))).max(1));
+        let about = if page.total_is_estimate { "~" } else { "" };
         set_text(
             &self.page_label,
             &match pages {
-                Some(pages) => format!("Page {} of {}", count(current), count(pages)),
+                Some(pages) => format!("Page {} of {about}{}", count(current), count(pages)),
                 None => format!("Page {}", count(current)),
             },
         );

@@ -28,7 +28,7 @@ use crate::table::{
     COLLAPSED_COLUMN_WIDTH, FILTER_OPERATORS, FilterDraft, MAX_PREVIEW_ROWS, PENDING_EXPORT_ERROR,
     PENDING_REFRESH_ERROR, PendingRow, PreviewCard, TableState, default_column_width,
     display_prefix, filter_needs_value, large_value_size, operator_label, rows_label, stage_cell,
-    toggle_delete,
+    toggle_delete, total_text,
 };
 
 enum Action {
@@ -280,20 +280,16 @@ fn toolbar(
         apply_menu(chosen, state, &selected, actions);
     }
     let total = state
-        .total_rows()
-        .map_or_else(String::new, |n| format!(" ({})", theme::count(n)));
+        .total_text()
+        .map_or_else(String::new, |total| format!(" ({total})"));
     let export_label = if cx.exporting {
         row.ctx.request_repaint_after(0.2);
         let done = state
             .export_progress
             .as_ref()
             .map_or(0, |rows| rows.load(Ordering::Relaxed));
-        match state.total_rows() {
-            Some(total) => format!(
-                "Exporting {} / {}…",
-                theme::count(done),
-                theme::count(total)
-            ),
+        match state.total_text() {
+            Some(total) => format!("Exporting {} / {total}…", theme::count(done)),
             None => format!("Exporting {}…", theme::count(done)),
         }
     } else {
@@ -352,7 +348,7 @@ fn toolbar(
     l.spacing.x = 8.0;
     widgets::icon(&mut l, Icon::Table, 15.0, theme::MUTED);
     let counts = state.page.as_ref().map(|page| {
-        let rows = page.total_rows.map_or_else(|| "—".to_owned(), theme::count);
+        let rows = total_text(page).unwrap_or_else(|| "—".to_owned());
         format!("{rows} rows · {} columns", page.metadata.columns.len())
     });
     let counts_w = counts
@@ -871,9 +867,7 @@ fn status_bar(
     // `.status-bar`: 11.5 px #8e8e93; the page label is `--secondary`.
     let font = theme::ui(11.5);
     let muted = Color32::from_rgb(0x8e, 0x8e, 0x93);
-    let total = page
-        .total_rows
-        .map_or_else(String::new, |n| format!(" of {}", theme::count(n)));
+    let total = total_text(page).map_or_else(String::new, |total| format!(" of {total}"));
     let rows = if page.rows.is_empty() {
         format!("No rows{total}")
     } else {
@@ -905,8 +899,13 @@ fn status_bar(
         let pages = page
             .total_rows
             .map(|n| n.div_ceil(u64::from(page.limit.max(1))).max(1));
+        let about = if page.total_is_estimate { "~" } else { "" };
         let label = match pages {
-            Some(pages) => format!("Page {} of {}", theme::count(current), theme::count(pages)),
+            Some(pages) => format!(
+                "Page {} of {about}{}",
+                theme::count(current),
+                theme::count(pages)
+            ),
             None => format!("Page {}", theme::count(current)),
         };
         row.label(&label, font, theme::SECONDARY);

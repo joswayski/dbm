@@ -12,7 +12,8 @@ use gtk::prelude::*;
 use crate::app::App;
 use crate::icons::Icon;
 use crate::state::{
-    CONNECTION_COLORS, FeedbackKind, ProfileForm, State, count, engine_label, engine_preset_name,
+    CONNECTION_COLORS, FeedbackKind, ProfileForm, State, engine_label, engine_preset_name,
+    large_export_message,
 };
 use crate::ui;
 
@@ -92,12 +93,8 @@ pub fn build(app: &App, state: &State) -> Option<gtk::Widget> {
     } else if !matches!(state.updates.whats_new, WhatsNew::Closed) {
         (whats_new_dialog(app, &state.updates.whats_new), 460)
     } else if let Some(tab) = state.confirm_export {
-        let total = state
-            .tables
-            .get(&tab)
-            .and_then(|t| t.total_rows())
-            .unwrap_or(0);
-        (export_dialog(app, total), 420)
+        let total = state.tables.get(&tab).and_then(|t| t.total_text());
+        (export_dialog(app, total.as_deref()), 420)
     } else {
         return None;
     };
@@ -272,16 +269,10 @@ fn query_dialog(app: &App, sql: &str) -> gtk::Box {
     content
 }
 
-fn export_dialog(app: &App, total: u64) -> gtk::Box {
+fn export_dialog(app: &App, total: Option<&str>) -> gtk::Box {
     let content = ui::vbox(0);
     content.append(&title("Export a large table?", None));
-    content.append(&body(
-        &format!(
-            "This export contains {} rows and may take a while. Continue?",
-            count(total)
-        ),
-        &["secondary"],
-    ));
+    content.append(&body(&large_export_message(total), &["secondary"]));
     let cancel = ui::button("secondary-button", None, "Cancel", "");
     let handle = app.clone();
     cancel.connect_clicked(move |_| handle.update(|state| state.confirm_export_choice(false)));

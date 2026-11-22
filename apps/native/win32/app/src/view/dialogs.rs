@@ -19,6 +19,7 @@ use crate::state::{
     FeedbackKind, PASSWORD_LOAD, ProfileForm, RequestKind, Workbench, engine_label,
     engine_preset_name,
 };
+use crate::table::{TableState, large_export_message};
 
 /// The colour the system picker returned, picked up on the next frame.
 static PICKED_COLOR: Mutex<Option<[u8; 3]>> = Mutex::new(None);
@@ -307,19 +308,11 @@ impl Workbench {
         self.update_failed_dialog(ui);
         self.whats_new_dialog(ui);
         if let Some(tab_id) = self.confirm_export {
-            let total = self
-                .tables
-                .get(&tab_id)
-                .and_then(|s| s.page.as_ref())
-                .and_then(|p| p.total_rows)
-                .unwrap_or(0);
+            let total = self.tables.get(&tab_id).and_then(TableState::total_text);
             let out = modal(ui, "Large export", 420.0, |ui| {
                 dialog_title(ui, None, "Export a large table?");
                 ui.label_wrapped(
-                    &format!(
-                        "This export contains {} rows and may take a while. Continue?",
-                        theme::count(total)
-                    ),
+                    &large_export_message(total.as_deref()),
                     theme::ui(12.5),
                     theme::SECONDARY,
                     false,
