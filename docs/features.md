@@ -57,11 +57,13 @@ What the app does today, what is deliberately not built yet, and what it stores 
   structured multi-filtering, ordering, visible-page CSV copy, and full filtered
   CSV export. Redis connections show numbered databases, a SCAN-backed key
   index, and per-type key folders (strings, hashes, lists, sets, sorted sets,
-  streams) that each show up to 250 keys, sampled in one SCAN pass.
+  streams) that each show up to 250 keys, sampled in one SCAN pass. The pass
+  stops after inspecting about 20,000 keys, so on a larger keyspace a rare
+  type's folder can be short or missing; **Keys › all** still lists every key.
 - CSV exports of PostgreSQL and MySQL tables stream every matching row from
   one statement, so tables without a primary key export each row exactly once
-  (PostgreSQL reads one consistent snapshot). Redis exports page through keys
-  in order. The chosen file is replaced only after every row is written
+  (PostgreSQL reads one consistent snapshot). Redis exports read the key list,
+  or the exported key, once and write its rows in order. The chosen file is replaced only after every row is written
   successfully; a failed export leaves an existing file unchanged. A connection
   lost mid-export reconnects once and restarts the export.
 - Redis key-index pages scan the complete matching keyspace, deduplicate keys,
@@ -72,7 +74,8 @@ What the app does today, what is deliberately not built yet, and what it stores 
   Key filters other than equals, contains, starts with, and ends with scan
   every key. Key names that are not valid UTF-8 are left out of the key index
   and sidebar. Binary values, hash fields, and set members show as `\x…` hex,
-  and values over 256 KiB are truncated.
+  and values over 256 KiB are truncated (binary values to the hex of their
+  first 256 KiB).
 - Unfiltered Redis lists in ascending index order fetch only the requested page
   plus one lookahead element, with `LLEN` supplying the total. Filtering or
   other sort orders still load the complete list before paging.

@@ -9,6 +9,7 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use crate::error::{AppError, AppResult};
+use crate::export::RowSink;
 use crate::models::{
     ConnectionProfile, DatabaseRef, FilterCondition, FilterOperator, MutationBatch, MutationResult,
     OrderSpec, QueryColumn, QueryResponse, RowMutation, SchemaNode, TableColumn, TableMetadata,
@@ -18,6 +19,10 @@ use crate::models::{
 const MAX_PAGE_SIZE: u32 = 1_000;
 const DEFAULT_QUERY_ROWS: u32 = 10_000;
 const TREE_KEYS_PER_TYPE: usize = 250;
+/// Keys the sidebar inspects before it stops looking for more. Without a
+/// limit, a keyspace missing any one type (most have no streams) was scanned
+/// to its end, with a TYPE call per key, on every sidebar load.
+const TREE_SCAN_KEYS: usize = 20_000;
 /// SCAN COUNT hint: fewer round trips than the server default of 10.
 const SCAN_COUNT: usize = 1_000;
 /// Keys per TYPE/TTL pipeline, so huge keyspaces are not sent in one request.
@@ -103,7 +108,7 @@ impl RedisSession {
                 children: Vec::new(),
             }],
         }];
-        let folders = tree_keys(&mut conn).await?;
+        let folders = tree_keys(&mut conn, TREE_SCAN_KEYS).await?;
         for (key_type, keys) in KEY_TYPES.into_iter().zip(folders) {
             if keys.is_empty() {
                 continue;
@@ -134,6 +139,43 @@ impl RedisSession {
             return keys_table_page(&mut conn, request).await;
         }
         key_table_page(&mut conn, request).await
+    }
+
+    /// Sends every row matching `request`'s filters and order (its offset and
+    /// limit are ignored) to `sink` and returns how many were sent. The key
+    /// list, or the key's contents, are read once; paging through them would
+    /// read them again for every page.
+    pub async fn export_rows(
+        &self,
+        request: &TablePageRequest,
+        sink: &mut RowSink<'_>,
+    ) -> AppResult<u64> {
+        let mut conn = self.conn().await;
+        let mut sent = 0;
+        if request.schema == "keys" && request.table == "all" {
+            let keys = KeyIndex::scan(&mut conn, request).await?;
+            if keys.pages_by_key {
+                // TYPE and TTL a batch at a time, in key order.
+                for chunk in keys.keys.chunks(PIPELINE_KEYS) {
+                    for row in key_index_rows(&mut conn, chunk).await? {
+                        sink(row)?;
+                        sent += 1;
+                    }
+                }
+                return Ok(sent);
+            }
+            for row in keys.matching_rows(&mut conn, request).await? {
+                sink(row)?;
+                sent += 1;
+            }
+            return Ok(sent);
+        }
+        let (metadata, key_type) = key_view(&mut conn, request).await?;
+        for row in key_view_rows(&mut conn, &metadata, &key_type, request).await? {
+            sink(row)?;
+            sent += 1;
+        }
+        Ok(sent)
     }
 
     pub async fn run_query(&self, sql: &str, max_rows: Option<u32>) -> AppResult<QueryResponse> {
@@ -389,16 +431,22 @@ async fn database_count(conn: &mut MultiplexedConnection) -> AppResult<i64> {
 }
 
 /// One SCAN pass that fills every sidebar folder with up to
-/// `TREE_KEYS_PER_TYPE` keys, sorted. It stops once every folder is full or
-/// the keyspace is exhausted, instead of scanning once per type.
+/// `TREE_KEYS_PER_TYPE` keys, sorted. It stops once every folder is full, the
+/// keyspace is exhausted, or about `budget` keys have been inspected, instead
+/// of scanning once per type. On a keyspace larger than the budget a rare
+/// type's folder can be short or missing; Keys › all still lists every key.
 async fn tree_keys(
     conn: &mut MultiplexedConnection,
+    budget: usize,
 ) -> AppResult<[BTreeSet<String>; KEY_TYPES.len()]> {
     let mut folders: [BTreeSet<String>; KEY_TYPES.len()] = Default::default();
     let mut cursor = 0;
+    let mut inspected = 0;
     loop {
         let (next, keys) = scan_batch(conn, cursor, "*", None).await?;
         cursor = next;
+        // Batches of only non-UTF-8 names still count, so the pass ends.
+        inspected += keys.len().max(1);
         let types = key_types(conn, &keys).await?;
         for (key, key_type) in keys.into_iter().zip(types) {
             if let Some(folder) = KEY_TYPES
@@ -411,6 +459,7 @@ async fn tree_keys(
             }
         }
         if cursor == 0
+            || inspected >= budget
             || folders
                 .iter()
                 .all(|folder| folder.len() >= TREE_KEYS_PER_TYPE)
@@ -492,41 +541,71 @@ async fn key_types(conn: &mut MultiplexedConnection, keys: &[String]) -> AppResu
     Ok(types)
 }
 
+/// The key index's keys: everything matching the request's key-name filters,
+/// deduplicated and in the requested key order.
+struct KeyIndex {
+    keys: Vec<String>,
+    /// Without filters and ordered by key name, a page is a slice of `keys`
+    /// and only that slice needs its TYPE and TTL read.
+    pages_by_key: bool,
+}
+
+impl KeyIndex {
+    async fn scan(conn: &mut MultiplexedConnection, request: &TablePageRequest) -> AppResult<Self> {
+        let pattern = scan_pattern(&request.filters);
+        let type_filter = type_filter(&request.filters);
+        // Offset pagination needs the complete keyspace in a deterministic order.
+        // SCAN can repeat keys, so deduplicate before counting or slicing.
+        let mut keys = scan_keys(conn, &pattern, type_filter.as_deref()).await?;
+        keys.sort_unstable();
+        keys.dedup();
+        let pages_by_key = request.filters.is_empty()
+            && request
+                .order_by
+                .as_ref()
+                .is_none_or(|order| order.column == "key");
+        if pages_by_key
+            && request
+                .order_by
+                .as_ref()
+                .is_some_and(|order| order.descending)
+        {
+            keys.reverse();
+        }
+        Ok(Self { keys, pages_by_key })
+    }
+
+    /// Every key's row, filtered and sorted as requested. Filtering or
+    /// sorting by type or TTL has to read them for every key.
+    async fn matching_rows(
+        &self,
+        conn: &mut MultiplexedConnection,
+        request: &TablePageRequest,
+    ) -> AppResult<Vec<Vec<JsonValue>>> {
+        let metadata = key_index_metadata();
+        let mut rows = key_index_rows(conn, &self.keys).await?;
+        rows.retain(|row| row_matches(&metadata, row, &request.filters));
+        sort_rows(&metadata, &mut rows, request.order_by.as_ref())?;
+        Ok(rows)
+    }
+}
+
 async fn keys_table_page(
     conn: &mut MultiplexedConnection,
     request: &TablePageRequest,
 ) -> AppResult<TablePage> {
     let metadata = key_index_metadata();
     let limit = request.limit.clamp(1, MAX_PAGE_SIZE);
-    let pattern = scan_pattern(&request.filters);
-    let type_filter = type_filter(&request.filters);
-    // Offset pagination needs the complete keyspace in a deterministic order.
-    // SCAN can repeat keys, so deduplicate before counting or slicing.
-    let mut keys = scan_keys(conn, &pattern, type_filter.as_deref()).await?;
-    keys.sort_unstable();
-    keys.dedup();
+    let index = KeyIndex::scan(conn, request).await?;
     let offset = usize::try_from(request.offset).unwrap_or(0);
     let take = usize::try_from(limit).unwrap_or(0);
-    let key_order = request
-        .order_by
-        .as_ref()
-        .is_none_or(|order| order.column == "key");
-    let (page_rows, total) = if request.filters.is_empty() && key_order {
+    let (page_rows, total) = if index.pages_by_key {
         // The common path only needs TYPE/TTL for the keys on this page.
-        let total = keys.len();
-        if request
-            .order_by
-            .as_ref()
-            .is_some_and(|order| order.descending)
-        {
-            keys.reverse();
-        }
-        let keys: Vec<_> = keys.into_iter().skip(offset).take(take).collect();
+        let total = index.keys.len();
+        let keys: Vec<_> = index.keys.into_iter().skip(offset).take(take).collect();
         (key_index_rows(conn, &keys).await?, total)
     } else {
-        let mut rows = key_index_rows(conn, &keys).await?;
-        rows.retain(|row| row_matches(&metadata, row, &request.filters));
-        sort_rows(&metadata, &mut rows, request.order_by.as_ref())?;
+        let rows = index.matching_rows(conn, request).await?;
         let total = rows.len();
         (rows.into_iter().skip(offset).take(take).collect(), total)
     };
@@ -582,10 +661,12 @@ async fn key_index_rows(
     Ok(rows)
 }
 
-async fn key_table_page(
+/// The columns and type of the key a request views, checked against the
+/// type the request expects.
+async fn key_view(
     conn: &mut MultiplexedConnection,
     request: &TablePageRequest,
-) -> AppResult<TablePage> {
+) -> AppResult<(TableMetadata, String)> {
     let key_type = inspect_type(conn, &request.table).await?;
     if key_type == "none" {
         return Err(AppError::InvalidInput(format!(
@@ -599,7 +680,27 @@ async fn key_table_page(
             request.table, request.schema
         )));
     }
-    let metadata = key_metadata(&key_type, &request.table);
+    Ok((key_metadata(&key_type, &request.table), key_type))
+}
+
+/// Every row of a key, filtered and sorted as requested.
+async fn key_view_rows(
+    conn: &mut MultiplexedConnection,
+    metadata: &TableMetadata,
+    key_type: &str,
+    request: &TablePageRequest,
+) -> AppResult<Vec<Vec<JsonValue>>> {
+    let mut rows = load_key_rows(conn, key_type, &request.table).await?;
+    rows.retain(|row| row_matches(metadata, row, &request.filters));
+    sort_rows(metadata, &mut rows, request.order_by.as_ref())?;
+    Ok(rows)
+}
+
+async fn key_table_page(
+    conn: &mut MultiplexedConnection,
+    request: &TablePageRequest,
+) -> AppResult<TablePage> {
+    let (metadata, key_type) = key_view(conn, request).await?;
     let limit = request.limit.clamp(1, MAX_PAGE_SIZE);
     let offset = usize::try_from(request.offset).unwrap_or(0);
     let take = usize::try_from(limit).unwrap_or(0);
@@ -636,9 +737,7 @@ async fn key_table_page(
             .collect();
         (rows, total, has_more)
     } else {
-        let mut rows = load_key_rows(conn, &key_type, &request.table).await?;
-        rows.retain(|row| row_matches(&metadata, row, &request.filters));
-        sort_rows(&metadata, &mut rows, request.order_by.as_ref())?;
+        let rows = key_view_rows(conn, &metadata, &key_type, request).await?;
         let total = rows.len() as u64;
         let has_more = u64::from(request.offset) + u64::from(limit) < total;
         (
@@ -1930,15 +2029,23 @@ fn json_from_redis(value: Value) -> JsonValue {
 }
 
 fn bulk_to_json(bytes: &[u8]) -> JsonValue {
-    match String::from_utf8(bytes.to_vec()) {
-        Ok(mut text) => {
-            if text.len() > MAX_VALUE_BYTES {
-                text.truncate(text.floor_char_boundary(MAX_VALUE_BYTES));
+    match std::str::from_utf8(bytes) {
+        Ok(text) if text.len() > MAX_VALUE_BYTES => JsonValue::String(format!(
+            "{}{TRUNCATION_MARKER}",
+            &text[..text.floor_char_boundary(MAX_VALUE_BYTES)]
+        )),
+        Ok(text) => JsonValue::String(text.to_owned()),
+        // Binary values are capped like text: the hex of the first 256 KiB.
+        Err(_) => {
+            let shown = &bytes[..bytes.len().min(MAX_VALUE_BYTES)];
+            let mut text = String::with_capacity(2 + shown.len() * 2 + TRUNCATION_MARKER.len());
+            text.push_str("\\x");
+            push_hex(&mut text, shown);
+            if shown.len() < bytes.len() {
                 text.push_str(TRUNCATION_MARKER);
             }
             JsonValue::String(text)
         }
-        Err(_) => JsonValue::String(format!("\\x{}", hex_encode(bytes))),
     }
 }
 
@@ -1998,8 +2105,12 @@ fn json_to_i64(value: &JsonValue) -> AppResult<i64> {
     }
 }
 
-fn hex_encode(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+fn push_hex(out: &mut String, bytes: &[u8]) {
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+    for byte in bytes {
+        out.push(char::from(DIGITS[usize::from(byte >> 4)]));
+        out.push(char::from(DIGITS[usize::from(byte & 0x0f)]));
+    }
 }
 
 #[cfg(test)]
@@ -2022,6 +2133,31 @@ mod tests {
                 JsonValue::String(format!("{prefix}… (truncated)"))
             );
         }
+    }
+
+    #[test]
+    fn binary_previews_are_hex_and_capped_like_text() {
+        assert_eq!(
+            bulk_to_json(&[0x00, 0xff, 0x1a]),
+            JsonValue::String("\\x00ff1a".into())
+        );
+        let exact = vec![0xff; MAX_VALUE_BYTES];
+        let JsonValue::String(shown) = bulk_to_json(&exact) else {
+            panic!("expected text")
+        };
+        assert_eq!(shown.len(), 2 + MAX_VALUE_BYTES * 2);
+        assert!(is_lossy_preview(&JsonValue::String(shown)));
+        let mut large = vec![0xff; MAX_VALUE_BYTES];
+        large.extend([0x01; 10]);
+        let JsonValue::String(shown) = bulk_to_json(&large) else {
+            panic!("expected text")
+        };
+        assert_eq!(
+            shown.len(),
+            2 + MAX_VALUE_BYTES * 2 + TRUNCATION_MARKER.len()
+        );
+        assert!(shown.ends_with("ff… (truncated)"));
+        assert!(is_lossy_preview(&JsonValue::String(shown)));
     }
 
     #[test]
@@ -3182,7 +3318,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn exports_page_through_every_key_in_order() {
+    async fn exports_send_every_key_in_order_from_one_scan() {
         let Some((_server, session)) = start_test_redis().await else {
             eprintln!("skipping live Redis test because redis-server is unavailable");
             return;
@@ -3193,6 +3329,12 @@ mod tests {
             for index in 0..2_345 {
                 pipe.cmd("SET").arg(format!("k:{index:05}")).arg(1).ignore();
             }
+            pipe.cmd("RPUSH").arg("list");
+            for index in 0..2_345 {
+                pipe.arg(index);
+            }
+            pipe.ignore();
+            pipe.cmd("CONFIG").arg("RESETSTAT").ignore();
             pipe.query_async::<()>(&mut *conn).await.unwrap();
         }
         let session = crate::session::DbSession::Redis(session);
@@ -3214,9 +3356,51 @@ mod tests {
             })
             .await
             .unwrap();
-        assert_eq!(sent, 2_345);
-        let expected: Vec<_> = (0..2_345).map(|index| format!("k:{index:05}")).collect();
+        assert_eq!(sent, 2_346);
+        let expected: Vec<_> = (0..2_345)
+            .map(|index| format!("k:{index:05}"))
+            .chain(["list".to_owned()])
+            .collect();
         assert_eq!(keys, expected);
+
+        // A key's rows export the same way: every element, in the order asked.
+        let mut elements = Vec::new();
+        let list = TablePageRequest {
+            schema: "list".into(),
+            table: "list".into(),
+            order_by: Some(OrderSpec {
+                column: "index".into(),
+                descending: true,
+            }),
+            ..request.clone()
+        };
+        let sent = session
+            .export_rows(&list, &mut |row: Vec<JsonValue>| {
+                elements.push(row[1].as_str().unwrap_or_default().to_owned());
+                Ok(())
+            })
+            .await
+            .unwrap();
+        assert_eq!(sent, 2_345);
+        let expected: Vec<_> = (0..2_345).rev().map(|index| index.to_string()).collect();
+        assert_eq!(elements, expected);
+
+        // The keyspace and the list were each read once; paging read them
+        // again for every 1,000 rows.
+        let crate::session::DbSession::Redis(session) = &session else {
+            unreachable!()
+        };
+        let stats = session.run_query("INFO commandstats", None).await.unwrap();
+        let stats = stats.rows[0][0].as_str().unwrap().to_owned();
+        let calls = |command: &str| {
+            stats
+                .lines()
+                .find_map(|line| line.strip_prefix(&format!("cmdstat_{command}:calls=")))
+                .and_then(|rest| rest.split(',').next()?.parse::<u32>().ok())
+                .unwrap_or(0)
+        };
+        assert!(calls("scan") <= 4, "{stats}");
+        assert_eq!(calls("lrange"), 1, "{stats}");
     }
 
     #[tokio::test]
@@ -3281,6 +3465,37 @@ mod tests {
         // used to need at least six.
         assert!(calls("scan") <= 3, "{stats}");
         assert!(calls("type") <= 1_000, "{stats}");
+    }
+
+    #[tokio::test]
+    async fn schema_tree_stops_scanning_a_large_keyspace_at_its_budget() {
+        let Some((_server, session)) = start_test_redis().await else {
+            eprintln!("skipping live Redis test because redis-server is unavailable");
+            return;
+        };
+        let mut conn = session.conn().await;
+        let mut pipe = redis_rs::pipe();
+        // No folder but strings can fill, so only the budget ends the pass.
+        for index in 0..20_000 {
+            pipe.cmd("SET").arg(format!("s:{index:05}")).arg(1).ignore();
+        }
+        pipe.cmd("CONFIG").arg("RESETSTAT").ignore();
+        pipe.query_async::<()>(&mut *conn).await.unwrap();
+        let folders = tree_keys(&mut conn, 3_000).await.unwrap();
+        assert_eq!(folders[0].len(), TREE_KEYS_PER_TYPE);
+        let stats: String = redis_rs::cmd("INFO")
+            .arg("commandstats")
+            .query_async(&mut *conn)
+            .await
+            .unwrap();
+        let types = stats
+            .lines()
+            .find_map(|line| line.strip_prefix("cmdstat_type:calls="))
+            .and_then(|rest| rest.split(',').next()?.parse::<usize>().ok())
+            .unwrap();
+        // SCAN's COUNT is a hint, so allow a batch or two past the budget;
+        // without the budget all 20,000 keys were inspected.
+        assert!((3_000..=6_000).contains(&types), "{types}");
     }
 
     #[tokio::test]
