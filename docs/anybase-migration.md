@@ -1,9 +1,9 @@
 # Anybase rename
 
-DBM has been renamed **Anybase**, at [anyba.se](https://anyba.se). "DBM" collides
+DBM is being renamed **Anybase**, at [anyba.se](https://anyba.se). "DBM" collides
 with the Unix dbm/gdbm libraries and Python's `dbm` module, and doesn't say that
-the app speaks several databases. This page tracks the stages, which names
-changed, and which identifiers must never change.
+the app speaks several databases. This page tracks the stages, which names change
+when, and which identifiers must never change.
 
 ## Stages
 
