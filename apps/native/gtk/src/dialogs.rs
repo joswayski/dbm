@@ -847,7 +847,7 @@ fn form_dialog(app: &App, state: &State, form: &ProfileForm) -> gtk::Box {
     let password_row = ui::hbox(8);
     password_row.append(&password);
     password_row.append(&reveal);
-    let tls = gtk::DropDown::from_strings(&["Preferred", "Required", "Disabled"]);
+    let tls = ui::dropdown(&["Preferred", "Required", "Disabled"]);
     tls.set_selected(match form.tls {
         TlsMode::Preferred => 0,
         TlsMode::Required => 1,

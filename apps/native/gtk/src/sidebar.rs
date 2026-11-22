@@ -261,7 +261,7 @@ impl Workspace {
         root.set_margin_top(8);
         root.set_margin_bottom(10);
         let database_label = ui::label("Database", &["section-label"]);
-        let databases = gtk::DropDown::from_strings(&[]);
+        let databases = ui::dropdown(&[]);
         databases.set_hexpand(true);
         let schema_header = ui::hbox(4);
         schema_header.set_margin_top(10);

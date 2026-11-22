@@ -178,6 +178,38 @@ pub fn connection_css<'a>(colors: impl IntoIterator<Item = &'a str>) -> String {
     css
 }
 
+/// Frees a popover's surface each time it closes. GTK keeps a popover
+/// realized after its first popup, and every realized surface owns a
+/// renderer: under the GL renderer that is a GL context and its buffers,
+/// 9-28 MB each with Mesa's software driver, held for a menu nobody sees.
+pub fn release_when_closed(popover: &gtk::Popover) {
+    popover.connect_closed(|popover| {
+        let weak = popover.downgrade();
+        // After the close has finished; a popover reopened by then stays.
+        gtk::glib::idle_add_local_once(move || {
+            if let Some(popover) = weak.upgrade()
+                && !popover.is_visible()
+            {
+                WidgetExt::unrealize(&popover);
+                crate::memory::trim_soon();
+            }
+        });
+    });
+}
+
+/// A dropdown of `items` whose list is released when it closes.
+pub fn dropdown(items: &[&str]) -> gtk::DropDown {
+    let dropdown = gtk::DropDown::from_strings(items);
+    let mut child = dropdown.first_child();
+    while let Some(widget) = child {
+        if let Some(popover) = widget.downcast_ref::<gtk::Popover>() {
+            release_when_closed(popover);
+        }
+        child = widget.next_sibling();
+    }
+    dropdown
+}
+
 /// A menu item for `menu`: its label, whether it is destructive, and what
 /// it does.
 pub type MenuItem = (String, bool, Box<dyn Fn()>);
@@ -209,6 +241,7 @@ pub fn menu(items: Vec<MenuItem>, width: i32) -> gtk::Popover {
         list.append(&item);
     }
     popover.set_child(Some(&list));
+    release_when_closed(&popover);
     popover
 }
 

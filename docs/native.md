@@ -220,6 +220,43 @@ memory is 142 MB. A hardware GPU driver replaces llvmpipe on a real desktop.
 Grid cells build their in-grid editor only while editing and their copy button
 only while hovered, which took 13 MB off the first GTK measurement (212.8 MB).
 
+### Measurements: GTK memory against PostgreSQL (Linux, 2026-11-22)
+
+Resident memory of GTK release builds walking the same states against a local
+PostgreSQL 17 table (300,000 rows, 8 columns), driven with xdotool in a
+1280×800 window. Same orb and caveat as above: no GPU, so the GL column
+includes llvmpipe. "Before" is commit `05e5c33`.
+
+| State | GL before | GL after | Cairo before | Cairo after |
+| --- | ---: | ---: | ---: | ---: |
+| Connected, query tab | 202 MB | 192 MB | 125 MB | 123 MB |
+| Table tab open | 221–241 MB | 217 MB | 159 MB | 157 MB |
+| `SELECT *` run five times | 314–317 MB | 265 MB | 230 MB | 193 MB |
+| Five tabs open: three 10,000-row results, two tables | 442–454 MB | 383 MB | 315 MB | 312 MB |
+| All tabs closed, 30 s later | 443–445 MB | 216 MB | 306 MB | 137 MB |
+| Table tab open, then seven popovers and a tooltip opened once | 361 MB | 230 MB | — | — |
+
+What changed:
+
+- glibc kept freed memory in its heap. With every tab closed, `malloc_stats`
+  showed 434 MB taken from the system and 120 MB in use. The app now calls
+  `malloc_trim` three seconds after it last released something large (a closed
+  tab, a replaced result, a popup).
+- Under the GL renderer every dropdown, menu, completion list and staged-row
+  preview kept its surface, and with it a GL context, after its first use:
+  9–28 MB each here. Popovers are now unrealized when they close. Under Cairo
+  they cost nothing; hardware GL drivers were not measured.
+- GTK keeps about 200 rows of cell widgets per list whether or not the list is
+  on screen, roughly 20 KB a cell. A tab in the background for 60 seconds now
+  drops its grid's row widgets and rebuilds them, at the same scroll offset and
+  selection, when it is shown again. With four 10,000-row result tabs open,
+  three of them in the background, that took 353 MB to 291 MB; showing a parked
+  tab costs one rebuild (0.8 s of CPU in this orb).
+
+Still open: a grid on screen costs 20–35 MB for eight columns and grows with
+the column count, because every cell is a widget. The Win32 grid draws its
+cells itself; doing the same in GTK is the remaining large saving.
+
 ### Measurements: egui vs Tauri (Linux, 2026-09-25)
 
 Release builds of the egui workbench and the former Tauri app, same VM, same

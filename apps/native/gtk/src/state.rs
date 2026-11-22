@@ -1027,9 +1027,12 @@ impl State {
             .any(|m| m.profile == Some(profile) && labels.contains(&m.label))
     }
 
-    /// Applies finished work and sends the next queued request.
-    pub fn drain(&mut self) {
+    /// Applies finished work and sends the next queued request. Returns
+    /// whether any answer arrived, since one may have replaced a result.
+    pub fn drain(&mut self) -> bool {
+        let mut answered = false;
         while let Ok(done) = self.worker.rx.try_recv() {
+            answered = true;
             let Some(meta) = self.pending_requests.remove(&done.id) else {
                 continue;
             };
@@ -1051,6 +1054,7 @@ impl State {
                 self.queued.push_back(next);
             }
         }
+        answered
     }
 
     pub fn fail(&mut self, error: String, meta: &RequestMeta) {

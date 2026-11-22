@@ -138,6 +138,51 @@ impl HoverCopy {
     }
 }
 
+/// A grid on a background tab. GTK keeps about 200 rows of cell widgets
+/// alive per list, visible or not, at roughly 20 KB a cell: 20 MB for an
+/// eight-column result, more for a wide one. A parked grid keeps its model
+/// and scroll offset and drops the widgets until its tab shows again.
+#[derive(Default)]
+pub struct Parked(RefCell<Option<(gtk::SelectionModel, f64)>>);
+
+impl Parked {
+    pub fn park(&self, view: &gtk::ColumnView) {
+        if self.0.borrow().is_some() {
+            return;
+        }
+        let Some(model) = view.model() else { return };
+        let offset = view.vadjustment().map_or(0.0, |a| a.value());
+        view.set_model(None::<&gtk::SelectionModel>);
+        *self.0.borrow_mut() = Some((model, offset));
+        crate::memory::trim_soon();
+    }
+
+    pub fn unpark(&self, view: &gtk::ColumnView) {
+        let Some((model, offset)) = self.0.borrow_mut().take() else {
+            return;
+        };
+        let rows = model.n_items();
+        view.set_model(Some(&model));
+        let Some(adjustment) = view.vadjustment().filter(|_| offset > 0.0 && rows > 0) else {
+            return;
+        };
+        // The list scrolls by anchor row until it has been laid out again,
+        // so the first frame shows the row that was at the bottom edge and
+        // the exact offset follows once the adjustment knows its range.
+        let row_height = adjustment.upper() / f64::from(rows);
+        if row_height > 0.0 {
+            let bottom = ((offset + adjustment.page_size()) / row_height) as u32;
+            view.scroll_to(
+                bottom.saturating_sub(1).min(rows - 1),
+                None,
+                gtk::ListScrollFlags::NONE,
+                None,
+            );
+        }
+        glib::idle_add_local_once(move || adjustment.set_value(offset));
+    }
+}
+
 /// The row index a list item holds.
 pub fn row_of(item: &gtk::ListItem) -> Option<usize> {
     item.item()
@@ -187,6 +232,7 @@ pub struct ResultGrid {
     /// Name and type of each column the view was built for.
     shape: RefCell<Vec<(String, String)>>,
     cells: Cells<Cell>,
+    parked: Parked,
 }
 
 impl ResultGrid {
@@ -210,7 +256,17 @@ impl ResultGrid {
             key: RefCell::new(None),
             shape: RefCell::default(),
             cells: Rc::default(),
+            parked: Parked::default(),
         }
+    }
+
+    /// Drops the row widgets while the grid's tab is in the background.
+    pub fn park(&self) {
+        self.parked.park(&self.view);
+    }
+
+    pub fn unpark(&self) {
+        self.parked.unpark(&self.view);
     }
 
     /// Shows a new result; the same result again changes nothing.

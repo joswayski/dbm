@@ -6,6 +6,7 @@ mod dialogs;
 mod fonts;
 mod grid;
 mod icons;
+mod memory;
 mod messages;
 mod query;
 mod settings;

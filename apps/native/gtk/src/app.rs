@@ -22,6 +22,8 @@ use crate::{dialogs, query, sidebar, table, tabs};
 
 pub const DEFAULT_SIZE: (i32, i32) = (1280, 800);
 const SIDEBAR_DEFAULT: i32 = 260;
+/// Seconds a tab stays in the background before its grid is parked.
+const PARK_AFTER: f64 = 60.0;
 
 pub enum View {
     Query(Rc<query::QueryView>),
@@ -65,6 +67,8 @@ pub struct Inner {
     pub window: gtk::ApplicationWindow,
     pub shell: Shell,
     pub views: RefCell<HashMap<u64, View>>,
+    /// When each background tab left the screen (seconds since launch).
+    hidden_since: RefCell<HashMap<u64, f64>>,
     rendering: Cell<bool>,
     render_queued: Cell<bool>,
     started: Instant,
@@ -137,6 +141,7 @@ impl App {
             window,
             shell,
             views: RefCell::new(HashMap::new()),
+            hidden_since: RefCell::default(),
             rendering: Cell::new(false),
             render_queued: Cell::new(false),
             started: Instant::now(),
@@ -203,7 +208,9 @@ impl App {
 
     fn on_wake(&self) {
         let next_check = self.quiet_with(|state, now| {
-            state.drain();
+            if state.drain() {
+                crate::memory::trim_soon();
+            }
             if state.demo {
                 return None;
             }
@@ -773,6 +780,7 @@ impl App {
                     view.teardown();
                 }
                 stack.remove(&widget);
+                crate::memory::trim_soon();
             }
             keep
         });
@@ -795,6 +803,32 @@ impl App {
             };
             views.insert(tab.id, view);
         }
+        // A tab left in the background gives up its grid's row widgets.
+        // Not at once: rebuilding them costs a moment, and flipping between
+        // two tabs should stay instant.
+        let now = self.now();
+        let mut hidden_since = self.hidden_since.borrow_mut();
+        hidden_since.retain(|id, _| views.contains_key(id));
+        for (id, view) in views.iter() {
+            if state.active_tab == Some(*id) {
+                hidden_since.remove(id);
+                match view {
+                    View::Query(view) => view.unpark(),
+                    View::Table(view) => view.unpark(),
+                }
+                continue;
+            }
+            let due = *hidden_since.entry(*id).or_insert(now) + PARK_AFTER;
+            if now < due {
+                self.schedule(due);
+                continue;
+            }
+            match view {
+                View::Query(view) => view.park(),
+                View::Table(view) => view.park(),
+            }
+        }
+        drop(hidden_since);
         match state
             .active_tab
             .and_then(|id| views.get(&id).map(|v| (id, v)))

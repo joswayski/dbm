@@ -15,7 +15,7 @@ use gtk::prelude::*;
 use serde_json::Value;
 
 use crate::app::{App, set_text};
-use crate::grid::{Cells, HoverCopy, cell_label, default_column_width, fill, row_of};
+use crate::grid::{Cells, HoverCopy, Parked, cell_label, default_column_width, fill, row_of};
 use crate::icons::{self, Icon};
 use crate::messages::Slot;
 use crate::state::{
@@ -82,6 +82,7 @@ pub struct TableView {
     page_key: Cell<usize>,
     /// The table's `scroll_top` count this grid last scrolled up for.
     scroll_top: Cell<u64>,
+    parked: Parked,
     cells: Cells<TableCell>,
     style_key: RefCell<String>,
     refreshing: gtk::Box,
@@ -191,9 +192,9 @@ impl TableView {
         limit.set_value(f64::from(MAX_PREVIEW_ROWS));
         limit.set_width_chars(4);
         limit.add_css_class("mono");
-        let sort = gtk::DropDown::from_strings(&[]);
+        let sort = ui::dropdown(&[]);
         sort.set_size_request(170, -1);
-        let direction = gtk::DropDown::from_strings(&["Ascending", "Descending"]);
+        let direction = ui::dropdown(&["Ascending", "Descending"]);
         direction.set_size_request(142, -1);
         let direction_group = group("Direction", direction.upcast_ref());
         let reset_columns = ui::button(
@@ -392,6 +393,7 @@ impl TableView {
         preview.set_position(gtk::PositionType::Bottom);
         preview.add_css_class("preview");
         preview.set_parent(&view);
+        ui::release_when_closed(&preview);
         let table = Rc::new(Self {
             root,
             tab_id,
@@ -426,6 +428,7 @@ impl TableView {
             column_key: RefCell::new(String::new()),
             page_key: Cell::new(0),
             scroll_top: Cell::new(0),
+            parked: Parked::default(),
             cells: Rc::default(),
             style_key: RefCell::new(String::new()),
             refreshing: dim,
@@ -452,6 +455,15 @@ impl TableView {
         });
         table.connect(&add_filter, &apply, &retry);
         table
+    }
+
+    /// Drops the row widgets while the table's tab is in the background.
+    pub fn park(&self) {
+        self.parked.park(&self.view);
+    }
+
+    pub fn unpark(&self) {
+        self.parked.unpark(&self.view);
     }
 
     pub fn teardown(&self) {
@@ -1015,12 +1027,12 @@ impl TableView {
         let operator_list: Vec<&str> = FILTER_OPERATORS.iter().map(|(_, l)| *l).collect();
         for (index, filter) in table.filters.iter().enumerate() {
             let row = ui::hbox(8);
-            let column = gtk::DropDown::from_strings(&column_list);
+            let column = ui::dropdown(&column_list);
             column.set_size_request(170, -1);
             if let Some(i) = columns.iter().position(|c| *c == filter.column) {
                 column.set_selected(i as u32);
             }
-            let operator = gtk::DropDown::from_strings(&operator_list);
+            let operator = ui::dropdown(&operator_list);
             operator.set_size_request(170, -1);
             if let Some(i) = FILTER_OPERATORS
                 .iter()

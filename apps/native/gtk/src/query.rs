@@ -284,6 +284,7 @@ impl QueryView {
         completion.set_position(gtk::PositionType::Bottom);
         completion.set_child(Some(&completion_list));
         completion.set_parent(&editor);
+        ui::release_when_closed(&completion);
         let view = Rc::new(Self {
             root,
             tab_id,
@@ -488,6 +489,21 @@ impl QueryView {
     /// The embedded table viewer, while a `SELECT *` result shows.
     pub fn table_view(&self) -> Option<Rc<TableView>> {
         self.table.borrow().clone()
+    }
+
+    /// Drops the result's row widgets while the tab is in the background.
+    pub fn park(&self) {
+        self.grid.park();
+        if let Some(table) = self.table.borrow().as_ref() {
+            table.park();
+        }
+    }
+
+    pub fn unpark(&self) {
+        self.grid.unpark();
+        if let Some(table) = self.table.borrow().as_ref() {
+            table.unpark();
+        }
     }
 
     pub fn teardown(&self) {
