@@ -147,8 +147,17 @@ jobs:
           if ! jq -e --arg runtime "$runtime" 'any(.runtimes[]; .identifier == $runtime and .isAvailable)' <<< "$runtimes" > /dev/null; then
             xcodebuild -downloadPlatform iOS -buildVersion "$version"
             xcrun simctl list
+            runtimes="$(xcrun simctl list runtimes --json)"
           fi
-          device="$(xcrun simctl create 'DBM UI Tests' com.apple.CoreSimulator.SimDeviceType.iPhone-16 "$runtime")"
+          # iPhone 16 when the runtime runs it; otherwise its first iPhone (the
+          # self-hosted Mac's iOS 27.1 runtime only runs iPhone Duo).
+          iphone16=com.apple.CoreSimulator.SimDeviceType.iPhone-16
+          device_type="$(jq -r --arg runtime "$runtime" --arg preferred "$iphone16" '
+            [.runtimes[] | select(.identifier == $runtime) | .supportedDeviceTypes[]?
+              | select(.productFamily == "iPhone") | .identifier] as $types
+            | if any($types[]; . == $preferred) then $preferred else ($types[0] // $preferred) end' <<< "$runtimes")"
+          echo "Creating a $device_type simulator on $runtime"
+          device="$(xcrun simctl create 'DBM UI Tests' "$device_type" "$runtime")"
           # Boot in the background while the app builds; the wait for a
           # finished boot happens right before the UI tests.
           xcrun simctl boot "$device"
