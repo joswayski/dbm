@@ -13,6 +13,9 @@ val releaseSigningAvailable = listOf(releaseStore, releaseStorePassword, release
     .all { it.isPresent && it.get().isNotBlank() }
 val buildNumber = providers.environmentVariable("DBM_BUILD_NUMBER").map { it.toInt() }.orElse(1)
 require(buildNumber.get() in 1..2_100_000_000) { "DBM_BUILD_NUMBER must be a positive Android version code." }
+// Mobile release CalVer (scripts/mobile_release_version.py), e.g. 2026.11.22.3
+// with build 2026112203; local and CI debug builds stay at 0.1.0-dev.
+val releaseVersion = providers.environmentVariable("DBM_VERSION").orElse("0.1.0-dev")
 
 android {
     namespace = "com.dbm.nativeapp"
@@ -32,7 +35,7 @@ android {
         minSdk = 26
         targetSdk = 36
         versionCode = buildNumber.get()
-        versionName = if (buildNumber.get() > 1) "0.1.${buildNumber.get()}" else "0.1.0-dev"
+        versionName = releaseVersion.get()
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
         externalNativeBuild { cmake { cppFlags += "-std=c++17" } }

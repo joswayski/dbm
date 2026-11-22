@@ -4,8 +4,11 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 export DBM_IOS_BUNDLE_ID="${DBM_IOS_BUNDLE_ID:-se.anyba.app}"
-: "${APPLE_TEAM_ID:?}" "${NOTARY_KEY_PATH:?}" "${NOTARY_KEY_ID:?}" "${NOTARY_ISSUER:?}" "${BUILD_NUMBER:?}"
-[[ "$BUILD_NUMBER" =~ ^[1-9][0-9]*\.[1-9][0-9]*$ ]] || { echo "BUILD_NUMBER must be <run number>.<attempt>." >&2; exit 2; }
+: "${APPLE_TEAM_ID:?}" "${NOTARY_KEY_PATH:?}" "${NOTARY_KEY_ID:?}" "${NOTARY_ISSUER:?}" "${BUILD_NUMBER:?}" "${DBM_APP_VERSION:?}"
+# CalVer from scripts/mobile_release_version.py: build 2026112203.1 (attempt 1)
+# and app version 2026.11.2203, which TestFlight shows as the version.
+[[ "$BUILD_NUMBER" =~ ^[1-9][0-9]*\.[1-9][0-9]*$ ]] || { echo "BUILD_NUMBER must be <build>.<attempt>." >&2; exit 2; }
+[[ "$DBM_APP_VERSION" =~ ^[1-9][0-9]*\.[1-9][0-9]*\.[1-9][0-9]*$ ]] || { echo "DBM_APP_VERSION must be YEAR.MONTH.DAYNN." >&2; exit 2; }
 [[ -s "$NOTARY_KEY_PATH" ]] || { echo "App Store Connect key file is missing." >&2; exit 2; }
 
 auth=(
@@ -26,7 +29,7 @@ xcodebuild -project "$ROOT/DBM.xcodeproj" -scheme DBM -configuration Release \
   -destination 'generic/platform=iOS' -archivePath "$work/DBM.xcarchive" \
   -derivedDataPath "$ROOT/DerivedData-TestFlight" \
   DEVELOPMENT_TEAM="$APPLE_TEAM_ID" DBM_IOS_BUNDLE_ID="$DBM_IOS_BUNDLE_ID" \
-  CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+  CURRENT_PROJECT_VERSION="$BUILD_NUMBER" MARKETING_VERSION="$DBM_APP_VERSION" \
   CODE_SIGN_IDENTITY=- AD_HOC_CODE_SIGNING_ALLOWED=YES archive
 
 # plistlib handles escaping rather than interpolating values into XML.

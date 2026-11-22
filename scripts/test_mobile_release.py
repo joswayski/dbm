@@ -4,6 +4,7 @@
 # ///
 """Exercise release orchestration with disposable tools/APIs; never upload."""
 
+from datetime import date
 import importlib.util
 import json
 import os
@@ -77,24 +78,21 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertEqual(job["permissions"]["actions"], "read")
         script = job["steps"][1]["run"]
         # No passing mobile build, mobile files changed since the newest one,
-        # off main, malformed SHAs, and exhausted attempts are all refused.
+        # off main, and malformed SHAs are all refused.
         for env in (
             {"TESTED": ""},
             {"MOBILE_CHANGED": "1"},
             {"ANCESTOR": "1"},
             {"REQUESTED_SHA": SHA.upper()},
             {"REQUESTED_SHA": "main; touch unexpected"},
-            {"GITHUB_RUN_ATTEMPT": "100"},
         ):
             with self.subTest(env=env):
                 self.assertNotEqual(self.run_step(script, **env).returncode, 0)
                 self.assertFalse((self.directory / "output").exists())
         result = self.run_step(script)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual((self.directory / "output").read_text(), f"sha={SHA}\nandroid_build=902\n")
+        self.assertEqual((self.directory / "output").read_text(), f"sha={SHA}\n")
         self.assertIn("mobile.yml/runs?branch=main&event=push&status=success", (self.directory / "calls").read_text())
-        self.assertEqual(self.run_step(script, GITHUB_RUN_ATTEMPT="3").returncode, 0)
-        self.assertTrue((self.directory / "output").read_text().endswith("android_build=903\n"))
 
     def test_resolve_releases_ci_only_commits_from_an_earlier_passing_build(self):
         script = workflow("mobile-release.yml")["jobs"]["resolve"]["steps"][1]["run"]
@@ -102,7 +100,22 @@ class ReleaseWorkflowTests(unittest.TestCase):
         result = self.run_step(script, TESTED=earlier)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(f"unchanged since {earlier}", result.stdout)
-        self.assertEqual((self.directory / "output").read_text(), f"sha={SHA}\nandroid_build=902\n")
+        self.assertEqual((self.directory / "output").read_text(), f"sha={SHA}\n")
+
+    def test_releases_are_numbered_with_calver(self):
+        release = workflow("mobile-release.yml")
+        resolve = release["jobs"]["resolve"]
+        step = resolve["steps"][2]
+        self.assertEqual(step["id"], "version")
+        self.assertEqual(step["run"], "python3 scripts/mobile_release_version.py")
+        for key in ("version", "app_version", "build"):
+            self.assertEqual(resolve["outputs"][key], f"${{{{ steps.version.outputs.{key} }}}}")
+        android = release["jobs"]["android"]["env"]
+        self.assertEqual(android["DBM_BUILD_NUMBER"], "${{ needs.resolve.outputs.build }}")
+        self.assertEqual(android["DBM_VERSION"], "${{ needs.resolve.outputs.version }}")
+        testflight = release["jobs"]["testflight"]["env"]
+        self.assertEqual(testflight["BUILD_NUMBER"], "${{ needs.resolve.outputs.build }}.${{ github.run_attempt }}")
+        self.assertEqual(testflight["DBM_APP_VERSION"], "${{ needs.resolve.outputs.app_version }}")
 
     def test_publishing_cannot_replace_the_desktop_latest_release(self):
         release = workflow("mobile-release.yml")
@@ -299,7 +312,8 @@ with open(os.environ["CALLS"], "a") as out:
             NOTARY_KEY_PATH=str(key),
             NOTARY_KEY_ID="TESTKEY",
             NOTARY_ISSUER="TESTISSUER",
-            BUILD_NUMBER="9.2",
+            BUILD_NUMBER="2026112203.1",
+            DBM_APP_VERSION="2026.11.2203",
             DBM_IOS_BUNDLE_ID="se.anyba.app",
         )
         self.assertEqual(run.returncode, 0, run.stderr)
@@ -308,7 +322,8 @@ with open(os.environ["CALLS"], "a") as out:
         self.assertIn("Release", calls[0]["args"])
         self.assertIn("generic/platform=iOS", calls[0]["args"])
         self.assertIn("DBM_IOS_BUNDLE_ID=se.anyba.app", calls[0]["args"])
-        self.assertIn("CURRENT_PROJECT_VERSION=9.2", calls[0]["args"])
+        self.assertIn("CURRENT_PROJECT_VERSION=2026112203.1", calls[0]["args"])
+        self.assertIn("MARKETING_VERSION=2026.11.2203", calls[0]["args"])
         self.assertEqual(calls[0]["args"][-1], "archive")
         # Archiving signs locally (ad hoc): asking Apple for a development
         # certificate on every fresh runner exhausts the team's limit.
@@ -502,6 +517,82 @@ class TesterDistributionTests(unittest.TestCase):
             self.assertEqual(calls[9].args[3]["track"], "alpha")
             self.assertEqual(calls[9].args[3]["releases"][0]["status"], "draft")
             self.assertTrue(calls[10].args[2].endswith("/edits/second:commit"))
+
+
+def release_run(number, created_at="2026-11-22T15:00:00Z", conclusion="success", attempt=1):
+    return {
+        "id": number * 10,
+        "run_number": number,
+        "created_at": created_at,
+        "conclusion": conclusion,
+        "run_attempt": attempt,
+    }
+
+
+class ReleaseVersionTests(unittest.TestCase):
+    """Mirrors joswayski/caper's tests for the script this one is adapted from."""
+
+    def setUp(self):
+        self.release = load_script("mobile_release_version")
+
+    def test_dates_releases_in_new_york_across_utc_midnight_and_daylight_saving(self):
+        self.assertEqual(self.release.release_date("2026-11-20T04:30:00Z"), date(2026, 11, 19))
+        self.assertEqual(self.release.release_date("2026-11-20T05:30:00Z"), date(2026, 11, 20))
+        self.assertEqual(self.release.release_date("2026-07-20T03:30:00Z"), date(2026, 7, 19))
+        # The day clocks fall back lasts 25 hours.
+        self.assertEqual(self.release.day_bounds(date(2026, 11, 1)), "2026-11-01T04:00:00Z..2026-11-02T04:59:59Z")
+
+    def test_formats_each_version_and_builds_always_increase(self):
+        self.assertEqual(
+            self.release.release_version(date(2026, 1, 5), 3),
+            {"version": "2026.01.05.3", "app_version": "2026.1.503", "build": "2026010503"},
+        )
+        self.assertEqual(
+            self.release.release_version(date(2026, 11, 22), 12),
+            {"version": "2026.11.22.12", "app_version": "2026.11.2212", "build": "2026112212"},
+        )
+        builds = [
+            int(self.release.release_version(day, revision)["build"])
+            for day, revision in [(date(2026, 11, 22), 9), (date(2026, 11, 22), 10), (date(2026, 11, 23), 1)]
+        ]
+        self.assertEqual(builds, sorted(builds))
+        # Above every pre-CalVer version code (run number x 100 + attempt), below Android's limit.
+        self.assertTrue(1_000_000 < builds[0] and builds[-1] < 2_100_000_000)
+        for revision in (0, 100):
+            with self.assertRaises(ValueError):
+                self.release.release_version(date(2026, 11, 22), revision)
+
+    def test_counts_only_earlier_runs_that_started(self):
+        jobs = {20: [], 30: [{"conclusion": "cancelled"}], 40: [{"conclusion": "skipped"}]}
+        asked = []
+
+        def first_attempt_jobs(run_id):
+            asked.append(run_id)
+            return jobs[run_id]
+
+        today = [
+            release_run(1),  # Released.
+            release_run(2, conclusion="cancelled"),  # Cancelled while waiting: never built.
+            release_run(3, conclusion="cancelled"),  # Cancelled mid-build: may have uploaded.
+            release_run(4, conclusion="skipped"),
+            release_run(5, conclusion="failure"),
+            release_run(6, conclusion=None),
+            release_run(7, conclusion=None),
+        ]
+        version = self.release.resolve(today[5], today, first_attempt_jobs)
+        self.assertEqual(version["version"], "2026.11.22.4")
+        self.assertEqual(sorted(asked), [20, 30, 40])
+
+    def test_reruns_keep_their_version_and_runs_that_never_started_cannot_rerun(self):
+        jobs = {20: [], 30: [{"conclusion": "success"}]}
+        today = [release_run(1), release_run(2, conclusion="cancelled"), release_run(3, conclusion=None)]
+        first = self.release.resolve(today[2], today, jobs.get)
+        # Run 2 was re-run later; what its first attempt did has not changed.
+        today[1] = release_run(2, conclusion="success", attempt=2)
+        today[2] = release_run(3, conclusion=None, attempt=2)
+        self.assertEqual(self.release.resolve(today[2], today, jobs.get), first)
+        with self.assertRaisesRegex(ValueError, "cancelled before it started"):
+            self.release.resolve(today[1], today, jobs.get)
 
 
 if __name__ == "__main__":

@@ -183,8 +183,11 @@ The release reads `production/signing/release` through GitHub OIDC role
 `production-dbm-release-signer`; no signing files belong in this repository:
 
 - **Android:** the existing `android` upload key signs `se.anyba.app`.
-  APK updates retain profiles/history. The version code is `run number × 100 +
-  attempt` (attempts 1–99); even re-runs increase it. Release builds disable demo
+  APK updates retain profiles/history. Releases use CalVer like the desktop
+  apps (`scripts/mobile_release_version.py`): the New York release date plus a
+  daily revision, e.g. version `2026.11.22.3` with version code `2026112203`. A
+  re-run keeps its version, so if its Play upload already went through, start a
+  new **Mobile release** instead of re-running. Release builds disable demo
   mode and refuse packaging without all four `DBM_ANDROID_KEYSTORE`,
   `DBM_ANDROID_KEYSTORE_PASSWORD`, `DBM_ANDROID_KEY_ALIAS`, and
   `DBM_ANDROID_KEY_PASSWORD` inputs. Build locally with these variables and
@@ -211,7 +214,8 @@ The release reads `production/signing/release` through GitHub OIDC role
   30 days, including when the subsequent Play upload fails during first-app setup.
 - **iPhone:** `apps/native/ios/upload-testflight.sh` builds a Release device
   archive for `se.anyba.app` with Xcode 27.1 (GitHub's `xcode-27` image, so
-  iPhone Duo shows it full screen) and build number `<run number>.<attempt>`.
+  iPhone Duo shows it full screen), app version `2026.11.2203` (what TestFlight
+  shows) and build number `2026112203.<attempt>`.
   The existing `apple` App Store Connect API key handles cloud-managed signing,
   upload, processing, What to Test, and tester-group assignment. External groups
   may still await Apple's beta review; Apple reviews one build per version at a

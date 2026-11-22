@@ -32,7 +32,9 @@ jobs:
       actions: read
     outputs:
       sha: ${{ steps.release.outputs.sha }}
-      android_build: ${{ steps.release.outputs.android_build }}
+      version: ${{ steps.version.outputs.version }}
+      app_version: ${{ steps.version.outputs.app_version }}
+      build: ${{ steps.version.outputs.build }}
       ios_notes: ${{ steps.notes.outputs.ios_notes }}
       android_notes: ${{ steps.notes.outputs.android_notes }}
     steps:
@@ -61,12 +63,14 @@ jobs:
           done
           [[ -n "$tested" ]] || { echo "Mobile files at this commit need passing Mobile development builds on main before release." >&2; exit 1; }
           [[ "$tested" == "$sha" ]] || echo "Mobile files are unchanged since $tested, which passed Mobile development builds."
-          # Re-runs also upgrade an installed APK; reserve two digits for attempts.
-          [[ "$GITHUB_RUN_ATTEMPT" -lt 100 ]] || { echo "Start a new release run after attempt 99." >&2; exit 1; }
-          build=$((GITHUB_RUN_NUMBER * 100 + GITHUB_RUN_ATTEMPT))
-          [[ "$build" -le 2100000000 ]] || { echo "Android version code overflow." >&2; exit 1; }
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
-          echo "android_build=$build" >> "$GITHUB_OUTPUT"
+      - id: version
+        name: Number the release
+        # CalVer like the desktop apps, e.g. 2026.11.22.3, iOS app version
+        # 2026.11.2203, build 2026112203. A re-run keeps its version.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/mobile_release_version.py
       - name: Write each app's release notes
         id: notes
         env:
@@ -88,7 +92,8 @@ jobs:
       contents: read
       id-token: write
     env:
-      DBM_BUILD_NUMBER: ${{ needs.resolve.outputs.android_build }}
+      DBM_BUILD_NUMBER: ${{ needs.resolve.outputs.build }}
+      DBM_VERSION: ${{ needs.resolve.outputs.version }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -188,7 +193,7 @@ jobs:
           aws secretsmanager get-secret-value --secret-id production/signing/release \
             --query SecretString --output text | jq -er '.dbm_google_play.service_account_json | strings' > "$RUNNER_TEMP/play.json"
           export GOOGLE_PLAY_SERVICE_ACCOUNT="$RUNNER_TEMP/play.json"
-          export PLAY_RELEASE_NAME="0.1.$DBM_BUILD_NUMBER"
+          export PLAY_RELEASE_NAME="$DBM_VERSION"
           export PLAY_RELEASE_NOTES="$ANDROID_NOTES"
           "$RUNNER_TEMP/mobile-python/bin/python" scripts/play-upload.py dist/mobile/play/DBM-Android-Play.aab
       - name: Remove signing material
@@ -206,7 +211,8 @@ jobs:
       contents: read
       id-token: write
     env:
-      BUILD_NUMBER: ${{ github.run_number }}.${{ github.run_attempt }}
+      BUILD_NUMBER: ${{ needs.resolve.outputs.build }}.${{ github.run_attempt }}
+      DBM_APP_VERSION: ${{ needs.resolve.outputs.app_version }}
     steps:
       - uses: actions/checkout@v4
         with:
