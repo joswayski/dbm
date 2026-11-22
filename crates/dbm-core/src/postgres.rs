@@ -364,7 +364,7 @@ impl PgSession {
                         .collect::<Vec<_>>(),
                 ),
                 Err(error) if is_multiple_commands_error(&error) => None,
-                Err(error) => return Err(error.into()),
+                Err(error) => return Err(query_error(error, sql)),
             }
         } else {
             None
@@ -373,10 +373,19 @@ impl PgSession {
         // type can be shown, and multi-statement scripts run in one round trip.
         // Stream instead of collecting the entire response before applying the
         // row cap. Drain it fully so later commands and errors are still handled.
-        let mut messages = pin!(self.client.simple_query_raw(sql).await?);
+        let mut messages = pin!(
+            self.client
+                .simple_query_raw(sql)
+                .await
+                .map_err(|error| query_error(error, sql))?
+        );
         let mut result = SimpleResult::default();
         let mut current: Option<SimpleResult> = None;
-        while let Some(message) = messages.try_next().await? {
+        while let Some(message) = messages
+            .try_next()
+            .await
+            .map_err(|error| query_error(error, sql))?
+        {
             match message {
                 SimpleQueryMessage::RowDescription(description) => {
                     current = Some(SimpleResult {
@@ -724,6 +733,37 @@ async fn connect_client(profile: &ConnectionProfile, password: Option<&str>) -> 
             }
         }
         Err(error) => Err(AppError::from(error)),
+    }
+}
+
+/// A failed query's error, with the place the server points at as a line and
+/// column of the statement that ran, as psql's `LINE n:` does.
+fn query_error(error: tokio_postgres::Error, sql: &str) -> AppError {
+    let position = error
+        .as_db_error()
+        .and_then(|error| match error.position() {
+            // A 1-based character offset into the submitted text.
+            Some(tokio_postgres::error::ErrorPosition::Original(position)) => {
+                usize::try_from(*position).ok()?.checked_sub(1)
+            }
+            _ => None,
+        });
+    match (AppError::from(error), position) {
+        (AppError::Database(message), Some(position)) => {
+            let (mut line, mut column) = (1, 1);
+            for character in sql.chars().take(position) {
+                if character == '\n' {
+                    line += 1;
+                    column = 1;
+                } else {
+                    column += 1;
+                }
+            }
+            AppError::Database(format!(
+                "{message}\nAt line {line}, column {column} of the statement"
+            ))
+        }
+        (error, _) => error,
     }
 }
 
@@ -1466,6 +1506,32 @@ mod tests {
                 ..row
             };
             assert!(mutation_predicate(&metadata, &null_key).is_err());
+        }
+
+        #[tokio::test]
+        async fn query_errors_say_where_in_the_statement_they_are() {
+            let Some(profile) = profile(false) else {
+                return;
+            };
+            let session = PgSession::connect(profile, None).await.expect("connect");
+            // Prepared (one statement) and simple-protocol (a script) paths.
+            for (sql, place) in [
+                // The server reads `FORM` as an alias and stops at the next word;
+                // columns count characters, not bytes.
+                ("SELECT 1,\n  'é' FORM pg_class", "line 2, column 12"),
+                ("SELECT 1;\nSELECT 2;\n SELEC 3", "line 3, column 2"),
+            ] {
+                let error = session.run_query(sql, None).await.unwrap_err();
+                let message = error.to_string();
+                assert!(
+                    message.ends_with(&format!("(SQLSTATE 42601)\nAt {place} of the statement")),
+                    "{message}"
+                );
+                assert!(!error.is_connection_lost());
+            }
+            // Errors without a position are unchanged.
+            let error = session.run_query("SELECT 1/0", None).await.unwrap_err();
+            assert!(error.to_string().ends_with("(SQLSTATE 22012)"), "{error}");
         }
 
         #[tokio::test]
