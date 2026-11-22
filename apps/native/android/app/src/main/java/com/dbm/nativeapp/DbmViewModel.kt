@@ -41,7 +41,25 @@ class DbmViewModel(application: Application, val demo: Boolean = false) : Androi
         val values: List<ProfileSummary> = bridge.json.decodeFromJsonElement(call(expected, command("listProfiles")))
         state = state.copy(profiles = values.map { it.profile })
     }
-    fun add() { formReturnScreen = state.screen; state = state.copy(screen = Screen.Form, draft = ProfileDraft()) }
+    fun add(importing: Boolean = false) { formReturnScreen = state.screen; state = state.copy(screen = Screen.Form, draft = ProfileDraft(focusUrl = importing)) }
+    /** Fills the form from a connection URL with the desktop's Rust parser, as desktop does. */
+    fun importUrl() {
+        val text = state.draft.url.trim()
+        if (text.isEmpty()) return
+        launch { expected ->
+            val imported: ImportedConnection = try {
+                bridge.json.decodeFromJsonElement(call(expected, buildJsonObject { put("command", "parseConnectionUrl"); put("url", text) }))
+            } catch (e: CancellationException) { throw e } catch (e: Exception) {
+                state = state.copy(draft = state.draft.copy(urlFeedback = e.message ?: "Enter a valid connection URL.", urlFailed = true)); return@launch
+            }
+            val d = state.draft
+            val tls = if (imported.tlsMode == "required") "" else " Mobile always requires verified TLS."
+            state = state.copy(draft = d.copy(name = if (d.id == null && d.name.isBlank()) imported.suggestedName else d.name,
+                engine = imported.engine, host = imported.host, port = imported.port.toString(), username = imported.username,
+                database = imported.defaultDatabase, password = imported.password ?: "", url = "",
+                urlFeedback = "Imported. Review the details, then save and connect.$tls", urlFailed = false))
+        }
+    }
     fun select(profile: Profile) {
         if (demo) connect(profile)
         else { formReturnScreen = state.screen; state = state.copy(screen = Screen.Form, draft = ProfileDraft(id = profile.id, name = profile.name,

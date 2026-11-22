@@ -255,7 +255,9 @@ async fn dispatch_mobile(state: &AppState, request: Request) -> Result<Value, St
         | Request::LoadSchemaTree { .. }
         | Request::LoadTablePage { .. }
         | Request::Query { .. }
-        | Request::ListQueryHistory { .. } => {}
+        | Request::ListQueryHistory { .. }
+        // Pure parsing for the form's URL import; it touches no database or storage.
+        | Request::ParseConnectionUrl { .. } => {}
         _ => return Err("operation is unavailable in the read-only mobile app".into()),
     }
     dispatch(state, clamp_mobile_request(request)).await
@@ -888,6 +890,17 @@ mod tests {
         let summaries = call(json!({"command":"listProfiles"}));
         assert_eq!(summaries["value"][0]["profile"]["name"], "Phone 🦀");
         assert!(summaries["value"][0]["profile"].get("password").is_none());
+        let imported = call(
+            json!({"command":"parseConnectionUrl", "url":"mysql://reader:pw@db.example.com:3307/shop"}),
+        );
+        assert_eq!(imported["ok"], true);
+        assert_eq!(imported["value"]["engine"], "mysql");
+        assert_eq!(imported["value"]["port"], 3307);
+        assert_eq!(imported["value"]["password"], "pw");
+        assert_eq!(
+            call(json!({"command":"parseConnectionUrl", "url":"ftp://x"}))["ok"],
+            false
+        );
         assert_eq!(
             call(
                 json!({"command":"exportCsv", "path":directory.join("must-not-exist.csv"),

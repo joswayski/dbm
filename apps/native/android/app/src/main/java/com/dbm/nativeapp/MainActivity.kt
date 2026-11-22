@@ -12,6 +12,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -19,6 +20,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -33,6 +36,7 @@ import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
@@ -140,15 +144,33 @@ private fun engineTitle(value: String) = when(value) { "postgres" -> "PostgreSQL
                 }
             }
         }
-        Box(Modifier.fillMaxWidth().border(0.5.dp, Border).padding(10.dp)) { SecondaryButton("New connection", Icon.Plus, Modifier.fillMaxWidth().testTag("add"), !vm.state.busy, vm::add) }
+        // The screen's one primary action, as on desktop; Import URL opens the same form with its URL field focused.
+        Row(Modifier.fillMaxWidth().border(0.5.dp, Border).padding(10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            SecondaryButton("Import URL", Icon.Link, Modifier.testTag("import-url"), !vm.state.busy) { vm.add(importing = true) }
+            PrimaryButton("New connection", Icon.Plus, Modifier.weight(1f).testTag("add"), !vm.state.busy) { vm.add() }
+        }
     }
     deleting?.let { p -> AlertDialog(onDismissRequest = { deleting = null }, containerColor = Color(0xff262629), title = { Text("Delete ${p.name}?") }, text = { Text("This removes the saved connection and its local query history.", color = Secondary) }, confirmButton = { SmallButton("Delete connection", true) { deleting = null; vm.delete(p.id) } }, dismissButton = { SmallButton("Cancel") { deleting = null } }) }
 }
 
 @Composable private fun Form(vm: DbmViewModel) {
     val d = vm.state.draft
-    LazyColumn(Modifier.fillMaxSize().background(Color(0xff262629)).padding(horizontal = 18.dp), verticalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(vertical = 18.dp)) {
+    val urlFocus = remember { FocusRequester() }
+    // The lazy item attaches during the first layout, so wait a frame before focusing it.
+    LaunchedEffect(d.focusUrl) { if (d.focusUrl) { withFrameNanos {}; runCatching { urlFocus.requestFocus() }; vm.editDraft { it.copy(focusUrl = false) } } }
+    LazyColumn(Modifier.fillMaxSize().background(Color(0xff262629)).padding(horizontal = 18.dp).testTag("profile-form"), verticalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(vertical = 18.dp)) {
         item { Row(verticalAlignment = Alignment.Top) { Column(Modifier.weight(1f)) { Text(d.engine.uppercase(), color = Muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold); Text(if (d.id == null) "New connection" else "Edit connection", color = TextStrong, fontSize = 17.sp, fontWeight = FontWeight.SemiBold) }; SmallButton("Cancel", enabled = !vm.state.busy, action = vm::cancelForm) } }
+        item {
+            Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                // Pasting a URL imports it straight away, as on macOS; typing waits for Import or Go.
+                GField("Connection URL · paste to fill the fields", d.url, Modifier.weight(1f), tag = "connection-url", keyboardType = KeyboardType.Uri, fieldModifier = Modifier.focusRequester(urlFocus), onGo = vm::importUrl) { v ->
+                    val pasted = v.length - d.url.length > 1 && v.contains("://")
+                    vm.editDraft { it.copy(url = v) }; if (pasted) vm.importUrl()
+                }
+                SecondaryButton("Import", modifier = Modifier.height(48.dp).testTag("apply-url"), enabled = !vm.state.busy && d.url.isNotBlank(), action = vm::importUrl)
+            }
+            d.urlFeedback?.let { Text(it, color = if (d.urlFailed) Danger else Success, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp).testTag("url-feedback")) }
+        }
         item { Label("Database engine"); Row(Modifier.fillMaxWidth().background(Control, RoundedCornerShape(7.dp)).padding(2.dp)) { listOf("postgres", "mysql", "redis").forEach { e -> Segment(engineTitle(e), d.engine == e, Modifier.weight(1f)) { vm.editDraft { it.copy(engine = e, port = when(e) { "postgres" -> "5432"; "mysql" -> "3306"; else -> "6379" }, database = if (e == "redis") "0" else "") } } } } }
         item { GField("Name", d.name) { vm.editDraft { x -> x.copy(name = it) } } }
         item { Label("Connection color"); Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) { Palette.forEach { hex -> val selected = d.color.equals(hex, true); Box(Modifier.size(30.dp).clip(RoundedCornerShape(15.dp)).then(if(selected) Modifier.border(2.dp, Text, RoundedCornerShape(15.dp)) else Modifier).clickable { vm.editDraft { it.copy(color = hex) } }.testTag("color-$hex"), contentAlignment = Alignment.Center) { Dot(profileColor(hex), true) } }; GField("Custom", d.color, Modifier.width(112.dp)) { vm.editDraft { x -> x.copy(color = it) } } } }
@@ -248,7 +270,7 @@ private fun matches(node: SchemaNode, filter: String): Boolean = node.name.conta
 }
 @Composable private fun Cell(value: String, header: Boolean) { Text(value, color = Text, fontFamily = MonoFont, fontSize = if(header) 11.sp else 12.sp, modifier = Modifier.width(160.dp).height(if(header) 34.dp else 32.dp).drawBehind { drawLine(if(header) Border else Color(0xff202023), Offset(0f, size.height), Offset(size.width, size.height), .5.dp.toPx()) }.padding(horizontal = 8.dp, vertical = 7.dp), maxLines = 1, overflow = TextOverflow.Ellipsis) }
 
-@Composable private fun GField(label: String, value: String, modifier: Modifier = Modifier, password: Boolean = false, tag: String? = null, changed: (String) -> Unit) { Column(modifier) { Label(label); TextField(value, changed, singleLine = true, keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, keyboardType = if(password) KeyboardType.Password else KeyboardType.Text), visualTransformation = if(password) PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None, textStyle = TextStyle(Text, 13.sp, fontFamily = if(label == "Port" || label == "Custom") MonoFont else UiFont), colors = TextFieldDefaults.colors(focusedContainerColor = Control, unfocusedContainerColor = Control, focusedIndicatorColor = Accent, unfocusedIndicatorColor = BorderStrong, cursorColor = Accent), shape = RoundedCornerShape(6.dp), modifier = Modifier.fillMaxWidth().height(48.dp).then(if(tag != null) Modifier.testTag(tag) else Modifier)) } }
+@Composable private fun GField(label: String, value: String, modifier: Modifier = Modifier, password: Boolean = false, tag: String? = null, keyboardType: KeyboardType = KeyboardType.Text, fieldModifier: Modifier = Modifier, onGo: (() -> Unit)? = null, changed: (String) -> Unit) { Column(modifier) { Label(label); TextField(value, changed, singleLine = true, keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, keyboardType = if(password) KeyboardType.Password else keyboardType, imeAction = if(onGo != null) ImeAction.Go else ImeAction.Default), keyboardActions = KeyboardActions(onGo = { onGo?.invoke() }), visualTransformation = if(password) PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None, textStyle = TextStyle(Text, 13.sp, fontFamily = if(label == "Port" || label == "Custom") MonoFont else UiFont), colors = TextFieldDefaults.colors(focusedContainerColor = Control, unfocusedContainerColor = Control, focusedIndicatorColor = Accent, unfocusedIndicatorColor = BorderStrong, cursorColor = Accent), shape = RoundedCornerShape(6.dp), modifier = fieldModifier.fillMaxWidth().height(48.dp).then(if(tag != null) Modifier.testTag(tag) else Modifier)) } }
 @Composable private fun GEditor(value: String, changed: (String) -> Unit, modifier: Modifier) { TextField(value, changed, keyboardOptions = KeyboardOptions(autoCorrectEnabled = false), textStyle = TextStyle(Text, 12.sp, fontFamily = MonoFont), colors = TextFieldDefaults.colors(focusedContainerColor = Bg, unfocusedContainerColor = Bg, focusedIndicatorColor = Accent, unfocusedIndicatorColor = Border, cursorColor = Accent), shape = RoundedCornerShape(0.dp), modifier = modifier) }
 @Composable private fun Label(value: String) { Text(value, color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(bottom = 5.dp)) }
 @Composable private fun ReadOnlyValue(value: String) { Text(value, Modifier.fillMaxWidth().background(Control, RoundedCornerShape(6.dp)).border(1.dp, BorderStrong, RoundedCornerShape(6.dp)).padding(11.dp), color = Text) }
@@ -265,7 +287,7 @@ private fun matches(node: SchemaNode, filter: String): Boolean = node.name.conta
 @Composable private fun SecondaryButton(text: String, icon: Icon? = null, modifier: Modifier = Modifier, enabled: Boolean = true, action: () -> Unit) { Button(action, modifier.heightIn(min = 40.dp), enabled, shape = RoundedCornerShape(6.dp), colors = ButtonDefaults.buttonColors(Control, Text, Control, Faint), border = BorderStroke(1.dp, BorderStrong), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 7.dp)) { if(icon != null) { DbIcon(icon, if(enabled) Secondary else Faint); Spacer(Modifier.width(6.dp)) }; Text(text, fontSize = 12.sp) } }
 @Composable private fun SmallButton(text: String, danger: Boolean = false, enabled: Boolean = true, modifier: Modifier = Modifier, action: () -> Unit) { TextButton(action, modifier.heightIn(min = 40.dp), enabled, shape = RoundedCornerShape(5.dp), contentPadding = PaddingValues(horizontal = 9.dp, vertical = 5.dp), colors = ButtonDefaults.textButtonColors(contentColor = if(danger) Danger else Secondary, disabledContentColor = Faint)) { Text(text, fontSize = 12.sp) } }
 
-private enum class Icon { Database, Table, Folder, Query, Refresh, Play, Plus, Close, Sidebar, ChevronDown, ChevronRight }
+private enum class Icon { Database, Table, Folder, Query, Refresh, Play, Plus, Link, Close, Sidebar, ChevronDown, ChevronRight }
 @Composable private fun DbIcon(icon: Icon, color: Color) { Canvas(Modifier.size(16.dp)) { withTransform({ scale(size.width / 16f, size.height / 16f, Offset.Zero) }) { val w = 1.5f; val stroke = Stroke(w, cap = StrokeCap.Round); when(icon) {
     Icon.Database -> { drawOval(color, topLeft = Offset(2f,2f), size = androidx.compose.ui.geometry.Size(12f,5f), style=stroke); drawLine(color,Offset(2f,4f),Offset(2f,12f),w); drawLine(color,Offset(14f,4f),Offset(14f,12f),w); drawArc(color,0f,180f,false,topLeft=Offset(2f,9f),size=androidx.compose.ui.geometry.Size(12f,5f),style=stroke) }
     Icon.Table -> { drawRect(color,Offset(2f,2f),androidx.compose.ui.geometry.Size(12f,12f),style=stroke); drawLine(color,Offset(2f,6f),Offset(14f,6f),w); drawLine(color,Offset(7f,2f),Offset(7f,14f),w) }
@@ -274,6 +296,7 @@ private enum class Icon { Database, Table, Folder, Query, Refresh, Play, Plus, C
     Icon.Refresh -> { drawArc(color,-50f,260f,false,topLeft=Offset(3f,3f),size=androidx.compose.ui.geometry.Size(10f,10f),style=stroke); drawLine(color,Offset(12f,2f),Offset(13f,6f),w) }
     Icon.Play -> { val p=Path(); p.moveTo(5f,3f); p.lineTo(13f,8f); p.lineTo(5f,13f); p.close(); drawPath(p,color,style=stroke) }
     Icon.Plus -> { drawLine(color,Offset(8f,3f),Offset(8f,13f),w); drawLine(color,Offset(3f,8f),Offset(13f,8f),w) }
+    Icon.Link -> { drawRoundRect(color,Offset(1.5f,5.5f),androidx.compose.ui.geometry.Size(7f,5f),androidx.compose.ui.geometry.CornerRadius(2.5f),style=stroke); drawRoundRect(color,Offset(7.5f,5.5f),androidx.compose.ui.geometry.Size(7f,5f),androidx.compose.ui.geometry.CornerRadius(2.5f),style=stroke) }
     Icon.Close -> { drawLine(color,Offset(4f,4f),Offset(12f,12f),w); drawLine(color,Offset(12f,4f),Offset(4f,12f),w) }
     Icon.Sidebar -> { drawRect(color,Offset(2f,2f),androidx.compose.ui.geometry.Size(12f,12f),style=stroke); drawLine(color,Offset(6f,2f),Offset(6f,14f),w) }
     Icon.ChevronDown -> { drawLine(color,Offset(4f,6f),Offset(8f,10f),w); drawLine(color,Offset(8f,10f),Offset(12f,6f),w) }

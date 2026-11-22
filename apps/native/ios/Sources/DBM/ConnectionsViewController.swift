@@ -28,10 +28,17 @@ final class ConnectionsViewController: UIViewController {
             list.trailingAnchor.constraint(equalTo: scroll.frameLayoutGuide.trailingAnchor, constant: -10),
         ])
 
-        let add = button("New connection", image: "plus", size: 13) { [weak self] in self?.edit(ProfileDraft()) }
-        add.contentHorizontalAlignment = .leading; add.accessibilityIdentifier = "add-connection"
-        let footer = add.padded(.init(top: 0, left: 16, bottom: 0, right: 16)); footer.backgroundColor = Graphite.sidebar; footer.topBorder()
-        add.size(nil, 48)
+        // The screen's one primary action, as on desktop; Import URL opens the
+        // same form with its URL field focused.
+        let importURL = button("Import URL", image: "link", style: .secondary, size: 13, height: 44) { [weak self] in
+            self?.edit(ProfileDraft(), importing: true)
+        }
+        importURL.accessibilityIdentifier = "import-connection-url"
+        let add = button("New connection", image: "plus", style: .primary, size: 13, height: 44) { [weak self] in self?.edit(ProfileDraft()) }
+        add.accessibilityIdentifier = "add-connection"
+        add.setContentHuggingPriority(.init(1), for: .horizontal)
+        let footer = hstack([importURL, add], spacing: 8).padded(.init(top: 10, left: 16, bottom: 10, right: 16))
+        footer.backgroundColor = Graphite.sidebar; footer.topBorder()
         let footerBackground = UIView(); footerBackground.backgroundColor = Graphite.sidebar
 
         let column = vstack([header, section, scroll, footer])
@@ -88,7 +95,9 @@ final class ConnectionsViewController: UIViewController {
         return row
     }
 
-    private func edit(_ draft: ProfileDraft) { topPresenter.present(ProfileFormViewController(model: model, draft: draft), animated: true) }
+    private func edit(_ draft: ProfileDraft, importing: Bool = false) {
+        topPresenter.present(ProfileFormViewController(model: model, draft: draft, focusURL: importing), animated: true)
+    }
 
     private func confirmDelete(_ profile: Profile) {
         let sheet = UIAlertController(title: "Delete \(profile.name)?", message: nil, preferredStyle: .actionSheet)
@@ -114,6 +123,11 @@ final class ProfileFormViewController: UIViewController, UITextFieldDelegate {
     private let username = GraphiteTextField(placeholder: "Username", identifier: "username")
     private let database = GraphiteTextField(placeholder: "Database", identifier: "database")
     private let password = GraphiteTextField(placeholder: "Not saved on this device", identifier: "password")
+    private let url = GraphiteTextField(placeholder: "postgres://user:pass@host/db", identifier: "connection-url", size: 12)
+    private var importURL: UIButton!
+    private var previousURL = ""
+    private let urlStatus = label(size: 11)
+    private var focusURL: Bool
     private let usernameLabel = label(size: 11, color: Graphite.muted), databaseLabel = label(size: 11, color: Graphite.muted)
     private let swatches = hstack([], spacing: 2)
     private var swatchDots: [UIView] = []
@@ -121,8 +135,8 @@ final class ProfileFormViewController: UIViewController, UITextFieldDelegate {
     private var test: UIButton!, save: UIButton!, connect: UIButton!
     private var scroll = UIScrollView()
 
-    init(model: AppModel, draft: ProfileDraft) {
-        self.model = model; self.draft = draft
+    init(model: AppModel, draft: ProfileDraft, focusURL: Bool = false) {
+        self.model = model; self.draft = draft; self.focusURL = focusURL
         super.init(nibName: nil, bundle: nil)
         if let sheet = sheetPresentationController { sheet.detents = [.large()] }
     }
@@ -164,6 +178,13 @@ final class ProfileFormViewController: UIViewController, UITextFieldDelegate {
             field.delegate = self
             field.addAction(UIAction { [weak self] _ in self?.read() }, for: .editingChanged)
         }
+        url.keyboardType = .URL; url.returnKeyType = .go; url.textContentType = .URL; url.delegate = self
+        url.accessibilityLabel = "Connection URL"
+        url.addAction(UIAction { [weak self] _ in self?.urlChanged() }, for: .editingChanged)
+        importURL = button("Import", style: .secondary, height: 36) { [weak self] in self?.importConnectionURL() }
+        importURL.accessibilityIdentifier = "apply-connection-url"; importURL.isEnabled = false
+        urlStatus.numberOfLines = 0; urlStatus.isHidden = true; urlStatus.accessibilityIdentifier = "connection-url-status"
+        let urlRow = vstack([hstack([url, importURL], spacing: 8), urlStatus], spacing: 6)
         let hostRow = hstack([field("Host", host), field("Port", port)], spacing: 10, alignment: .top)
         hostRow.arrangedSubviews[1].size(105, nil)
         let userRow = hstack([field(usernameLabel, username), field(databaseLabel, database)], spacing: 10, alignment: .top)
@@ -175,7 +196,7 @@ final class ProfileFormViewController: UIViewController, UITextFieldDelegate {
         noticeBox.backgroundColor = Graphite.control; noticeBox.layer.cornerRadius = 6
         status.accessibilityIdentifier = "form-status"; status.numberOfLines = 0; status.isHidden = true
 
-        let form = vstack([field("Database engine", engine), field("Name", name),
+        let form = vstack([field("Connection URL · paste to fill the fields", urlRow), field("Database engine", engine), field("Name", name),
                            field("Connection color", vstack([swatchScroll, colorField], spacing: 5)),
                            hostRow, userRow, field("Password · session only", password), noticeBox, status], spacing: 13)
         scroll.alwaysBounceVertical = true; scroll.keyboardDismissMode = .interactive
@@ -189,8 +210,10 @@ final class ProfileFormViewController: UIViewController, UITextFieldDelegate {
 
         test = button("Test connection", style: .secondary, height: 40) { [weak self] in
             guard let self else { return }
-            setStatus("Testing…")
-            model.test(draft) { [weak self] ok in self?.setStatus(ok ? "Connection succeeded" : "Connection failed") }
+            setStatus("Testing…", color: Graphite.muted)
+            model.test(draft) { [weak self] ok in
+                self?.setStatus(ok ? "Connection succeeded" : "Connection failed", color: ok ? Graphite.success : Graphite.danger)
+            }
         }
         test.accessibilityIdentifier = "test-connection"
         save = button("Save", style: .secondary, height: 40) { [weak self] in
@@ -219,12 +242,46 @@ final class ProfileFormViewController: UIViewController, UITextFieldDelegate {
         renderer = ModelRenderer(model) { [weak self] in self?.render() }
     }
 
-    override func viewDidDisappear(_ animated: Bool) {
-        super.viewDidDisappear(animated)
-        if presentingViewController == nil { draft.password = ""; password.text = "" }
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        if focusURL { focusURL = false; url.becomeFirstResponder() }
     }
 
-    func textFieldShouldReturn(_ textField: UITextField) -> Bool { textField.resignFirstResponder() }
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        if presentingViewController == nil { draft.password = ""; password.text = ""; url.text = "" }
+    }
+
+    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+        if textField === url { importConnectionURL(); return false }
+        return textField.resignFirstResponder()
+    }
+
+    /// Pasting a URL imports it straight away, as on macOS; typing waits for Import or Return.
+    private func urlChanged() {
+        let text = url.text ?? ""
+        importURL.isEnabled = !text.trimmingCharacters(in: .whitespaces).isEmpty
+        if text.count - previousURL.count > 1 && text.contains("://") { importConnectionURL() }
+        previousURL = text
+    }
+
+    private func importConnectionURL() {
+        let text = (url.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        model.parseConnectionURL(text) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success(let imported):
+                draft.apply(imported: imported); fill()
+                url.text = ""; previousURL = ""; importURL.isEnabled = false; url.resignFirstResponder()
+                let tls = imported["tlsMode"] as? String == "required" ? "" : " Mobile always requires verified TLS."
+                urlStatus.text = "Imported. Review the details, then save and connect.\(tls)"; urlStatus.textColor = Graphite.success
+            case .failure(let error):
+                urlStatus.text = error.localizedDescription; urlStatus.textColor = Graphite.danger
+            }
+            urlStatus.isHidden = false
+        }
+    }
 
     private func field(_ title: String, _ content: UIView) -> UIView { field(label(title, size: 11, color: Graphite.muted), content) }
     private func field(_ title: UILabel, _ content: UIView) -> UIView { vstack([title, content], spacing: 5) }
@@ -259,10 +316,9 @@ final class ProfileFormViewController: UIViewController, UITextFieldDelegate {
         view.isUserInteractionEnabled = !model.loading
     }
 
-    private func setStatus(_ text: String) {
-        status.text = text; status.isHidden = text.isEmpty
-        status.textColor = text == "Connection succeeded" ? Graphite.success : Graphite.danger
+    private func setStatus(_ text: String, color: UIColor) {
+        status.text = text; status.isHidden = text.isEmpty; status.textColor = color
     }
 
-    private func close() { draft.password = ""; password.text = ""; dismiss(animated: true) }
+    private func close() { draft.password = ""; password.text = ""; url.text = ""; dismiss(animated: true) }
 }

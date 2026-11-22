@@ -26,6 +26,11 @@ verified-TLS database validation; both remain outstanding.
 ## First slice
 
 - PostgreSQL, MySQL and Redis connection forms, test/save/delete/connect.
+  New connection is the main screen's primary button; Import URL beside it
+  opens the form with a Connection URL field focused. Pasting a URL (or
+  tapping Import) fills the form with the desktop's Rust parser, including
+  a session-only password. The URL's TLS setting is ignored: mobile always
+  requires verified TLS.
 - Direct, verified TLS connections, with read-only profiles required by the
   mobile Rust bridge. Use a database user/Redis ACL that actually forbids writes:
   the app's read-only mode is a safeguard, not an authorization boundary.
@@ -50,7 +55,7 @@ verified-TLS database validation; both remain outstanding.
   disable autocorrection; Android also tells the keyboard the password field
   is a password, rather than only masking its display.
 
-No row editing, exports, desktop history browser, URL import, custom CA import,
+No row editing, exports, desktop history browser, custom CA import,
 SSH tunnel, biometric unlock, profile sync or background queries are implemented.
 Native CI and device acceptance are required before relying on these clients.
 

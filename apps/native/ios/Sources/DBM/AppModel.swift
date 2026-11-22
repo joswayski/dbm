@@ -49,6 +49,15 @@ final class AppModel: ObservableObject {
             connect(profile); completion(true)
         } failure: { _ in completion(false) }
     }
+    /// Parses a connection URL with the desktop's Rust parser. Errors arrive as
+    /// `.failure` for the form to show inline, not as the global alert.
+    func parseConnectionURL(_ url: String, completion: @escaping @MainActor (Result<[String: Any], Error>) -> Void) {
+        let epoch = privacyEpoch
+        bridge.call(["command": "parseConnectionUrl", "url": url]) { [weak self] result in
+            guard let self, self.privacyEpoch == epoch else { return }
+            completion(result.map { $0 as? [String: Any] ?? [:] })
+        }
+    }
     func test(_ draft: ProfileDraft, completion: @escaping (Bool) -> Void) {
         send(["command": "testProfile", "input": draft.input]) { _ in completion(true) } failure: { _ in completion(false) }
     }

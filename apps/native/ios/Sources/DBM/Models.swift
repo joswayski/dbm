@@ -36,6 +36,18 @@ struct ProfileDraft {
         username = profile.username; database = profile.database; port = profile.port; engine = profile.engine
     }
     mutating func select(_ next: Engine) { engine = next; port = next.defaultPort; database = next.defaultDatabase }
+    /// Fills the draft from a `parseConnectionUrl` result, as desktop does. A
+    /// new connection without a name takes the suggested one. Mobile always
+    /// requires TLS, so the URL's TLS mode is not applied.
+    mutating func apply(imported json: [String: Any]) {
+        if id == nil && name.trimmingCharacters(in: .whitespaces).isEmpty { name = json["suggestedName"] as? String ?? "" }
+        engine = Engine(rawValue: json["engine"] as? String ?? "") ?? engine
+        host = json["host"] as? String ?? ""
+        port = (json["port"] as? NSNumber)?.intValue ?? engine.defaultPort
+        username = json["username"] as? String ?? ""
+        database = json["defaultDatabase"] as? String ?? engine.defaultDatabase
+        password = json["password"] as? String ?? ""
+    }
     var input: [String: Any] {
         var value: [String: Any] = ["name": name, "color": color, "engine": engine.rawValue, "host": host,
             "port": port, "username": username, "defaultDatabase": database, "password": password,

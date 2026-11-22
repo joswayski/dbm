@@ -11,6 +11,7 @@ final class Bridge: @unchecked Sendable {
     private static let allowedCommands: Set<String> = [
         "listProfiles", "saveProfile", "deleteProfile", "testProfile", "connect", "disconnect",
         "connectDatabase", "listDatabases", "loadSchemaTree", "loadTablePage", "query", "listQueryHistory",
+        "parseConnectionUrl",
     ]
     private let queue = DispatchQueue(label: "app.dbm.bridge", qos: .userInitiated)
     private var session: OpaquePointer?

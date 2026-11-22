@@ -28,15 +28,28 @@ class DemoNavigationTest {
     @Test fun demoNavigatesQueryAndBrowseScreens() {
         compose.waitUntil(10_000) { compose.onAllNodesWithText("Production").fetchSemanticsNodes().isNotEmpty() }
         capture("connections")
+        compose.onNodeWithTag("import-url").performClick()
+        // One text input is a paste, which imports straight away.
+        compose.onNodeWithTag("connection-url").performTextInput("mysql://reader@db.example.com:3307/shop?ssl-mode=DISABLED")
+        compose.waitUntil(10_000) { compose.onAllNodesWithText("db.example.com").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("shop @ db.example.com").assertExists()
+        compose.onNodeWithText("3307").assertExists()
+        compose.onNodeWithText("reader").assertExists()
+        compose.onNodeWithTag("url-feedback").assertTextContains("Mobile always requires verified TLS", substring = true)
+        capture("connection-url-import")
+        compose.onNodeWithText("Cancel").performClick()
         compose.onNodeWithTag("add").performClick()
         compose.onNodeWithText("New connection").assertExists()
         capture("connection-form")
-        compose.onNodeWithText("Test").performScrollTo().performClick()
+        // The actions sit below the fold, where the lazy form has not composed them yet.
+        compose.onNodeWithTag("profile-form").performScrollToNode(hasText("Test"))
+        compose.onNodeWithText("Test").performClick()
         val validationError = "invalid input: name, host, and username are required"
         compose.waitUntil(10_000) { compose.onAllNodesWithText(validationError).fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText(validationError).performScrollTo().assertIsDisplayed()
         capture("connection-error")
-        compose.onNodeWithText("Cancel").performScrollTo().performClick()
+        compose.onNodeWithTag("profile-form").performScrollToNode(hasText("Cancel"))
+        compose.onNodeWithText("Cancel").performClick()
         compose.onNodeWithText("Production").performClick()
         compose.waitUntil(10_000) { compose.onAllNodesWithTag("editor").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithTag("run").performClick()
@@ -147,7 +160,8 @@ class DemoNavigationTest {
         assertEquals(InputType.TYPE_TEXT_VARIATION_PASSWORD, passwordType and InputType.TYPE_MASK_VARIATION)
         assertEquals(0, passwordType and InputType.TYPE_TEXT_FLAG_AUTO_CORRECT)
         capture("password-input")
-        compose.onNodeWithText("Cancel").performScrollTo().performClick()
+        compose.onNodeWithTag("profile-form").performScrollToNode(hasText("Cancel"))
+        compose.onNodeWithText("Cancel").performClick()
         compose.onNodeWithText("Production").performClick()
         compose.waitUntil(10_000) { compose.onAllNodesWithTag("editor").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithTag("editor").performClick()

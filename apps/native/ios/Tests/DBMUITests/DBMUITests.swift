@@ -16,6 +16,25 @@ final class DBMUITests: XCTestCase {
         retainScreenshot(named: "iphone-connection-form")
     }
 
+    func testImportConnectionURLFillsTheForm() {
+        let app = launchDemo()
+        XCTAssertTrue(app.buttons["import-connection-url"].waitForExistence(timeout: 10))
+        app.buttons["import-connection-url"].tap()
+        let url = app.textFields["connection-url"]
+        XCTAssertTrue(url.waitForExistence(timeout: 5))
+        url.tap(); url.typeText("mysql://reader@db.example.com:3307/shop?ssl-mode=DISABLED")
+        app.buttons["apply-connection-url"].tap()
+        expectation(for: NSPredicate(format: "value == %@", "db.example.com"), evaluatedWith: app.textFields["host"])
+        waitForExpectations(timeout: 10)
+        XCTAssertEqual(app.textFields["port"].value as? String, "3307")
+        XCTAssertEqual(app.textFields["username"].value as? String, "reader")
+        XCTAssertEqual(app.textFields["database"].value as? String, "shop")
+        XCTAssertEqual(app.textFields["name"].value as? String, "shop @ db.example.com")
+        XCTAssertTrue(app.segmentedControls["engine"].buttons["MySQL"].isSelected)
+        XCTAssertTrue(app.staticTexts["connection-url-status"].label.contains("Mobile always requires verified TLS"))
+        retainScreenshot(named: "iphone-connection-url-import")
+    }
+
     func testLandscapeUsesPersistentSourceList() {
         let app = launchDemo()
         XCTAssertTrue(app.staticTexts["Production"].waitForExistence(timeout: 10))
@@ -145,7 +164,10 @@ final class DBMUITests: XCTestCase {
         let app = launchDemo()
         XCTAssertTrue(app.buttons["add-connection"].waitForExistence(timeout: 10))
         app.buttons["add-connection"].tap()
-        app.segmentedControls["engine"].buttons["Redis"].tap()
+        // A tap while the sheet is still sliding up can miss the segment.
+        let redis = app.segmentedControls["engine"].buttons["Redis"]
+        for _ in 0..<3 where !redis.isSelected { redis.tap() }
+        XCTAssertTrue(redis.isSelected)
         let name = app.textFields["name"]; name.tap(); name.typeText("Invalid Redis")
         let database = app.textFields["database"]; database.tap(); database.typeText(XCUIKeyboardKey.delete.rawValue + "not-a-number")
         app.buttons["test-connection"].tap()
