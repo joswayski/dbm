@@ -395,7 +395,6 @@ mod tests {
             highlights: vec![dbm_update::Highlight {
                 title: title.into(),
                 body: String::new(),
-                commits: Vec::new(),
             }],
         }
     }

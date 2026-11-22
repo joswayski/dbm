@@ -313,16 +313,13 @@ fn link_markup(url: &str, text: &str) -> String {
     )
 }
 
-/// "Version 2026.10.18.2 · October 18, 2026", the version linking to its
-/// GitHub release page.
-fn version_line(version: &str, date: Option<&str>) -> gtk::Label {
-    let mut markup = link_markup(
+/// "Version 2026.10.18.2", linking to its GitHub release page. CalVer
+/// already says when it was built, so no date.
+fn version_line(version: &str) -> gtk::Label {
+    let markup = link_markup(
         &dbm_update::release_url(version),
         &format!("Version {version}"),
     );
-    if let Some(date) = date {
-        markup.push_str(&glib::markup_escape_text(&format!(" · {date}")));
-    }
     let label = gtk::Label::new(None);
     label.set_markup(&markup);
     label.set_xalign(0.0);
@@ -332,20 +329,11 @@ fn version_line(version: &str, date: Option<&str>) -> gtk::Label {
     label
 }
 
-/// Bold titles over muted descriptions, each ending with links to the
-/// commits it describes, as Captures links pull requests.
+/// Bold titles over muted descriptions.
 fn highlights(content: &gtk::Box, items: &[dbm_update::Highlight]) {
     for item in items {
         content.append(&body(&item.title, &["bold", "strong"]));
-        let mut markup = glib::markup_escape_text(&item.body).to_string();
-        for commit in &item.commits {
-            if let Some(url) = dbm_update::commit_url(commit) {
-                markup.push_str("  ");
-                markup.push_str(&link_markup(&url, &commit[..7]));
-            }
-        }
-        let text = body("", &["secondary", "links"]);
-        text.set_markup(&markup);
+        let text = body(&item.body, &["secondary"]);
         text.set_margin_bottom(8);
         content.append(&text);
     }
@@ -404,7 +392,7 @@ fn update_dialog(app: &App, update: &dbm_update::Available, tabs_open: bool) -> 
     let heading = title("Update available", None);
     heading.set_margin_bottom(0);
     content.append(&heading);
-    content.append(&version_line(&update.version, update.released.as_deref()));
+    content.append(&version_line(&update.version));
     let eyebrow = ui::label("What’s new", &["eyebrow"]);
     eyebrow.set_margin_top(12);
     content.append(&eyebrow);
@@ -430,7 +418,7 @@ fn update_dialog(app: &App, update: &dbm_update::Available, tabs_open: bool) -> 
     let later = ui::button("secondary-button", None, "Not now", "");
     let handle = app.clone();
     later.connect_clicked(move |_| handle.update(|state| state.confirm_update = None));
-    let install = ui::button("primary", None, "Update now", "");
+    let install = ui::button("primary", None, "Update", "");
     let handle = app.clone();
     let update = update.clone();
     install.connect_clicked(move |_| {
@@ -483,7 +471,7 @@ fn whats_new_dialog(app: &App, whats_new: &WhatsNew) -> gtk::Box {
                 content.append(&ui::label(&day.date, &["size-12", "muted"]));
                 content.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
                 for release in &day.releases {
-                    let line = version_line(&release.version, None);
+                    let line = version_line(&release.version);
                     line.set_margin_top(4);
                     content.append(&line);
                     highlights(&content, &release.highlights);

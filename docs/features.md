@@ -49,7 +49,7 @@ What the app does today, what is deliberately not built yet, and what it stores 
   fullscreen windows are left unchanged.
 - Signed in-app updates from the GitHub Release published for each merge to
   `main`. The update review lists the highlights of every release being
-  installed, linking each version's release and each highlight's commits;
+  installed, linking each version's release;
   open tabs, unsaved queries, and staged edits reopen after the restart; and **What's new** (Anybase menu on macOS, Help menu on
   Windows and Linux) shows recent releases grouped by day; it opens once after an
   update with highlights you haven't seen.

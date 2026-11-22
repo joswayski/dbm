@@ -124,7 +124,7 @@ $clicked = Click-Named $old.hwnd 'Update to v*'
 Write-Host "clicked: $clicked"
 Start-Sleep -Seconds 1
 Save-Screen $old.hwnd '2-confirm.png'
-Click-Named $old.hwnd 'Update now' 30 | Out-Null
+Click-Named $old.hwnd 'Update' 30 | Out-Null
 
 # The updater swaps dbm.exe and relaunches it with --after-update.
 $sw = [Diagnostics.Stopwatch]::StartNew()

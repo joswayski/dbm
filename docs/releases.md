@@ -112,8 +112,8 @@ Windows and Linux. The top bar normally shows a small, non-clickable **Version
 <version>** label; manual checks show non-clickable status text above it.
 When the manifest lists a higher build number, an **Update to v<version>**
 button appears above the installed version. Failed manual checks offer
-**Retry update**. The button opens the update review (below) with **Update
-now** and **Not now**. Installing downloads the platform's artifact, verifies its minisign signature
+**Retry update**. The button opens the update review (below) with **Update**
+and **Not now**. Installing downloads the platform's artifact, verifies its minisign signature
 against the public key in `crates/dbm-update` (including that the signed
 `file:` name in the trusted comment matches the artifact's URL, so release
 assets must keep the name they were signed under), saves the open tabs, swaps
@@ -147,12 +147,12 @@ platform's URL and signature, and `releases`: recent releases' highlights
 (below). `darwin-aarch64` and `darwin-x86_64` both point at the universal zip.
 
 The update review, as Captures words its update notice: **Update
-available**, "Version X · date" linking to the version's GitHub release, then
-the highlights of every listed release newer than the installed build, newest
-first, with a title an older release repeats kept once. Each highlight ends
-with links to the commits it cites (short hashes; releases before this field
-have none). If the offered release has no highlights listed, it shows the
-plain notes instead. With tabs open, it says they reopen after the update.
+available**, then "Version X" linking to the version's GitHub release (no
+date: the CalVer version already says when it was built), then the
+highlights of every listed release newer than the installed build, newest
+first, with a title an older release repeats kept once. If the offered
+release has no highlights listed, it shows the plain notes instead. With tabs
+open, it says they reopen after the update.
 
 **Open tabs survive the restart**, as Captures reopens open captures: just
 before the new build replaces it, the app writes its tabs to

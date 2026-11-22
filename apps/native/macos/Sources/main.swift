@@ -103,7 +103,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, NS
         let alert = NSAlert()
         alert.messageText = "Update available"
         alert.accessoryView = ReleaseNotes.accessory(ReleaseNotes.review(update, tabsOpen: !tabs.isEmpty))
-        alert.addButton(withTitle: "Update now")
+        alert.addButton(withTitle: "Update")
         alert.addButton(withTitle: "Not now")
         alert.beginSheetModal(for: window) { [weak self] response in
             if response == .alertFirstButtonReturn { self?.updater.install(update) }

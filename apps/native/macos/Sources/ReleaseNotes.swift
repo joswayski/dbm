@@ -1,8 +1,8 @@
 import AppKit
 
 /// Release highlights as the update review and What's new show them: bold
-/// titles over muted descriptions with links to the commits they describe,
-/// each version linking to its GitHub release. `crates/dbm-update` stacks, de-duplicates, and groups them by
+/// titles over muted descriptions, each version linking to its GitHub
+/// release. `crates/dbm-update` stacks, de-duplicates, and groups them by
 /// UTC day, so this only lays them out.
 enum ReleaseNotes {
     static let width: CGFloat = 400
@@ -11,7 +11,7 @@ enum ReleaseNotes {
     /// The update review: every release being installed, newest first.
     static func review(_ update: [String: Any], tabsOpen: Bool) -> NSAttributedString {
         let text = NSMutableAttributedString()
-        text.append(versionLine(string(update["version"]), date: update["released"] as? String))
+        text.append(versionLine(string(update["version"])))
         text.append(plain("\n\nWhat’s new\n", font: Graphite.ui(10.5, .semibold), color: Graphite.faint))
         if let highlights = update["highlights"] as? [[String: Any]] {
             if highlights.isEmpty {
@@ -41,7 +41,7 @@ enum ReleaseNotes {
             if index > 0 { text.append(plain("\n", font: Graphite.ui(8), color: Graphite.muted)) }
             text.append(plain(string(day["date"]) + "\n", font: Graphite.ui(12), color: Graphite.muted))
             for release in day["releases"] as? [[String: Any]] ?? [] {
-                text.append(versionLine(string(release["version"]), date: nil))
+                text.append(versionLine(string(release["version"])))
                 text.append(plain("\n", font: Graphite.ui(12), color: Graphite.muted))
                 appendHighlights(release["highlights"] as? [[String: Any]] ?? [], to: text)
             }
@@ -78,15 +78,13 @@ enum ReleaseNotes {
         return scroll
     }
 
-    private static func versionLine(_ version: String, date: String?) -> NSAttributedString {
+    /// CalVer already says when it was built, so no date.
+    private static func versionLine(_ version: String) -> NSAttributedString {
         let line = NSMutableAttributedString(string: "Version \(version)", attributes: [
             .font: Graphite.ui(12), .foregroundColor: Graphite.muted,
         ])
         if let url = URL(string: "https://github.com/joswayski/dbm/releases/tag/v\(version)") {
             line.addAttribute(.link, value: url, range: NSRange(location: 0, length: line.length))
-        }
-        if let date, !date.isEmpty {
-            line.append(plain(" · \(date)", font: Graphite.ui(12), color: Graphite.muted))
         }
         return line
     }
@@ -97,15 +95,6 @@ enum ReleaseNotes {
         for highlight in highlights {
             text.append(plain(string(highlight["title"]) + "\n", font: Graphite.ui(13, .semibold), color: Graphite.textStrong))
             let styled = NSMutableAttributedString(attributedString: plain(string(highlight["body"]), font: Graphite.ui(12), color: Graphite.secondary))
-            // The commits it describes, as Captures links pull requests.
-            for commit in highlight["commits"] as? [String] ?? []
-            where commit.count == 40 && commit.allSatisfy(\.isHexDigit) {
-                guard let url = URL(string: "https://github.com/joswayski/dbm/commit/\(commit)") else { continue }
-                styled.append(plain("  ", font: Graphite.ui(12), color: Graphite.secondary))
-                styled.append(NSAttributedString(string: String(commit.prefix(7)), attributes: [
-                    .font: Graphite.ui(11.5), .foregroundColor: Graphite.accentText, .link: url,
-                ]))
-            }
             styled.append(plain("\n", font: Graphite.ui(12), color: Graphite.secondary))
             styled.addAttribute(.paragraphStyle, value: spaced, range: NSRange(location: 0, length: styled.length))
             text.append(styled)

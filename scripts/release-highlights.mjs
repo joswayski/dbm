@@ -245,11 +245,7 @@ function validated(response, source) {
     )
       throw new Error("unsupported highlight");
   }
-  return result.highlights.map(({ title, body, commits }) => ({
-    title: title.trim(),
-    body: body.trim(),
-    commits,
-  }));
+  return result.highlights.map(({ title, body }) => ({ title: title.trim(), body: body.trim() }));
 }
 
 /**

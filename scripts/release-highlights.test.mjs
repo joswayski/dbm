@@ -96,7 +96,7 @@ test("summarizes desktop changes, including merged pull requests, for Gemini", a
     },
   });
   assert.deepEqual(highlights, [
-    { title: "Copy rows as CSV", body: "Select rows and copy them straight into a spreadsheet.", commits: [after] },
+    { title: "Copy rows as CSV", body: "Select rows and copy them straight into a spreadsheet." },
   ]);
   assert.equal(request.generationConfig.thinkingConfig.thinkingLevel, "MEDIUM");
   assert.equal(request.generationConfig.maxOutputTokens, 32768);

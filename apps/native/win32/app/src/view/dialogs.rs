@@ -95,9 +95,9 @@ fn link(ui: &mut Ui, text: &str, url: &str, font: dbm_ui::Font) {
     }
 }
 
-/// "Version 2026.10.18.2 · October 18, 2026", the version linking to its
-/// GitHub release page.
-fn version_line(ui: &mut Ui, version: &str, date: Option<&str>) {
+/// "Version 2026.10.18.2", linking to its GitHub release page. CalVer
+/// already says when it was built, so no date.
+fn version_line(ui: &mut Ui, version: &str) {
     let font = theme::ui(12.0);
     ui.horizontal(18.0, |ui| {
         ui.spacing.x = 0.0;
@@ -107,31 +107,14 @@ fn version_line(ui: &mut Ui, version: &str, date: Option<&str>) {
             &dbm_update::release_url(version),
             font,
         );
-        if let Some(date) = date {
-            ui.label(&format!(" · {date}"), font, theme::MUTED);
-        }
     });
 }
 
-/// Bold titles over short, muted descriptions, then links to the commits
-/// each describes, as Captures links pull requests.
+/// Bold titles over short, muted descriptions.
 fn release_highlights(ui: &mut Ui, highlights: &[dbm_update::Highlight]) {
     for h in highlights {
         ui.label_wrapped(&h.title, theme::bold(13.0), theme::TEXT_STRONG, false);
         ui.label_wrapped(&h.body, theme::ui(12.5), theme::SECONDARY, false);
-        let commits: Vec<(String, &str)> = h
-            .commits
-            .iter()
-            .filter_map(|c| dbm_update::commit_url(c).map(|url| (url, &c[..7])))
-            .collect();
-        if !commits.is_empty() {
-            ui.horizontal(18.0, |ui| {
-                ui.spacing.x = 10.0;
-                for (url, short) in &commits {
-                    link(ui, short, url, theme::ui(11.5));
-                }
-            });
-        }
         ui.add_space(8.0);
     }
 }
@@ -271,8 +254,15 @@ impl Workbench {
         if let Some(update) = self.confirm_update.clone() {
             let tabs_open = !self.tabs.is_empty();
             let out = modal(ui, "Update available", 460.0, |ui| {
-                dialog_title(ui, None, "Update available");
-                version_line(ui, &update.version, update.released.as_deref());
+                // The version sits right under the title.
+                ui.label_wrapped(
+                    "Update available",
+                    theme::bold(17.0),
+                    theme::TEXT_STRONG,
+                    false,
+                );
+                ui.add_space(2.0);
+                version_line(ui, &update.version);
                 ui.add_space(12.0);
                 ui.label("What’s new", theme::bold(10.5), theme::FAINT);
                 ui.separator(theme::BORDER);
@@ -314,7 +304,7 @@ impl Workbench {
                     );
                 }
                 ui.add_space(14.0);
-                confirm_buttons(ui, primary_button("Update now"), "Not now", true)
+                confirm_buttons(ui, primary_button("Update"), "Not now", true)
             });
             let escape = self.dialog_escape;
             if let Some(install) = out
@@ -402,7 +392,7 @@ impl Workbench {
                         ui.separator(theme::BORDER);
                         ui.add_space(4.0);
                         for release in &day.releases {
-                            version_line(ui, &release.version, None);
+                            version_line(ui, &release.version);
                             ui.add_space(4.0);
                             release_highlights(ui, &release.highlights);
                         }

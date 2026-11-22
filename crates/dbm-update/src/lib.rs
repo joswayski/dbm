@@ -98,10 +98,6 @@ pub struct Release {
 pub struct Highlight {
     pub title: String,
     pub body: String,
-    /// The full source commits the highlight describes, each linked from
-    /// the update review. Highlights before this field have none.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub commits: Vec<String>,
 }
 
 /// Releases published on the same UTC day, newest first.
@@ -502,7 +498,6 @@ mod tests {
                 .map(|title| Highlight {
                     title: (*title).into(),
                     body: format!("{title} body"),
-                    commits: Vec::new(),
                 })
                 .collect(),
         }
