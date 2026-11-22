@@ -807,6 +807,7 @@ pub fn modal_with_footer<R>(
     let mut backdrop_clicked = false;
     // The footer band and the gap above it.
     let band = if footer > 0.0 { footer + 14.0 } else { 0.0 };
+    ui.ctx.begin_focus_scope();
     let inner = ui.area(Layer::Modal, screen, |ui| {
         let r = ui.interact(
             screen,

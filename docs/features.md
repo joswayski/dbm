@@ -138,6 +138,12 @@ What the app does today, what is deliberately not built yet, and what it stores 
   variables, and explicit transactions carry over between runs.
   Drag the horizontal grip between the editor/history and results to resize
   their heights, including when results open in the editable table viewer.
+- Keyboard on Windows and Linux: F5 or Ctrl+R refreshes the tab (a table
+  reloads its page, a query tab re-runs its last statement), Ctrl+S saves
+  staged changes, Ctrl+Tab and Ctrl+Shift+Tab switch tabs, and a new or
+  newly selected query tab puts the caret in its editor. On Windows, Tab and
+  Shift+Tab indent and outdent the selected lines. The macOS app does not
+  have these yet.
   Query completion time appears beside the query title; results do not have
   a separate completion or table-viewer status bar.
   **Copy results** copies the displayed query results and headers to the

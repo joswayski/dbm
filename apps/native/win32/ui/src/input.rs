@@ -21,12 +21,15 @@ pub enum Key {
     A,
     C,
     N,
+    R,
+    S,
     T,
     V,
     W,
     X,
     Y,
     Z,
+    F5,
     F10,
 }
 

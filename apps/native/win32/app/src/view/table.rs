@@ -1313,6 +1313,8 @@ fn data_grid(
     let events = RefCell::new(GridEvents::default());
     let mut drafts = std::mem::take(&mut state.drafts);
     let mut focus_editor = state.focus_editor;
+    // The cell whose editor took Escape this frame: its edit is dropped.
+    let mut escaped = None;
     {
         let st: &TableState = state;
         grid::grid(
@@ -1426,12 +1428,15 @@ fn data_grid(
                     let current = values.get(column).map_or_else(String::new, editable_text);
                     let draft = drafts.entry((index, column)).or_insert(current);
                     let id = cell_editor_id(tab_id, index, column);
-                    TextEdit::singleline(id, draft)
+                    let out = TextEdit::singleline(id, draft)
                         .frameless()
                         .font(theme::ui(12.0))
                         .margin(10.0, 7.0)
                         .name(&columns[column].name)
                         .show_in(ui, rect);
+                    if out.escaped {
+                        escaped = Some((index, column));
+                    }
                     if focus_editor {
                         ui.ctx.request_focus(id);
                         focus_editor = false;
@@ -1470,6 +1475,10 @@ fn data_grid(
     }
     state.drafts = drafts;
     state.focus_editor = focus_editor;
+    if let Some(cell) = escaped {
+        state.drafts.remove(&cell);
+        state.editing = None;
+    }
     // Widths dragged this frame persist; collapsed columns keep theirs.
     for (i, w) in widths.iter().enumerate() {
         if !state.collapsed_columns.contains(&i) && (*w - defaults[i]).abs() > 0.5 {
@@ -1889,12 +1898,10 @@ fn diff_lines(
     lines
 }
 
-/// Stages drafts whose editor no longer has focus; Escape drops the focused
-/// draft instead, reverting the field.
+/// Stages drafts whose editor no longer has focus. An editor that took
+/// Escape has already dropped its draft, reverting the field.
 fn commit_unfocused_drafts(ui: &mut Ui, tab_id: u64, state: &mut TableState) {
     let focused = ui.ctx.focused();
-    let before = ui.ctx.focused_at_frame_start();
-    let escape = ui.ctx.key_pressed(Key::Escape);
     let keys: Vec<(usize, usize)> = state.drafts.keys().copied().collect();
     for key in keys {
         let ids = [
@@ -1903,15 +1910,7 @@ fn commit_unfocused_drafts(ui: &mut Ui, tab_id: u64, state: &mut TableState) {
         ];
         let has_focus = focused.is_some_and(|f| ids.contains(&f));
         let opening = state.editing == Some(key) && state.focus_editor;
-        if escape && (has_focus || before.is_some_and(|b| ids.contains(&b))) {
-            state.drafts.remove(&key);
-            if let Some(id) = focused {
-                ui.ctx.surrender_focus(id);
-            }
-            if state.editing == Some(key) {
-                state.editing = None;
-            }
-        } else if !(has_focus || opening) {
+        if !(has_focus || opening) {
             if let Some(text) = state.drafts.remove(&key) {
                 stage_cell(state, key.0, key.1, &text);
             }
@@ -2138,6 +2137,10 @@ fn inspector_field(
         .show_in(ui, rect);
     if out.response.changed && !read_only {
         state.drafts.insert(key, text);
+    }
+    // Escape reverts the field to the row's value.
+    if out.escaped {
+        state.drafts.remove(&key);
     }
 }
 

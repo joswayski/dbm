@@ -335,22 +335,91 @@ impl App {
         self.shell.collapsed_sidebar.append(&expand);
     }
 
-    /// New connection, new query, and close tab (Ctrl+N/T/W), taken before
-    /// any widget sees them; Escape closes dialogs.
+    /// The window's shortcuts, taken before any widget sees them: Ctrl+N
+    /// (new connection), Ctrl+T (new query), Ctrl+W (close tab), Ctrl+Tab
+    /// and Ctrl+Shift+Tab (next and previous tab), F5 or Ctrl+R (refresh),
+    /// Ctrl+S (save staged changes), and Ctrl+Enter to run the query when
+    /// the editor does not have the keyboard. Escape closes dialogs.
     fn shortcut(&self, key: gtk::gdk::Key, modifiers: gtk::gdk::ModifierType) -> glib::Propagation {
-        let control = modifiers.contains(gtk::gdk::ModifierType::CONTROL_MASK);
+        use gtk::gdk::{Key, ModifierType};
+        let control = modifiers.contains(ModifierType::CONTROL_MASK);
         let modal = self.state.borrow().modal_open();
-        if key == gtk::gdk::Key::Escape && modal {
+        if key == Key::Escape && modal {
             self.update(dialogs::dismiss);
             return glib::Propagation::Stop;
         }
-        if !control || modal {
+        if modal || modifiers.contains(ModifierType::ALT_MASK) {
+            return glib::Propagation::Proceed;
+        }
+        if key == Key::F5 && !control {
+            self.update(|state| {
+                if let Some(tab) = state.active_tab {
+                    state.refresh_tab(tab);
+                }
+            });
+            return glib::Propagation::Stop;
+        }
+        if !control {
             return glib::Propagation::Proceed;
         }
         let lower = key.to_lower();
-        if lower == gtk::gdk::Key::n {
+        if matches!(key, Key::Tab | Key::ISO_Left_Tab) {
+            let backwards =
+                key == Key::ISO_Left_Tab || modifiers.contains(ModifierType::SHIFT_MASK);
+            self.update(|state| state.cycle_tab(backwards));
+        } else if lower == Key::r {
+            self.update(|state| {
+                if let Some(tab) = state.active_tab {
+                    state.refresh_tab(tab);
+                }
+            });
+        } else if lower == Key::s {
+            // An edit still being typed is staged first: its entry commits
+            // when it gives up the keyboard.
+            let editing = {
+                let state = self.state.borrow();
+                state
+                    .active_tab
+                    .and_then(|tab| state.tables.get(&tab))
+                    .is_some_and(|table| table.editing.is_some())
+            };
+            if editing {
+                gtk::prelude::GtkWindowExt::set_focus(&self.window, gtk::Widget::NONE);
+            }
+            self.update(|state| {
+                if let Some(tab) = state.active_tab
+                    && state.tables.get(&tab).is_some_and(|t| t.dirty())
+                {
+                    state.save_changes(tab);
+                }
+            });
+        } else if matches!(key, Key::Return | Key::KP_Enter) {
+            // The editor runs its own Ctrl+Enter; this covers the keyboard
+            // being on a button or the results after a click.
+            let run = {
+                let state = self.state.borrow();
+                state
+                    .active_tab
+                    .filter(|id| state.tab(*id).is_some_and(|t| t.kind == TabKind::Query))
+            };
+            let Some(tab) = run else {
+                return glib::Propagation::Proceed;
+            };
+            let in_editor = match self.views.borrow().get(&tab) {
+                Some(View::Query(view)) => view.editor.has_focus(),
+                _ => true,
+            };
+            if in_editor {
+                return glib::Propagation::Proceed;
+            }
+            self.update(|state| {
+                if let Some(sql) = query::target(state, tab).map(|t| t.sql) {
+                    state.run_query(tab, sql, false, false);
+                }
+            });
+        } else if lower == Key::n {
             self.update(|state| state.profile_form = Some(crate::state::ProfileForm::fresh()));
-        } else if lower == gtk::gdk::Key::t {
+        } else if lower == Key::t {
             self.update(|state| {
                 if let Some(profile) = state
                     .active_profile
@@ -359,7 +428,7 @@ impl App {
                     state.open_query(profile, true);
                 }
             });
-        } else if lower == gtk::gdk::Key::w {
+        } else if lower == Key::w {
             self.update(|state| {
                 if let Some(tab) = state.active_tab {
                     state.close_tab(tab);
@@ -412,8 +481,15 @@ impl App {
                 settings.set(settings::WHATS_NEW, build.to_string());
                 settings.save();
             }
-            next
+            // A dialog keeps the keyboard; the editor takes it afterwards.
+            let focus = if state.modal_open() {
+                None
+            } else {
+                state.focus_editor.take()
+            };
+            (next, focus)
         };
+        let (next, focus_editor) = next;
         let state = self.state.borrow();
         self.render_css(&state);
         self.render_sidebar_mode(&state);
@@ -427,6 +503,15 @@ impl App {
         let busy = self.ticks_needed(&state);
         drop(state);
         self.rendering.set(false);
+        // After the borrows end: moving focus can commit a cell edit, which
+        // renders again.
+        let editor = focus_editor.and_then(|id| match self.views.borrow().get(&id) {
+            Some(View::Query(view)) => Some(view.editor.clone()),
+            _ => None,
+        });
+        if let Some(editor) = editor {
+            editor.grab_focus();
+        }
         if let Some(at) = next {
             self.schedule(at);
         }

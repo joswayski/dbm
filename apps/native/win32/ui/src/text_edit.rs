@@ -36,6 +36,21 @@ impl EditState {
     pub fn set_caret(&mut self, at: usize) {
         self.selection = (at, at);
     }
+
+    /// Replaces the whole text as one undoable step (a History pick), with
+    /// the caret at the end.
+    pub fn replace_all(&mut self, text: &mut String, new: String) {
+        push_undo(self, text);
+        *text = new;
+        self.set_caret(text.len());
+        self.goal_x = None;
+    }
+
+    /// Selects everything in a field holding `len` bytes, so typing
+    /// replaces it.
+    pub fn select_all(&mut self, len: usize) {
+        self.selection = (0, len);
+    }
 }
 
 pub struct TextEdit<'t> {
@@ -220,6 +235,7 @@ impl<'t> TextEdit<'t> {
         };
         let mut sense = sense;
         sense.focusable = self.interactive;
+        sense.takes_keys = true;
         sense.plain_cursor = true;
         let mut response = ui.interact(rect, id, sense);
         let mut st = ui.ctx.data::<EditState>(id).unwrap_or_default();
@@ -725,7 +741,13 @@ impl<'t> TextEdit<'t> {
                 insert(text, st, &format!("\n{indent}"));
                 return KeyResult::Handled(true);
             }
-            Key::Tab if self.multiline && !m.ctrl && editable && !m.shift => {
+            Key::Tab if self.multiline && !m.ctrl && editable => {
+                // Tab indents the selected lines and Shift+Tab outdents them
+                // (or the caret's line); otherwise Tab types two spaces.
+                let (a, b) = order(st.selection);
+                if m.shift || text[a..b].contains('\n') {
+                    return KeyResult::Handled(indent_lines(text, st, m.shift));
+                }
                 insert(text, st, "  ");
                 return KeyResult::Handled(true);
             }
@@ -863,6 +885,67 @@ fn insert(text: &mut String, st: &mut EditState, s: &str) {
     replace_selection(text, st, s);
 }
 
+/// Adds two spaces to the start of every non-empty line the selection
+/// touches, or with `outdent` removes up to two spaces (or a tab) from each,
+/// as one undo step. The selection keeps covering the same text. Returns
+/// whether anything changed.
+fn indent_lines(text: &mut String, st: &mut EditState, outdent: bool) -> bool {
+    let (a, b) = order(st.selection);
+    let start = text[..a].rfind('\n').map_or(0, |i| i + 1);
+    // A selection that ends at the start of a line leaves that line alone.
+    let last = if b > a && text[..b].ends_with('\n') {
+        b - 1
+    } else {
+        b
+    };
+    let end = text[last..].find('\n').map_or(text.len(), |i| last + i);
+    // (line start in the old text, bytes added or removed there)
+    let mut changes: Vec<(usize, usize)> = Vec::new();
+    let mut out = String::with_capacity(end - start + 16);
+    let mut offset = start;
+    for line in text[start..end].split('\n') {
+        if outdent {
+            let remove = if line.starts_with('\t') {
+                1
+            } else {
+                line.bytes().take(2).take_while(|b| *b == b' ').count()
+            };
+            if remove > 0 {
+                changes.push((offset, remove));
+            }
+            out.push_str(&line[remove..]);
+        } else {
+            if !line.is_empty() {
+                changes.push((offset, 2));
+                out.push_str("  ");
+            }
+            out.push_str(line);
+        }
+        out.push('\n');
+        offset += line.len() + 1;
+    }
+    out.pop();
+    if changes.is_empty() {
+        return false;
+    }
+    push_undo(st, text);
+    text.replace_range(start..end, &out);
+    let moved = |p: usize| {
+        changes.iter().fold(p, |q, &(at, n)| {
+            if p <= at {
+                q
+            } else if outdent {
+                q - n.min(p - at)
+            } else {
+                q + n
+            }
+        })
+    };
+    st.selection = (moved(st.selection.0), moved(st.selection.1));
+    st.goal_x = None;
+    true
+}
+
 fn replace_selection(text: &mut String, st: &mut EditState, s: &str) {
     let (a, b) = order(st.selection);
     text.replace_range(a..b, s);
@@ -956,6 +1039,38 @@ mod tests {
         assert_eq!(map_offset(shown, text, 3), 1);
         assert_eq!(map_offset(shown, text, 6), 3);
         assert_eq!(map_offset_rev(text, shown, 3), 6);
+    }
+
+    #[test]
+    fn tab_indents_selected_lines_and_shift_tab_outdents_them() {
+        let mut text = String::from("a\n  b\n\n c\nd");
+        let mut st = EditState {
+            // From inside "a" to the start of the "d" line, caret first.
+            selection: (10, 1),
+            ..Default::default()
+        };
+        assert!(indent_lines(&mut text, &mut st, false));
+        // Empty lines stay empty, and the line the selection only reaches
+        // the start of is left alone.
+        assert_eq!(text, "  a\n    b\n\n   c\nd");
+        assert_eq!(&text[st.selection.1..st.selection.0], "\n    b\n\n   c\n");
+
+        assert!(indent_lines(&mut text, &mut st, true));
+        assert_eq!(text, "a\n  b\n\n c\nd");
+        assert_eq!(st.selection, (10, 1));
+        // Outdenting removes what is there: two spaces, one space, nothing.
+        assert!(indent_lines(&mut text, &mut st, true));
+        assert_eq!(text, "a\nb\n\nc\nd");
+        assert!(!indent_lines(&mut text, &mut st, true));
+        assert_eq!(st.undo.len(), 3, "one undo step per change");
+
+        // With no selection, Shift+Tab outdents the caret's line and keeps
+        // the caret on the same character.
+        let mut text = String::from("x\n\ty = 1");
+        let mut st = EditState::default();
+        st.set_caret(5);
+        assert!(indent_lines(&mut text, &mut st, true));
+        assert_eq!((text.as_str(), st.selection), ("x\ny = 1", (4, 4)));
     }
 
     #[test]

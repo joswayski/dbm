@@ -108,6 +108,8 @@ pub enum FeedbackKind {
 
 #[derive(Clone)]
 pub struct ProfileForm {
+    /// The dialog has been drawn: its Name field took the keyboard.
+    pub opened: bool,
     pub id: Option<Uuid>,
     pub name: String,
     pub color: String,
@@ -140,6 +142,7 @@ impl ProfileForm {
         let engine = DatabaseEngine::Postgres;
         let (port, database) = engine_defaults(engine);
         Self {
+            opened: false,
             id: None,
             name: engine_preset_name(engine).into(),
             color: theme::DEFAULT_CONNECTION_COLOR.into(),
@@ -169,6 +172,7 @@ impl ProfileForm {
 
     pub fn from_profile(p: &ConnectionProfile) -> Self {
         Self {
+            opened: false,
             id: Some(p.id),
             name: p.name.clone(),
             color: p
@@ -358,6 +362,10 @@ pub struct Workbench {
     pub schema_toggled: HashSet<(Uuid, String)>,
     pub tabs: Vec<Tab>,
     pub active_tab: Option<u64>,
+    /// The query tab whose editor takes the keyboard when it is next drawn:
+    /// a tab that was just opened or switched to, so typing and Ctrl+Enter
+    /// work without clicking into the editor first.
+    pub focus_editor: Option<u64>,
     pub active_profile: Option<Uuid>,
     pub query_results: HashMap<u64, QueryResponse>,
     pub histories: HashMap<(Uuid, String), Vec<QueryHistoryEntry>>,
@@ -369,6 +377,9 @@ pub struct Workbench {
     pub banner: Option<Message>,
     pub query_errors: HashMap<u64, Message>,
     pub profile_form: Option<ProfileForm>,
+    /// Escape was pressed this frame with a dialog open; the dialogs take it
+    /// before their fields can, so one press closes the dialog.
+    pub dialog_escape: bool,
     pub confirm_delete: Option<Uuid>,
     pub confirm_query: Option<ConfirmQuery>,
     pub confirm_export: Option<u64>,
@@ -411,6 +422,7 @@ impl Workbench {
             schema_toggled: HashSet::new(),
             tabs: vec![],
             active_tab: None,
+            focus_editor: None,
             active_profile: None,
             query_results: HashMap::new(),
             histories: HashMap::new(),
@@ -422,6 +434,7 @@ impl Workbench {
             banner: None,
             query_errors: HashMap::new(),
             profile_form: None,
+            dialog_escape: false,
             confirm_delete: None,
             confirm_query: None,
             confirm_export: None,
@@ -916,10 +929,23 @@ impl Workbench {
             return;
         }
         if let Some(tab) = self.tabs.iter().rev().find(|t| t.profile_id == profile) {
-            self.active_tab = Some(tab.id);
+            let id = tab.id;
+            self.select_tab(id);
             return;
         }
         self.open_query(profile, true);
+    }
+
+    /// Hands the keyboard to the active query tab's editor.
+    pub fn focus_active_editor(&mut self) {
+        let active = self.active_tab;
+        if self
+            .tabs
+            .iter()
+            .any(|t| Some(t.id) == active && t.kind == TabKind::Query)
+        {
+            self.focus_editor = active;
+        }
     }
 
     pub fn open_query(&mut self, profile: Uuid, activate: bool) {
@@ -947,6 +973,7 @@ impl Workbench {
         if activate {
             self.active_tab = Some(id);
             self.active_profile = Some(profile);
+            self.focus_editor = Some(id);
         }
     }
 
@@ -1002,8 +1029,44 @@ impl Workbench {
     pub fn select_tab(&mut self, tab_id: u64) {
         if let Some(tab) = self.tabs.iter_mut().find(|t| t.id == tab_id) {
             tab.collapsed = false;
+            // Only on a switch: clicking the active tab (the first half of a
+            // double-click to rename it) leaves the keyboard where it is.
+            if self.active_tab != Some(tab_id) && tab.kind == TabKind::Query {
+                self.focus_editor = Some(tab_id);
+            }
             self.active_tab = Some(tab_id);
             self.active_profile = Some(tab.profile_id);
+        }
+    }
+
+    /// Ctrl+Tab and Ctrl+Shift+Tab: the next or previous tab, wrapping.
+    pub fn cycle_tab(&mut self, backwards: bool) {
+        let count = self.tabs.len();
+        let Some(index) = self.tabs.iter().position(|t| Some(t.id) == self.active_tab) else {
+            return;
+        };
+        let next = if backwards {
+            (index + count - 1) % count
+        } else {
+            (index + 1) % count
+        };
+        let id = self.tabs[next].id;
+        self.select_tab(id);
+    }
+
+    /// F5 and Ctrl+R: what the tab's Refresh button does. A table reloads
+    /// its page; a query tab re-runs the statement it last ran.
+    pub fn refresh_tab(&mut self, tab_id: u64) {
+        let Some(tab) = self.tabs.iter().find(|t| t.id == tab_id) else {
+            return;
+        };
+        match &tab.kind {
+            TabKind::Table { .. } => self.load_table(tab_id),
+            TabKind::Query => {
+                if let Some(sql) = tab.last_executed.clone() {
+                    self.run_query(tab_id, sql, true, false);
+                }
+            }
         }
     }
 
@@ -1176,6 +1239,8 @@ impl Workbench {
     pub fn choose_profile(&mut self, id: Uuid) {
         if self.workspaces.contains_key(&id) {
             self.activate_profile(id);
+            // Back to typing, also when its query tab was already showing.
+            self.focus_active_editor();
         } else {
             self.active_profile = Some(id);
             if !self.connecting(id) {

@@ -7,8 +7,8 @@ use dbm_core::connection_url::{display_connection_url, format_connection_url};
 use dbm_core::models::{DatabaseEngine, TlsMode};
 use dbm_desktop::updates::{self, WhatsNew};
 use dbm_desktop::worker::Command;
-use dbm_ui::input::Key;
-use dbm_ui::text_edit::TextEdit;
+use dbm_ui::input::{Key, Modifiers};
+use dbm_ui::text_edit::{EditState, TextEdit};
 use dbm_ui::widgets::{
     self, danger_button, dialog_title, icon_button_in, modal, modal_with_footer, primary_button,
     secondary_button,
@@ -174,7 +174,7 @@ impl Workbench {
                 self.updates.failure_open = false;
             }
             Some(false) => self.updates.check(false),
-            None if out.backdrop_clicked || ui.ctx.key_pressed(Key::Escape) => {
+            None if out.backdrop_clicked || self.dialog_escape => {
                 self.updates.failure_open = false;
             }
             None => {}
@@ -182,6 +182,11 @@ impl Workbench {
     }
 
     pub(super) fn dialogs(&mut self, ui: &mut Ui) {
+        // Taken before a focused field can, which would only give up the
+        // keyboard; an open list in the dialog still closes first.
+        self.dialog_escape = self.modal_open()
+            && !ui.ctx.any_popup_open()
+            && ui.ctx.consume_key(Modifiers::NONE, Key::Escape);
         self.profile_dialog(ui);
         if let Some(id) = self.confirm_delete {
             let name = self.profile(id).map(|p| p.name.clone()).unwrap_or_default();
@@ -192,7 +197,7 @@ impl Workbench {
                 ui.add_space(14.0);
                 confirm_buttons(ui, danger_button("Delete"), "Cancel", !busy)
             });
-            let escape = ui.ctx.key_pressed(Key::Escape);
+            let escape = self.dialog_escape;
             match out
                 .inner
                 .flatten()
@@ -228,7 +233,7 @@ impl Workbench {
                 ui.add_space(14.0);
                 confirm_buttons(ui, danger_button("Run anyway"), "Cancel", true)
             });
-            let escape = ui.ctx.key_pressed(Key::Escape);
+            let escape = self.dialog_escape;
             if let Some(run) = out
                 .inner
                 .flatten()
@@ -293,7 +298,7 @@ impl Workbench {
                 ui.add_space(14.0);
                 confirm_buttons(ui, primary_button("Install and restart"), "Later", true)
             });
-            let escape = ui.ctx.key_pressed(Key::Escape);
+            let escape = self.dialog_escape;
             if let Some(install) = out
                 .inner
                 .flatten()
@@ -320,7 +325,7 @@ impl Workbench {
                 ui.add_space(14.0);
                 confirm_buttons(ui, primary_button("Export"), "Cancel", true)
             });
-            let escape = ui.ctx.key_pressed(Key::Escape);
+            let escape = self.dialog_escape;
             if let Some(export) = out
                 .inner
                 .flatten()
@@ -391,8 +396,7 @@ impl Workbench {
             ui.add_space(8.0);
             button_row(ui, |row| primary_button("Done").show(row).clicked)
         });
-        let done =
-            out.inner.unwrap_or(false) || out.backdrop_clicked || ui.ctx.key_pressed(Key::Escape);
+        let done = out.inner.unwrap_or(false) || out.backdrop_clicked || self.dialog_escape;
         if retry {
             self.updates.whats_new = WhatsNew::Closed;
             self.updates.open_whats_new();
@@ -574,6 +578,14 @@ impl Workbench {
             });
             ui.add_space(8.0);
             form_label(ui, "Name");
+            // The form opens with Name selected, ready to be typed over.
+            if !std::mem::replace(&mut form.opened, true) {
+                let id = Id::new("profile-name");
+                let mut st = EditState::load(ui, id).unwrap_or_default();
+                st.select_all(form.name.len());
+                st.store(ui, id);
+                ui.ctx.request_focus(id);
+            }
             field_enter |= field(
                 ui,
                 Id::new("profile-name"),
@@ -804,7 +816,7 @@ impl Workbench {
         // Escape and a backdrop click belong to the delete confirmation while
         // it is open over this editor; they cancel it, not the editor.
         if self.confirm_delete.is_none() {
-            close |= out.backdrop_clicked || ui.ctx.key_pressed(Key::Escape);
+            close |= out.backdrop_clicked || self.dialog_escape;
         }
         // Enter in a text field saves, like submitting the desktop form.
         if field_enter && !url_enter && !busy {

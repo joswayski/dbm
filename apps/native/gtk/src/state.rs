@@ -833,6 +833,10 @@ pub struct State {
     pub toggled_nodes: HashSet<(Uuid, String)>,
     pub tabs: Vec<Tab>,
     pub active_tab: Option<u64>,
+    /// The query tab whose editor takes the keyboard at the next render: a
+    /// tab that was just opened or switched to, so typing and Ctrl+Enter
+    /// work without clicking into the editor first.
+    pub focus_editor: Option<u64>,
     pub active_profile: Option<Uuid>,
     pub query_results: HashMap<u64, QueryResponse>,
     pub histories: HashMap<(Uuid, String), Vec<QueryHistoryEntry>>,
@@ -878,6 +882,7 @@ impl State {
             toggled_nodes: HashSet::new(),
             tabs: vec![],
             active_tab: None,
+            focus_editor: None,
             active_profile: None,
             query_results: HashMap::new(),
             histories: HashMap::new(),
@@ -1431,7 +1436,8 @@ impl State {
             return;
         }
         if let Some(tab) = self.tabs.iter().rev().find(|t| t.profile_id == profile) {
-            self.active_tab = Some(tab.id);
+            let id = tab.id;
+            self.select_tab(id);
             return;
         }
         self.open_query(profile, true);
@@ -1441,11 +1447,25 @@ impl State {
     pub fn select_connection(&mut self, id: Uuid) {
         if self.workspaces.contains_key(&id) {
             self.activate_profile(id);
+            // Back to typing, also when its query tab was already showing.
+            self.focus_active_editor();
         } else {
             self.active_profile = Some(id);
             if !self.has_label(id, &["Connecting", "Switching database"]) {
                 self.send(Command::Connect(id), "Connecting", Some(id));
             }
+        }
+    }
+
+    /// Hands the keyboard to the active query tab's editor.
+    pub fn focus_active_editor(&mut self) {
+        let active = self.active_tab;
+        if self
+            .tabs
+            .iter()
+            .any(|t| Some(t.id) == active && t.kind == TabKind::Query)
+        {
+            self.focus_editor = active;
         }
     }
 
@@ -1472,6 +1492,7 @@ impl State {
             collapsed: false,
         });
         if activate {
+            self.focus_editor = Some(id);
             self.active_tab = Some(id);
             self.active_profile = Some(profile);
         }
@@ -1528,8 +1549,44 @@ impl State {
     pub fn select_tab(&mut self, tab_id: u64) {
         if let Some(tab) = self.tabs.iter_mut().find(|t| t.id == tab_id) {
             tab.collapsed = false;
+            // Only on a switch: clicking the active tab (the first half of a
+            // double-click to rename it) leaves the keyboard where it is.
+            if self.active_tab != Some(tab_id) && tab.kind == TabKind::Query {
+                self.focus_editor = Some(tab_id);
+            }
             self.active_tab = Some(tab_id);
             self.active_profile = Some(tab.profile_id);
+        }
+    }
+
+    /// Ctrl+Tab and Ctrl+Shift+Tab: the next or previous tab, wrapping.
+    pub fn cycle_tab(&mut self, backwards: bool) {
+        let count = self.tabs.len();
+        let Some(index) = self.tabs.iter().position(|t| Some(t.id) == self.active_tab) else {
+            return;
+        };
+        let next = if backwards {
+            (index + count - 1) % count
+        } else {
+            (index + 1) % count
+        };
+        let id = self.tabs[next].id;
+        self.select_tab(id);
+    }
+
+    /// F5 and Ctrl+R: what the tab's Refresh button does. A table reloads
+    /// its page; a query tab re-runs the statement it last ran.
+    pub fn refresh_tab(&mut self, tab_id: u64) {
+        let Some(tab) = self.tab(tab_id) else {
+            return;
+        };
+        match &tab.kind {
+            TabKind::Table { .. } => self.load_table(tab_id),
+            TabKind::Query => {
+                if let Some(sql) = tab.last_executed.clone() {
+                    self.run_query(tab_id, sql, true, false);
+                }
+            }
         }
     }
 
@@ -2437,6 +2494,49 @@ pub mod tests {
         app.mark_stale(id);
         let state = &app.tables[&tab];
         assert!(!state.loading && state.in_flight == 0 && state.requested.is_none());
+    }
+
+    #[test]
+    fn tab_shortcuts_cycle_refresh_and_hand_the_keyboard_to_the_editor() {
+        let mut app = app();
+        let id = Uuid::from_u128(1);
+        app.open_query(id, true);
+        let query = app.active_tab.unwrap();
+        assert_eq!(
+            app.focus_editor.take(),
+            Some(query),
+            "a new tab is typed in"
+        );
+        app.open_table(id, "public".into(), "customers".into());
+        let table = app.active_tab.unwrap();
+        app.pending_requests.clear();
+
+        // Ctrl+Tab wraps in both directions; only a query tab's editor
+        // takes the keyboard, and only when the tab changes.
+        app.cycle_tab(false);
+        assert_eq!(
+            (app.active_tab, app.focus_editor.take()),
+            (Some(query), Some(query))
+        );
+        app.select_tab(query);
+        assert_eq!(app.focus_editor, None, "the first click of a rename");
+        app.cycle_tab(true);
+        assert_eq!((app.active_tab, app.focus_editor), (Some(table), None));
+
+        // F5 reloads a table, and re-runs a query only once one has run.
+        app.refresh_tab(table);
+        let labels = |app: &State| {
+            let mut labels: Vec<_> = app.pending_requests.values().map(|r| r.label).collect();
+            labels.extend(app.queued.iter().map(|q| q.meta.label));
+            labels
+        };
+        assert_eq!(labels(&app), ["Loading rows"]);
+        app.pending_requests.clear();
+        app.refresh_tab(query);
+        assert!(labels(&app).is_empty());
+        app.tabs[0].last_executed = Some("SELECT 1".into());
+        app.refresh_tab(query);
+        assert_eq!(labels(&app), ["Refreshing query"]);
     }
 
     #[test]

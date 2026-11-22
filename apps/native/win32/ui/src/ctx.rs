@@ -45,6 +45,9 @@ pub struct Sense {
     pub focusable: bool,
     /// Keeps the arrow cursor although it is clickable (grid rows).
     pub plain_cursor: bool,
+    /// Reads the keyboard itself while focused (a text field), so Enter and
+    /// Space reach it instead of clicking it.
+    pub takes_keys: bool,
 }
 
 impl Sense {
@@ -53,18 +56,21 @@ impl Sense {
         drag: false,
         focusable: false,
         plain_cursor: false,
+        takes_keys: false,
     };
     pub const CLICK: Sense = Sense {
         click: true,
         drag: false,
         focusable: true,
         plain_cursor: false,
+        takes_keys: false,
     };
     pub const DRAG: Sense = Sense {
         click: true,
         drag: true,
         focusable: false,
         plain_cursor: false,
+        takes_keys: false,
     };
 
     pub fn plain(mut self) -> Sense {
@@ -241,6 +247,12 @@ pub struct Context {
     focus: Option<Id>,
     focus_at_start: Option<Id>,
     focus_claimed: bool,
+    /// Where the topmost dialog's controls start in `focusables`. Tab stays
+    /// inside it and focus outside it is dropped.
+    focus_scope: Option<usize>,
+    focus_scope_last_frame: bool,
+    /// What had focus when a dialog opened; it gets focus back on close.
+    focus_before_scope: Option<Id>,
     /// Lost focus last frame without the widget reporting it then.
     lost_pending: Option<Id>,
     lost_reported: Option<Id>,
@@ -292,6 +304,9 @@ impl Context {
             focus: None,
             focus_at_start: None,
             focus_claimed: false,
+            focus_scope: None,
+            focus_scope_last_frame: false,
+            focus_before_scope: None,
             lost_pending: None,
             lost_reported: None,
             focus_rect: None,
@@ -378,6 +393,7 @@ impl Context {
         self.focus_claimed = false;
         self.lost_reported = None;
         self.focusables.clear();
+        self.focus_scope = None;
         self.focus_rect = None;
         self.popup_area = self.popup_area_next.take().or(self.popup_area);
         if let Some((button, pos, _)) = self.pressed {
@@ -442,22 +458,48 @@ impl Context {
             let backwards =
                 matches!(self.events[index], Event::Key { modifiers, .. } if modifiers.shift);
             self.events.remove(index);
-            if !self.focusables.is_empty() {
+            // With a dialog open, Tab stays among its controls.
+            let scope = self.focus_scope.unwrap_or(0).min(self.focusables.len());
+            let focusables = &self.focusables[scope..];
+            if !focusables.is_empty() {
                 let current = self
                     .focus
-                    .and_then(|f| self.focusables.iter().position(|x| *x == f));
-                let n = self.focusables.len();
+                    .and_then(|f| focusables.iter().position(|x| *x == f));
+                let n = focusables.len();
                 let next = match (current, backwards) {
                     (Some(i), false) => (i + 1) % n,
                     (Some(i), true) => (i + n - 1) % n,
                     (None, false) => 0,
                     (None, true) => n - 1,
                 };
-                self.focus = Some(self.focusables[next]);
+                self.focus = Some(focusables[next]);
                 self.keyboard_nav = true;
                 self.unstable = true;
             }
         }
+        match self.focus_scope {
+            // A control behind the dialog does not keep the keyboard.
+            Some(scope) => {
+                let scope = scope.min(self.focusables.len());
+                if self
+                    .focus
+                    .is_some_and(|f| !self.focusables[scope..].contains(&f))
+                {
+                    self.focus = None;
+                }
+            }
+            // The dialog closed: the keyboard returns to where it was.
+            None if self.focus_scope_last_frame => {
+                let before = self.focus_before_scope.take();
+                // Unless something drawn this frame already took it.
+                if self.focus.is_none_or(|f| !self.focusables.contains(&f)) {
+                    self.focus = before.filter(|b| self.focusables.contains(b));
+                    self.unstable = true;
+                }
+            }
+            None => {}
+        }
+        self.focus_scope_last_frame = self.focus_scope.is_some();
         // A press that no widget claimed focus with clears it.
         if self.pressed.is_some_and(|(b, _, _)| b == Button::Primary)
             && !self.focus_claimed
@@ -631,6 +673,28 @@ impl Context {
     pub fn request_focus(&mut self, id: Id) {
         self.focus = Some(id);
         self.focus_claimed = true;
+    }
+
+    /// Starts a dialog's keyboard scope: the focusable controls drawn from
+    /// here on are the only ones Tab reaches, and a control drawn earlier
+    /// loses focus until the dialog closes. A later call (a dialog over a
+    /// dialog) replaces the scope.
+    pub fn begin_focus_scope(&mut self) {
+        if self.focus_scope.is_none() && !self.focus_scope_last_frame {
+            self.focus_before_scope = self.focus;
+        }
+        self.focus_scope = Some(self.focusables.len());
+    }
+
+    /// Takes this frame's key and text events so that what is drawn next
+    /// (the window behind a dialog) does not see them. Give them back with
+    /// [`Self::restore_keys`].
+    pub fn withhold_keys(&mut self) -> Vec<Event> {
+        std::mem::take(&mut self.events)
+    }
+
+    pub fn restore_keys(&mut self, events: Vec<Event>) {
+        self.events.splice(0..0, events);
     }
 
     pub fn surrender_focus(&mut self, id: Id) {
@@ -848,6 +912,7 @@ impl Context {
         if r.has_focus
             && enabled
             && sense.focusable
+            && !sense.takes_keys
             && (self.consume_key(Modifiers::NONE, Key::Enter)
                 || self.consume_key(Modifiers::NONE, Key::Space))
         {
@@ -931,6 +996,10 @@ impl Context {
     }
 
     // ---- popups -----------------------------------------------------------
+
+    pub fn any_popup_open(&self) -> bool {
+        self.open_popup.is_some()
+    }
 
     pub fn is_popup_open(&self, id: Id) -> bool {
         self.open_popup == Some(id)

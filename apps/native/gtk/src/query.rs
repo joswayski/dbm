@@ -913,7 +913,7 @@ impl QueryView {
 
 /// What Ctrl+Enter runs in a tab: its selection or the statement under the
 /// cursor.
-fn target(state: &State, tab_id: u64) -> Option<dbm_core::sql_text::ExecutionTarget> {
+pub fn target(state: &State, tab_id: u64) -> Option<dbm_core::sql_text::ExecutionTarget> {
     let tab = state.tab(tab_id)?;
     execution_target(
         state.engine(tab.profile_id),

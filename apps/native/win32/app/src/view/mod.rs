@@ -8,6 +8,8 @@ pub mod grid;
 mod query;
 mod sidebar;
 mod table;
+#[cfg(test)]
+mod tests;
 
 use dbm_ui::input::{Key, Modifiers};
 use dbm_ui::theme;
@@ -69,7 +71,9 @@ impl View {
         if !app.pending_requests.is_empty() {
             ui.ctx.request_repaint_after(0.25);
         }
-        shortcuts(app, ui);
+        let save = shortcuts(app, ui);
+        // A dialog owns the keyboard: nothing behind it sees keys or text.
+        let withheld = app.modal_open().then(|| ui.ctx.withhold_keys());
         ui.painter().rect_filled(screen, 0.0, theme::CHROME);
         let sidebar_w = if app.sidebar_collapsed {
             48.0
@@ -93,6 +97,16 @@ impl View {
         }
         ui.painter().rect_filled(content, 0.0, theme::BG);
         app.content(ui, content);
+        // After the tab is drawn, so an edit still being typed is staged
+        // and saved with the rest.
+        if let Some(tab) = save
+            && app.tables.get(&tab).is_some_and(|t| !t.pending.is_empty())
+        {
+            app.save_changes(tab);
+        }
+        if let Some(events) = withheld {
+            ui.ctx.restore_keys(events);
+        }
         app.dialogs(ui);
         toast(app, ui);
         self.persist();
@@ -120,11 +134,43 @@ impl View {
     }
 }
 
-/// Ctrl+N, Ctrl+T and Ctrl+W, taken before any field sees them so Ctrl+W
-/// closes the tab even while the editor has focus.
-fn shortcuts(app: &mut Workbench, ui: &mut Ui) {
+/// The window's shortcuts, taken before any field sees them so Ctrl+W
+/// closes the tab even while the editor has focus: Ctrl+N, Ctrl+T, Ctrl+W,
+/// Ctrl+Tab and Ctrl+Shift+Tab, F5 or Ctrl+R to refresh, and Ctrl+S.
+/// Returns the tab whose staged changes Ctrl+S saves.
+fn shortcuts(app: &mut Workbench, ui: &mut Ui) -> Option<u64> {
     if app.modal_open() {
-        return;
+        return None;
+    }
+    let control_shift = Modifiers {
+        shift: true,
+        ..Modifiers::COMMAND
+    };
+    if ui.ctx.consume_key(Modifiers::COMMAND, Key::Tab) {
+        app.cycle_tab(false);
+    }
+    if ui.ctx.consume_key(control_shift, Key::Tab) {
+        app.cycle_tab(true);
+    }
+    if (ui.ctx.consume_key(Modifiers::NONE, Key::F5)
+        || ui.ctx.consume_key(Modifiers::COMMAND, Key::R))
+        && let Some(tab) = app.active_tab
+    {
+        app.refresh_tab(tab);
+    }
+    let mut save = None;
+    if ui.ctx.consume_key(Modifiers::COMMAND, Key::S)
+        && let Some(tab) = app.active_tab
+        && let Some(table) = app.tables.get(&tab)
+    {
+        // A cell or inspector field still being edited gives up the
+        // keyboard, which stages what was typed.
+        if !table.drafts.is_empty()
+            && let Some(focused) = ui.ctx.focused()
+        {
+            ui.ctx.surrender_focus(focused);
+        }
+        save = Some(tab);
     }
     if ui.ctx.consume_key(Modifiers::COMMAND, Key::N) {
         app.profile_form = Some(ProfileForm::fresh());
@@ -141,6 +187,7 @@ fn shortcuts(app: &mut Workbench, ui: &mut Ui) {
     {
         app.close_tab(tab);
     }
+    save
 }
 
 fn toast(app: &mut Workbench, ui: &mut Ui) {

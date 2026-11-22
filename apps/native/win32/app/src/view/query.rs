@@ -122,6 +122,8 @@ impl Workbench {
                 .clicked;
             if clicked {
                 run = target.as_ref().map(|t| (t.sql.clone(), false));
+                // The click took the keyboard from the editor; give it back.
+                self.focus_editor = Some(tab_id);
             }
             let refresh_label = if running && self.pending_label(tab_id) == Some("Refreshing query")
             {
@@ -142,6 +144,7 @@ impl Workbench {
                 .on_any_hover_text(tip);
             if refresh.clicked {
                 run = tab.last_executed.clone().map(|sql| (sql, true));
+                self.focus_editor = Some(tab_id);
             }
             let left = row.available_rect();
             let mut l = row.child(left, Dir::Right);
@@ -228,10 +231,11 @@ impl Workbench {
             && let Some(t) = self.tabs.iter_mut().find(|t| t.id == tab_id)
         {
             t.selection = (sql.len(), sql.len());
-            t.sql = sql;
+            // One undo step, so Ctrl+Z brings back what the pick replaced.
             let mut st = EditState::load(ui, Id::new(("sql-editor", tab_id))).unwrap_or_default();
-            st.set_caret(t.sql.len());
+            st.replace_all(&mut t.sql, sql);
             st.store(ui, Id::new(("sql-editor", tab_id)));
+            self.focus_editor = Some(tab_id);
         }
         let card_inner = card.shrink(1.0);
         let (hint, editor_rect) = card_inner.split_bottom(28.0);
@@ -360,8 +364,16 @@ impl Workbench {
         engine: DatabaseEngine,
     ) -> Option<String> {
         let editor_id = Id::new(("sql-editor", tab_id));
+        if self.focus_editor == Some(tab_id) && !self.modal_open() {
+            self.focus_editor = None;
+            ui.ctx.request_focus(editor_id);
+        }
         let focused = ui.ctx.has_focus(editor_id);
-        let run_pressed = focused && ui.ctx.consume_key(Modifiers::COMMAND, Key::Enter);
+        // Also with nothing focused (after a click on a button or the grid),
+        // so Ctrl+Enter never silently does nothing on a query tab.
+        let run_pressed = (focused || ui.ctx.focused().is_none())
+            && !self.modal_open()
+            && ui.ctx.consume_key(Modifiers::COMMAND, Key::Enter);
         let mut completion = self
             .completion
             .take()
