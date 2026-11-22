@@ -10,7 +10,7 @@ use dbm_core::cell_values::{numeric_column, parse_cell_input};
 use dbm_core::models::{FilterCondition, FilterOperator, OrderSpec, TablePage, TablePageRequest};
 use dbm_core::sql_text::{csv_document, display_value};
 use dbm_ui::theme;
-use serde_json::Value;
+use serde_json::{Value, json};
 use uuid::Uuid;
 
 use crate::messages::Message;
@@ -138,6 +138,9 @@ pub struct TableState {
     pub drafts: HashMap<(usize, usize), String>,
     pub editing: Option<(usize, usize)>,
     pub focus_editor: bool,
+    /// The grid scrolls back to its first row when it next draws: a
+    /// different page, sort or filter just loaded.
+    pub scroll_top: bool,
     pub inspector_open: bool,
     pub collapsed_columns: BTreeSet<usize>,
     pub preview: Option<PreviewCard>,
@@ -168,6 +171,7 @@ impl Default for TableState {
             drafts: HashMap::new(),
             editing: None,
             focus_editor: false,
+            scroll_top: false,
             inspector_open: true,
             collapsed_columns: BTreeSet::new(),
             preview: None,
@@ -196,6 +200,16 @@ impl TableState {
             && let Some(first) = page.metadata.columns.first()
         {
             self.filters.push(FilterDraft::new(&first.name));
+        }
+        // Another page, sort or filter starts at its first row; a refresh
+        // of the same rows keeps the place.
+        let rows = |r: &TablePageRequest| (r.offset, r.limit, json!(r.filters), json!(r.order_by));
+        if self
+            .loaded
+            .as_ref()
+            .is_some_and(|old| rows(old) != rows(&request))
+        {
+            self.scroll_top = true;
         }
         self.loaded = Some(request);
         self.selected.clear();
@@ -497,7 +511,6 @@ pub fn rows_label(count: usize, which: &str) -> String {
 pub mod tests {
     use super::*;
     use dbm_core::demo::table_page as demo_page;
-    use serde_json::json;
 
     pub fn page() -> TablePage {
         demo_page(&TablePageRequest {
@@ -551,6 +564,23 @@ pub mod tests {
             large_export_message(None),
             "This export may contain more than 100,000 rows and take a while. Continue?"
         );
+    }
+
+    #[test]
+    fn a_new_page_or_sort_starts_at_the_top_and_a_refresh_keeps_its_place() {
+        let mut s = state();
+        assert!(!s.scroll_top, "the first load has nowhere to scroll from");
+        let same = s.request(Uuid::nil(), "public", "customers");
+        s.loaded(page(), same);
+        assert!(!s.scroll_top, "Refresh");
+        s.page_index = 1;
+        let next = s.request(Uuid::nil(), "public", "customers");
+        s.loaded(page(), next.clone());
+        assert!(std::mem::take(&mut s.scroll_top), "Next page");
+        s.sort_by("email".into());
+        let sorted = s.request(Uuid::nil(), "public", "customers");
+        s.loaded(page(), sorted);
+        assert!(s.scroll_top, "Sort");
     }
 
     #[test]

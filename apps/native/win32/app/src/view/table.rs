@@ -1311,6 +1311,14 @@ fn data_grid(
         .collect();
     let modifiers = ui.ctx.modifiers();
     let events = RefCell::new(GridEvents::default());
+    if std::mem::take(&mut state.scroll_top) {
+        let scroll = cx.id("grid").with("scroll");
+        let x = ui
+            .ctx
+            .data::<dbm_ui::scroll::ScrollState>(scroll)
+            .map_or(0.0, |state| state.offset.x);
+        ScrollArea::set_offset(ui, scroll, vec2(x, 0.0));
+    }
     let mut drafts = std::mem::take(&mut state.drafts);
     let mut focus_editor = state.focus_editor;
     // The cell whose editor took Escape this frame: its edit is dropped.

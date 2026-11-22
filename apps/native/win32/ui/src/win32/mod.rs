@@ -696,7 +696,17 @@ unsafe fn handle(s: &mut State, msg: u32, wp: WPARAM, lp: LPARAM) -> Option<LRES
                     r.bottom - r.top,
                     SWP_NOZORDER | SWP_NOACTIVATE,
                 );
-                s.dirty = true;
+                // SetWindowPos sends WM_SIZE while this handler holds the
+                // window state, so that message never reaches the WM_SIZE
+                // arm: take the new client size here.
+                let mut client = RECT::default();
+                let _ = GetClientRect(s.hwnd, &mut client);
+                let (w, h) = (client.right - client.left, client.bottom - client.top);
+                if w > 0 && h > 0 {
+                    s.size_px = (w as u32, h as u32);
+                    s.renderer.resize(w as u32, h as u32);
+                }
+                s.frame();
                 Some(LRESULT(0))
             }
             WM_GETMINMAXINFO => {
@@ -817,6 +827,10 @@ unsafe fn handle(s: &mut State, msg: u32, wp: WPARAM, lp: LPARAM) -> Option<LRES
             }
             WM_KILLFOCUS => {
                 s.push(Event::FocusLost);
+                Some(LRESULT(0))
+            }
+            WM_SETFOCUS => {
+                s.push(Event::FocusGained);
                 Some(LRESULT(0))
             }
             WM_CLOSE => {

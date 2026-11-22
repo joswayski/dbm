@@ -23,6 +23,9 @@ pub struct View {
     pub app: Workbench,
     pub store: Store,
     saved: (bool, f32),
+    /// The tabs drawn last frame; a closed tab's editor memory (its text's
+    /// undo history) is freed.
+    tab_ids: Vec<u64>,
 }
 
 impl View {
@@ -31,6 +34,7 @@ impl View {
             app,
             store,
             saved: (false, 260.0),
+            tab_ids: Vec::new(),
         };
         view.app.sidebar_collapsed = view.store.get(store::SIDEBAR_COLLAPSED) == Some("true");
         if let Some(w) = view
@@ -109,6 +113,18 @@ impl View {
         }
         app.dialogs(ui);
         toast(app, ui);
+        if !app
+            .tabs
+            .iter()
+            .map(|t| t.id)
+            .eq(self.tab_ids.iter().copied())
+        {
+            let open: Vec<u64> = app.tabs.iter().map(|t| t.id).collect();
+            for closed in self.tab_ids.iter().filter(|id| !open.contains(id)) {
+                ui.ctx.remove_data(dbm_ui::Id::new(("sql-editor", *closed)));
+            }
+            self.tab_ids = open;
+        }
         self.persist();
     }
 

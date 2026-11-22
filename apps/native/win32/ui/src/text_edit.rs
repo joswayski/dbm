@@ -3,6 +3,8 @@
 //! spans for syntax highlighting. Offsets are UTF-8 byte offsets on char
 //! boundaries.
 
+use std::rc::Rc;
+
 use crate::a11y::{Node, Role};
 use crate::ctx::{CursorIcon, Id, Response, Sense};
 use crate::geom::{Color32, Pos2, Rect, Stroke, Vec2, pos2, vec2};
@@ -16,8 +18,10 @@ pub struct EditState {
     /// (anchor, caret) byte offsets.
     pub selection: (usize, usize),
     pub scroll: Vec2,
-    undo: Vec<(String, (usize, usize))>,
-    redo: Vec<(String, (usize, usize))>,
+    /// Earlier texts, shared: the state is copied out of the toolkit's
+    /// memory on every frame, which must not copy every undo step's text.
+    undo: Vec<(Rc<str>, (usize, usize))>,
+    redo: Vec<(Rc<str>, (usize, usize))>,
     /// The caret's x while moving up and down, so it doesn't drift.
     goal_x: Option<f32>,
     drag_anchor: Option<usize>,
@@ -412,9 +416,18 @@ impl<'t> TextEdit<'t> {
         let origin = pos2(inner.left() - st.scroll.x, inner.top() - st.scroll.y);
         // Paint.
         let enabled = ui.is_enabled();
+        let window_focused = ui.ctx.window_focused();
         if self.frame {
             let border = if focused { ACCENT } else { BORDER };
             let fill = self.background.unwrap_or(FIELD);
+            // The Graphite focus ring: 3 px of 18% accent around the border.
+            if focused {
+                ui.painter().rect_stroke(
+                    rect.expand(1.5),
+                    7.5,
+                    Stroke::new(3.0, ACCENT.gamma_multiply(0.18)),
+                );
+            }
             ui.painter().rect(rect, 6.0, fill, Stroke::new(1.0, border));
         } else if let Some(bg) = self.background {
             ui.painter().rect_filled(rect, 0.0, bg);
@@ -502,8 +515,9 @@ impl<'t> TextEdit<'t> {
                     at = next;
                 }
             }
-            // Caret: blinks every half second, solid while typing.
-            if focused && editable {
+            // Caret: blinks every half second, solid while typing; hidden
+            // while another window has the keyboard.
+            if focused && editable && window_focused {
                 let phase = ((time - st.blink_from) / 0.5) as i64;
                 if phase % 2 == 0 {
                     let x = (origin.x + cx).round();
@@ -517,8 +531,11 @@ impl<'t> TextEdit<'t> {
             }
         }
         if focused && editable {
-            let next = 0.5 - ((time - st.blink_from) % 0.5);
-            ui.ctx.request_repaint_after(next);
+            // No blink frames in a background window: it stays idle.
+            if ui.ctx.window_focused() {
+                let next = 0.5 - ((time - st.blink_from) % 0.5);
+                ui.ctx.request_repaint_after(next);
+            }
             ui.ctx.set_ime_rect(Rect::from_min_size(
                 pos2(origin.x + cx, origin.y + cl as f32 * lh),
                 vec2(1.0, lh),
@@ -686,7 +703,10 @@ impl<'t> TextEdit<'t> {
                     st.undo.pop()
                 };
                 if let Some((t, sel)) = from {
-                    let current = (std::mem::replace(text, t), st.selection);
+                    let current = (
+                        Rc::from(std::mem::replace(text, t.to_string())),
+                        st.selection,
+                    );
                     if m.shift {
                         st.undo.push(current)
                     } else {
@@ -698,7 +718,10 @@ impl<'t> TextEdit<'t> {
             }
             Key::Y if m.ctrl && editable => {
                 if let Some((t, sel)) = st.redo.pop() {
-                    st.undo.push((std::mem::replace(text, t), st.selection));
+                    st.undo.push((
+                        Rc::from(std::mem::replace(text, t.to_string())),
+                        st.selection,
+                    ));
                     st.selection = sel;
                     return KeyResult::Handled(true);
                 }
@@ -869,12 +892,18 @@ fn selected(text: &str, sel: (usize, usize)) -> &str {
 }
 
 fn push_undo(st: &mut EditState, text: &str) {
-    st.undo.push((text.to_owned(), st.selection));
-    if st.undo.len() > 200 {
-        st.undo.remove(0);
+    st.undo.push((Rc::from(text), st.selection));
+    // At most 200 steps and 16 MiB of text, so a long script's history
+    // stays bounded; the newest step always stays.
+    let mut bytes: usize = st.undo.iter().map(|(text, _)| text.len()).sum();
+    while st.undo.len() > 1 && (st.undo.len() > UNDO_STEPS || bytes > UNDO_BYTES) {
+        bytes -= st.undo.remove(0).0.len();
     }
     st.redo.clear();
 }
+
+const UNDO_STEPS: usize = 200;
+const UNDO_BYTES: usize = 16 << 20;
 
 fn insert(text: &mut String, st: &mut EditState, s: &str) {
     // Typing coalesces into one undo step per word.
@@ -1083,9 +1112,31 @@ mod tests {
         replace_selection(&mut text, &mut st, "x");
         assert_eq!(text, "x");
         let (t, sel) = st.undo.pop().unwrap();
-        st.redo
-            .push((std::mem::replace(&mut text, t), st.selection));
+        st.redo.push((
+            Rc::from(std::mem::replace(&mut text, t.to_string())),
+            st.selection,
+        ));
         st.selection = sel;
         assert_eq!((text.as_str(), st.selection), ("abc", (3, 3)));
+    }
+
+    #[test]
+    fn undo_history_is_bounded_by_steps_and_by_bytes() {
+        let mut st = EditState::default();
+        for _ in 0..UNDO_STEPS + 50 {
+            push_undo(&mut st, "short");
+        }
+        assert_eq!(st.undo.len(), UNDO_STEPS);
+        // A 3 MiB script keeps five steps of history, not two hundred.
+        let script = "x".repeat(3 << 20);
+        let mut st = EditState::default();
+        for _ in 0..40 {
+            push_undo(&mut st, &script);
+        }
+        assert_eq!(st.undo.len(), 5);
+        // One step larger than the whole budget is still undoable.
+        let mut st = EditState::default();
+        push_undo(&mut st, &"x".repeat(UNDO_BYTES + 1));
+        assert_eq!(st.undo.len(), 1);
     }
 }

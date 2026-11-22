@@ -100,6 +100,8 @@ pub enum Event {
     Text(String),
     /// The window lost keyboard focus.
     FocusLost,
+    /// The window has keyboard focus again.
+    FocusGained,
     /// The person asked to close the window.
     CloseRequested,
     A11y(A11yAction),

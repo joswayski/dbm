@@ -247,6 +247,8 @@ pub struct Context {
     focus: Option<Id>,
     focus_at_start: Option<Id>,
     focus_claimed: bool,
+    /// The window has the keyboard; carets blink only while it does.
+    window_focused: bool,
     /// Where the topmost dialog's controls start in `focusables`. Tab stays
     /// inside it and focus outside it is dropped.
     focus_scope: Option<usize>,
@@ -304,6 +306,7 @@ impl Context {
             focus: None,
             focus_at_start: None,
             focus_claimed: false,
+            window_focused: true,
             focus_scope: None,
             focus_scope_last_frame: false,
             focus_before_scope: None,
@@ -373,7 +376,9 @@ impl Context {
                 Event::FocusLost => {
                     self.button_down = [false; 3];
                     self.active = None;
+                    self.window_focused = false;
                 }
+                Event::FocusGained => self.window_focused = true,
                 Event::CloseRequested => self.close_requested = true,
                 Event::A11y(action) => {
                     if let A11yAction::Focus(id) = &action {
@@ -666,6 +671,18 @@ impl Context {
         self.focus_at_start
     }
 
+    /// Whether the window has the keyboard. A focused field keeps its focus
+    /// while it does not, but stops blinking its caret.
+    pub fn window_focused(&self) -> bool {
+        self.window_focused
+    }
+
+    /// Whether `layer` is on top under the pointer: nothing above it (a
+    /// popup or a dialog) covers that spot.
+    pub fn layer_on_top(&self, layer: Layer) -> bool {
+        self.top_layer.is_none_or(|top| layer >= top)
+    }
+
     pub fn has_focus(&self, id: Id) -> bool {
         self.focus == Some(id)
     }
@@ -834,7 +851,7 @@ impl Context {
             });
         }
         let contains = self.pointer.is_some_and(|p| visible.contains(p));
-        let layer_ok = self.top_layer.is_none_or(|top| layer >= top);
+        let layer_ok = self.layer_on_top(layer);
         let mut hovered = contains
             && layer_ok
             && if sense.interactive() {

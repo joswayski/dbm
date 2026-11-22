@@ -452,6 +452,9 @@ pub struct TableState {
     pub pending: BTreeMap<usize, PendingRow>,
     /// The cell being edited in the grid.
     pub editing: Option<(usize, usize)>,
+    /// Counts loads of a different page, sort or filter; the grid scrolls
+    /// back to its first row when it changes. A refresh keeps its place.
+    pub scroll_top: u64,
     pub inspector_open: bool,
     /// Column indexes collapsed to a narrow strip.
     pub collapsed_columns: BTreeSet<usize>,
@@ -479,6 +482,7 @@ impl Default for TableState {
             selected: BTreeSet::new(),
             pending: BTreeMap::new(),
             editing: None,
+            scroll_top: 0,
             inspector_open: true,
             collapsed_columns: BTreeSet::new(),
             version: 0,
@@ -508,6 +512,21 @@ impl TableState {
             && let Some(first) = page.metadata.columns.first()
         {
             self.filters.push(FilterDraft::new(&first.name));
+        }
+        let rows = |r: &TablePageRequest| {
+            (
+                r.offset,
+                r.limit,
+                serde_json::json!(r.filters),
+                serde_json::json!(r.order_by),
+            )
+        };
+        if self
+            .loaded
+            .as_ref()
+            .is_some_and(|old| rows(old) != rows(&request))
+        {
+            self.scroll_top += 1;
         }
         self.loaded = Some(request);
         self.selected.clear();
@@ -2494,6 +2513,27 @@ pub mod tests {
         app.mark_stale(id);
         let state = &app.tables[&tab];
         assert!(!state.loading && state.in_flight == 0 && state.requested.is_none());
+    }
+
+    #[test]
+    fn a_new_page_or_sort_starts_at_the_top_and_a_refresh_keeps_its_place() {
+        let mut table = TableState::default();
+        let first = table.request(Uuid::nil(), "public", "customers");
+        table.loaded(page(), first.clone());
+        table.loaded(page(), first);
+        assert_eq!(table.scroll_top, 0, "the first load, then Refresh");
+        table.page_index = 1;
+        let next = table.request(Uuid::nil(), "public", "customers");
+        table.loaded(page(), next);
+        assert_eq!(table.scroll_top, 1, "Next page");
+        table.order = Some(OrderSpec {
+            column: "email".into(),
+            descending: false,
+        });
+        table.page_index = 0;
+        let sorted = table.request(Uuid::nil(), "public", "customers");
+        table.loaded(page(), sorted);
+        assert_eq!(table.scroll_top, 2, "Sort");
     }
 
     #[test]

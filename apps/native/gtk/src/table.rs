@@ -75,6 +75,8 @@ pub struct TableView {
     columns: RefCell<Vec<gtk::ColumnViewColumn>>,
     column_key: RefCell<String>,
     page_key: Cell<usize>,
+    /// The table's `scroll_top` count this grid last scrolled up for.
+    scroll_top: Cell<u64>,
     cells: Cells<TableCell>,
     style_key: RefCell<String>,
     refreshing: gtk::Box,
@@ -385,6 +387,7 @@ impl TableView {
             columns: RefCell::new(Vec::new()),
             column_key: RefCell::new(String::new()),
             page_key: Cell::new(0),
+            scroll_top: Cell::new(0),
             cells: Rc::default(),
             style_key: RefCell::new(String::new()),
             refreshing: dim,
@@ -1087,6 +1090,13 @@ impl TableView {
         if self.page_key.get() != page_key {
             self.page_key.set(page_key);
             fill(&self.store, page.rows.len());
+        }
+        // Another page, sort or filter starts at its first row.
+        // (The list keeps its own scroll anchor, so its adjustment cannot
+        // simply be reset here.)
+        if self.scroll_top.replace(table.scroll_top) != table.scroll_top && !page.rows.is_empty() {
+            self.view
+                .scroll_to(0, None, gtk::ListScrollFlags::NONE, None);
         }
         if page.rows.is_empty() {
             self.show("empty");

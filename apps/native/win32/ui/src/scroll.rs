@@ -164,8 +164,9 @@ impl ScrollArea {
             outer
         };
         state.viewport = viewport.size();
-        // Wheel: the innermost area under the pointer takes it.
-        if ui.rect_contains_pointer(viewport) {
+        // Wheel: the innermost area under the pointer takes it, unless a
+        // popup or dialog covers it there.
+        if ui.rect_contains_pointer(viewport) && ui.ctx.layer_on_top(ui.layer()) {
             let can_h = self.horizontal && state.content.x > viewport.width() + 0.5;
             let can_v = self.vertical && state.content.y > viewport.height() + 0.5;
             if can_h || can_v {
@@ -356,6 +357,55 @@ mod tests {
     use crate::paint::Layer;
     use crate::text::{Fonts, MonoMetrics};
     use crate::ui::Ui;
+
+    /// The wheel scrolls the list in a popup, not the area it covers.
+    #[test]
+    fn the_wheel_goes_to_the_area_on_top() {
+        use crate::ctx::Sense;
+        use crate::input::Event;
+        let mut ctx = Context::new(
+            Fonts::new(Box::new(MonoMetrics)),
+            Rc::new(NullPlatform::default()),
+        );
+        let screen = vec2(200.0, 100.0);
+        let area = Rect::from_min_size(pos2(0.0, 0.0), screen);
+        let mut frame = |events: Vec<Event>, popup: bool| {
+            let mut offsets = (0.0, 0.0);
+            for events in [events, Vec::new()] {
+                ctx.begin_frame(RawInput {
+                    events,
+                    screen,
+                    ..Default::default()
+                });
+                let mut ui = Ui::root(&mut ctx, area, Layer::Background);
+                let under = super::ScrollArea::vertical(Id::new("under")).show(&mut ui, |ui| {
+                    ui.allocate(vec2(100.0, 400.0));
+                });
+                offsets.0 = under.state.offset.y;
+                if popup {
+                    ui.area(Layer::Popup, area, |ui| {
+                        // A popup's background blocks what is under it.
+                        let _ = ui.interact(area, Id::new("popup"), Sense::HOVER);
+                        let over = super::ScrollArea::vertical(Id::new("over")).show(ui, |ui| {
+                            ui.allocate(vec2(100.0, 400.0));
+                        });
+                        offsets.1 = over.state.offset.y;
+                    });
+                }
+                ctx.end_frame();
+            }
+            offsets
+        };
+        let wheel = |y: f32| vec![Event::Wheel(vec2(0.0, y))];
+        frame(vec![Event::PointerMoved(pos2(50.0, 50.0))], false);
+        assert_eq!(frame(wheel(-30.0), false), (30.0, 0.0));
+        // The popup opens over it: the wheel now moves only the popup's list.
+        frame(Vec::new(), true);
+        assert_eq!(frame(wheel(-20.0), true), (30.0, 20.0));
+        // Closed again, the area underneath scrolls as before.
+        frame(Vec::new(), false);
+        assert_eq!(frame(wheel(-10.0), false), (40.0, 0.0));
+    }
 
     /// A scroll area shorter than the minimum thumb (a tiny first window)
     /// must lay out without panicking, on the first frame and the rerun.

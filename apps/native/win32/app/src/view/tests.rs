@@ -160,6 +160,19 @@ fn connecting_lands_in_the_editor_ready_to_type_and_run() {
 }
 
 #[test]
+fn closing_a_tab_frees_its_editor_history() {
+    use dbm_ui::text_edit::EditState;
+    let mut h = Harness::connected();
+    h.key(Modifiers::COMMAND, Key::T);
+    let editor = h.editor();
+    h.text("x");
+    assert!(h.ctx.data::<EditState>(editor).is_some());
+    h.key(Modifiers::COMMAND, Key::W);
+    assert_eq!(h.view.app.tabs.len(), 1);
+    assert!(h.ctx.data::<EditState>(editor).is_none());
+}
+
+#[test]
 fn enter_and_space_type_into_the_editor() {
     let mut h = Harness::connected();
     let before = h.sql();
