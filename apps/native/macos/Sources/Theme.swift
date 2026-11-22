@@ -93,23 +93,73 @@ class FlippedView: NSView {
     override var isFlipped: Bool { true }
 }
 
+/// Live display uses layer properties instead of `draw(_:)`, so a panel
+/// keeps no backing store: a window-sized panel's bitmap cost megabytes
+/// that its few fills never needed. `draw(_:)` still paints the same thing
+/// for snapshots (`cacheDisplay`), which do not render layers.
 class PanelView: NSView {
     var fill: NSColor? { didSet { needsDisplay = true } }
     var edges: Edges = [] { didSet { needsDisplay = true } }
-    var edgeColor = Graphite.border
+    var edgeColor = Graphite.border { didSet { needsDisplay = true } }
     var radius: CGFloat = 0 { didSet { needsDisplay = true } }
     var outline: NSColor? { didSet { needsDisplay = true } }
+    /// Hairline edges or an inset rounded fill, below every subview's layer.
+    private let backgroundLayer = CAShapeLayer()
 
     init(fill: NSColor?, edges: Edges = []) {
         self.fill = fill
         self.edges = edges
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
+        wantsLayer = true
+        layerContentsRedrawPolicy = .onSetNeedsDisplay
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     override var isFlipped: Bool { true }
+    override var wantsUpdateLayer: Bool { true }
+
+    override func updateLayer() {
+        guard let layer else { return }
+        // `draw(_:)` fills and strokes a path inset 0.5 pt. A 1 pt outline's
+        // outer edge is the bounds with a corner radius 0.5 pt larger, which
+        // the layer's own border draws; an unoutlined rounded fill keeps the
+        // inset path, drawn by the shape layer.
+        let insetFill = radius > 0 && outline == nil
+        layer.cornerRadius = radius > 0 && outline != nil ? radius + 0.5 : 0
+        layer.backgroundColor = insetFill ? nil : fill?.cgColor
+        layer.borderColor = outline?.cgColor
+        layer.borderWidth = radius > 0 && outline != nil ? 1 : 0
+        guard !edges.isEmpty || (insetFill && fill != nil) else {
+            backgroundLayer.removeFromSuperlayer()
+            return
+        }
+        if backgroundLayer.superlayer !== layer {
+            backgroundLayer.zPosition = -1
+            backgroundLayer.actions = ["path": NSNull(), "fillColor": NSNull(), "bounds": NSNull(), "position": NSNull()]
+            layer.addSublayer(backgroundLayer)
+        }
+        backgroundLayer.frame = layer.bounds
+        let path = CGMutablePath()
+        if insetFill, let fill {
+            backgroundLayer.fillColor = fill.cgColor
+            path.addRoundedRect(in: layer.bounds.insetBy(dx: 0.5, dy: 0.5), cornerWidth: radius, cornerHeight: radius)
+        } else {
+            backgroundLayer.fillColor = edgeColor.cgColor
+        }
+        // AppKit flips a flipped view's layer geometry, so y runs down here too.
+        if edges.contains(.top) { path.addRect(CGRect(x: 0, y: 0, width: bounds.width, height: 1)) }
+        if edges.contains(.bottom) { path.addRect(CGRect(x: 0, y: bounds.height - 1, width: bounds.width, height: 1)) }
+        if edges.contains(.left) { path.addRect(CGRect(x: 0, y: 0, width: 1, height: bounds.height)) }
+        if edges.contains(.right) { path.addRect(CGRect(x: bounds.width - 1, y: 0, width: 1, height: bounds.height)) }
+        backgroundLayer.path = path
+    }
+
+    override func layout() {
+        super.layout()
+        if backgroundLayer.superlayer != nil { needsDisplay = true }
+    }
 
     override func draw(_ dirtyRect: NSRect) {
         if radius > 0 {
