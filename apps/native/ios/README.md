@@ -37,7 +37,7 @@ device Rust library/project, archives a **Release** app, and uploads through
 App Store Connect. It needs Xcode 26, `APPLE_TEAM_ID`, `NOTARY_KEY_PATH` (the
 API `.p8` file), `NOTARY_KEY_ID`, `NOTARY_ISSUER`, and a unique increasing
 `BUILD_NUMBER` in `<run number>.<attempt>` form. `DBM_IOS_BUNDLE_ID` defaults to
-`app.dbm.ios`; keep it consistent with the registered Apple app. Release builds
+`se.anyba.app`; keep it consistent with the registered Apple app. Release builds
 ignore `DBM_DEMO`.
 
 The Mobile release workflow fetches those inputs from the same AWS signing

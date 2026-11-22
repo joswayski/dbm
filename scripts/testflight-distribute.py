@@ -11,7 +11,7 @@ group that does not already receive every build automatically, and submits it
 for beta app review when an external group (such as the public link) needs it.
 
 Environment: NOTARY_KEY_PATH (.p8), NOTARY_KEY_ID, NOTARY_ISSUER, BUILD_NUMBER,
-DBM_IOS_BUNDLE_ID (default app.dbm.ios), WHAT_TO_TEST (optional).
+DBM_IOS_BUNDLE_ID (default se.anyba.app), WHAT_TO_TEST (optional).
 Requires PyJWT with the cryptography backend.
 Adapted from joswayski/caper's tester distribution script.
 """
@@ -79,7 +79,7 @@ def must(result: tuple[int, dict], what: str) -> dict:
 
 
 def main() -> None:
-    bundle_id = os.environ.get("DBM_IOS_BUNDLE_ID", "app.dbm.ios")
+    bundle_id = os.environ.get("DBM_IOS_BUNDLE_ID", "se.anyba.app")
     build_number = os.environ["BUILD_NUMBER"]
     notes = os.environ.get("WHAT_TO_TEST", "").strip()[:4000]
 

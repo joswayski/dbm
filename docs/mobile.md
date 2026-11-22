@@ -14,7 +14,7 @@ The [mobile release on 7 October 2026 (UTC)](https://github.com/joswayski/anybas
 completed both platform jobs:
 
 - **Android:** version code 1001 rolled out to Google Play internal testers.
-  Enrolled testers can use [Google Play](https://play.google.com/apps/testing/com.dbm.nativeapp),
+  Enrolled testers can use [Google Play](https://play.google.com/apps/testing/se.anyba.app),
   or download the [signed APK](https://github.com/joswayski/anybase/releases/download/mobile-latest/DBM-Android.apk).
 - **iPhone:** build 10.1 uploaded, finished processing, and became available to
   the internal TestFlight group. Testers need an invitation; this does not
@@ -161,7 +161,7 @@ Godis's **Deploy DBM mobile** button can still dispatch a SHA by hand, but
 The release reads `production/signing/release` through GitHub OIDC role
 `production-dbm-release-signer`; no signing files belong in this repository:
 
-- **Android:** the existing `android` upload key signs `com.dbm.nativeapp`.
+- **Android:** the existing `android` upload key signs `se.anyba.app`.
   APK updates retain profiles/history. The version code is `run number × 100 +
   attempt` (attempts 1–99); even re-runs increase it. Release builds disable demo
   mode and refuse packaging without all four `DBM_ANDROID_KEYSTORE`,
@@ -170,12 +170,12 @@ The release reads `production/signing/release` through GitHub OIDC role
   `DBM_BUILD_NUMBER`, then `bash apps/native/android/build.sh assembleRelease bundleRelease`.
   Debug `.debug` installs are separate, and CI debug keys are not stable.
 - **Google Play:** every approved Android release uploads the signed AAB to
-  `com.dbm.nativeapp` on the **internal testing** track, using DBM's own service
+  `se.anyba.app` on the **internal testing** track, using DBM's own service
   account in `dbm_google_play.service_account_json`. It never falls back to
   Caper's `google_play` key. No repository opt-in variable is needed.
   Missing credentials or denied access fail the Android job rather than silently
   skipping Play. Testers install and update through the Play Store after joining
-  https://play.google.com/apps/testing/com.dbm.nativeapp with an enrolled account.
+  https://play.google.com/apps/testing/se.anyba.app with an enrolled account.
   If Google accepts only a draft, the job warns; finish its rollout in Play
   Console before expecting an install or update.
 - **Downloads:** the signed `DBM-Android.apk`, revision/version `BUILD.json`
@@ -186,7 +186,7 @@ The release reads `production/signing/release` through GitHub OIDC role
   The signed Play AAB is retained as the run's `google-play-bundle` artifact for
   30 days, including when the subsequent Play upload fails during first-app setup.
 - **iPhone:** `apps/native/ios/upload-testflight.sh` builds a Release device
-  archive for `app.dbm.ios` with Xcode 27.1 (GitHub's `xcode-27` image, so
+  archive for `se.anyba.app` with Xcode 27.1 (GitHub's `xcode-27` image, so
   iPhone Duo shows it full screen) and build number `<run number>.<attempt>`.
   The existing `apple` App Store Connect API key handles cloud-managed signing,
   upload, processing, What to Test, and tester-group assignment. External groups
@@ -218,12 +218,12 @@ stores. See
    with **Actions: write** only, deploy Godis's `dbm-mobile` dispatch support,
    and sync the existing notification secret from the infrastructure checkout:
    `./scripts/store-deploy-notification-webhook.sh --profile production`.
-3. Register Apple App ID `app.dbm.ios` and its App Store Connect app. The shared
+3. Register Apple App ID `se.anyba.app` and its App Store Connect app. The shared
    API key needs **Admin** access for cloud-managed distribution signing. Add
    yourself to a TestFlight internal group; a public link is not required.
    External testing additionally needs beta contact/review information.
 4. Create DBM in the same Play Console developer account as Caper. The first
-   bundle establishes package `com.dbm.nativeapp`; the display name can change,
+   bundle establishes package `se.anyba.app`; the display name can change,
    but the package cannot. Create a separate `dbm-play-release` service account
    in Google Cloud Console, in a project with **Google Play Android Developer API**
    enabled. Skip the optional Google Cloud IAM role grants. Under the service

@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 MODE="${1:-simulator}"
-export DBM_IOS_BUNDLE_ID="${DBM_IOS_BUNDLE_ID:-app.dbm.ios}"
+export DBM_IOS_BUNDLE_ID="${DBM_IOS_BUNDLE_ID:-se.anyba.app}"
 
 case "$MODE" in simulator|test) platform=iphonesimulator ;; device) platform=iphoneos ;; *) echo "Usage: $0 simulator|test|device" >&2; exit 2 ;; esac
 bash "$ROOT/prepare.sh" "$platform"

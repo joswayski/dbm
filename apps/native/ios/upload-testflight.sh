@@ -3,7 +3,7 @@
 # No Apple Distribution certificate or provisioning profile is stored in DBM.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-export DBM_IOS_BUNDLE_ID="${DBM_IOS_BUNDLE_ID:-app.dbm.ios}"
+export DBM_IOS_BUNDLE_ID="${DBM_IOS_BUNDLE_ID:-se.anyba.app}"
 : "${APPLE_TEAM_ID:?}" "${NOTARY_KEY_PATH:?}" "${NOTARY_KEY_ID:?}" "${NOTARY_ISSUER:?}" "${BUILD_NUMBER:?}"
 [[ "$BUILD_NUMBER" =~ ^[1-9][0-9]*\.[1-9][0-9]*$ ]] || { echo "BUILD_NUMBER must be <run number>.<attempt>." >&2; exit 2; }
 [[ -s "$NOTARY_KEY_PATH" ]] || { echo "App Store Connect key file is missing." >&2; exit 2; }

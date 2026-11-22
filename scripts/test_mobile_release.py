@@ -292,14 +292,14 @@ with open(os.environ["CALLS"], "a") as out:
             NOTARY_KEY_ID="TESTKEY",
             NOTARY_ISSUER="TESTISSUER",
             BUILD_NUMBER="9.2",
-            DBM_IOS_BUNDLE_ID="app.dbm.ios",
+            DBM_IOS_BUNDLE_ID="se.anyba.app",
         )
         self.assertEqual(run.returncode, 0, run.stderr)
         calls = [json.loads(line) for line in (self.directory / "calls").read_text().splitlines()]
         self.assertEqual(len(calls), 2)
         self.assertIn("Release", calls[0]["args"])
         self.assertIn("generic/platform=iOS", calls[0]["args"])
-        self.assertIn("DBM_IOS_BUNDLE_ID=app.dbm.ios", calls[0]["args"])
+        self.assertIn("DBM_IOS_BUNDLE_ID=se.anyba.app", calls[0]["args"])
         self.assertIn("CURRENT_PROJECT_VERSION=9.2", calls[0]["args"])
         self.assertEqual(calls[0]["args"][-1], "archive")
         # Archiving signs locally (ad hoc): asking Apple for a development
@@ -368,7 +368,7 @@ class TesterDistributionTests(unittest.TestCase):
             patch.object(script.time, "sleep") as sleep,
         ):
             script.main()
-        self.assertEqual(call.call_args_list[0].kwargs["query"], {"filter[bundleId]": "app.dbm.ios"})
+        self.assertEqual(call.call_args_list[0].kwargs["query"], {"filter[bundleId]": "se.anyba.app"})
         self.assertEqual(call.call_args_list[1].kwargs["query"]["filter[version]"], "9.2")
         sleep.assert_called_once_with(30)
         self.assertEqual(
@@ -429,7 +429,7 @@ class TesterDistributionTests(unittest.TestCase):
                         with self.assertRaises(SystemExit):
                             script.main()
                         self.assertEqual(call.call_count, 3)
-                    self.assertIn("/com.dbm.nativeapp/edits", call.call_args_list[0].args[2])
+                    self.assertIn("/se.anyba.app/edits", call.call_args_list[0].args[2])
                     self.assertEqual(call.call_args_list[2].args[3]["releases"][0]["versionCodes"], ["902"])
 
 

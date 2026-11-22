@@ -28,7 +28,7 @@ android {
         }
     }
     defaultConfig {
-        applicationId = "com.dbm.nativeapp"
+        applicationId = "se.anyba.app"
         minSdk = 26
         targetSdk = 36
         versionCode = buildNumber.get()

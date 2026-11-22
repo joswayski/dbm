@@ -119,13 +119,16 @@ users' saved state or strands them on an old version.
 If one of these ever has to move, ship a migration that copies the old data first
 and keep reading the old location for several releases.
 
-## Decide before a public store release: mobile identifiers
+## Mobile identifiers
 
-Android `com.dbm.nativeapp` and iPhone `app.dbm.ios` are only used for Play
-internal testing and TestFlight today. Google Play never allows a package name to
-change once an app is published, and a new bundle ID is a new App Store app. A
-rename is cheapest now: it means a new Play app and App Store Connect record and
-new signing entries in the release pipeline, but no users to move.
+Android and iPhone both use `se.anyba.app`, in new Play Console and App Store
+Connect apps named Anybase. They replaced Android `com.dbm.nativeapp` and iPhone
+`app.dbm.ios` before any public store release; testers reinstall once from the
+new apps. Google Play never allows a package name to change once an app exists,
+and a new bundle ID is a new App Store app, so treat `se.anyba.app` as permanent.
+
+The Kotlin source package and Android `namespace` stay `com.dbm.nativeapp`: they
+are internal and never shown to users.
 
 ## Website
 

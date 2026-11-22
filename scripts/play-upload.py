@@ -10,7 +10,7 @@ permissions for the app in Play Console. The track defaults to "internal",
 whose testers get the update through the Play Store within minutes.
 
 Environment: GOOGLE_PLAY_SERVICE_ACCOUNT (path to the JSON key),
-PLAY_PACKAGE (default com.dbm.nativeapp), PLAY_TRACK (default internal),
+PLAY_PACKAGE (default se.anyba.app), PLAY_TRACK (default internal),
 PLAY_RELEASE_NAME, PLAY_RELEASE_NOTES (optional). Argument: the .aab path.
 Requires PyJWT with the cryptography backend.
 Adapted from joswayski/caper's tester distribution script.
@@ -89,7 +89,7 @@ def main() -> None:
     bundle = sys.argv[1]
     with open(os.environ["GOOGLE_PLAY_SERVICE_ACCOUNT"], encoding="utf-8") as key:
         account = json.load(key)
-    package = os.environ.get("PLAY_PACKAGE", "com.dbm.nativeapp")
+    package = os.environ.get("PLAY_PACKAGE", "se.anyba.app")
     track = os.environ.get("PLAY_TRACK", "internal")
     name = os.environ.get("PLAY_RELEASE_NAME", "")
     notes = os.environ.get("PLAY_RELEASE_NOTES", "").strip()[:500]

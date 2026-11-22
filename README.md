@@ -52,7 +52,7 @@ public Play Store/App Store releases or desktop-parity clients.
 
 | Platform | Availability |
 | --- | --- |
-| Android 8.0+ (Kotlin/Compose) | [Google Play internal testing](https://play.google.com/apps/testing/com.dbm.nativeapp) for enrolled testers, or [download the signed APK](https://github.com/joswayski/anybase/releases/download/mobile-latest/DBM-Android.apk) |
+| Android 8.0+ (Kotlin/Compose) | [Google Play internal testing](https://play.google.com/apps/testing/se.anyba.app) for enrolled testers, or [download the signed APK](https://github.com/joswayski/anybase/releases/download/mobile-latest/DBM-Android.apk) |
 | iPhone, iOS 17+ (UIKit) | TestFlight internal testing; a tester invitation is required |
 
 Browse PostgreSQL, MySQL, and Redis and run read-only SQL/Redis commands through

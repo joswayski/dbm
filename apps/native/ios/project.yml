@@ -1,6 +1,6 @@
 name: DBM
 options:
-  bundleIdPrefix: app.dbm
+  bundleIdPrefix: se.anyba
   deploymentTarget:
     iOS: "17.0"
 settings:

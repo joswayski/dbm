@@ -6,7 +6,7 @@ REPO="$(cd "$ROOT/../../.." && pwd)"
 PLATFORM="${1:-iphonesimulator}"
 XCODEGEN_COMMIT=21ac9944b0ab546a07422dbed86f33dd2ebd76f8
 XCODEGEN="$ROOT/.build/xcodegen-$XCODEGEN_COMMIT"
-export DBM_IOS_BUNDLE_ID="${DBM_IOS_BUNDLE_ID:-app.dbm.ios}"
+export DBM_IOS_BUNDLE_ID="${DBM_IOS_BUNDLE_ID:-se.anyba.app}"
 
 case "$PLATFORM" in
   iphonesimulator) rust_target=aarch64-apple-ios-sim ;;

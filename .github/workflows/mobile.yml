@@ -75,7 +75,7 @@ jobs:
           apps/native/android/gradlew -p apps/native/android --no-daemon --max-workers=2 lintRelease assembleRelease bundleRelease
           apk=apps/native/android/app/build/outputs/apk/release/app-release.apk
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify "$apk"
-          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$apk" | grep "package: name='com.dbm.nativeapp' versionCode='703'"
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$apk" | grep "package: name='se.anyba.app' versionCode='703'"
           jarsigner -verify apps/native/android/app/build/outputs/bundle/release/app-release.aab | tee "$RUNNER_TEMP/dbm-fixture-verification.txt"
           grep -q 'jar verified' "$RUNNER_TEMP/dbm-fixture-verification.txt"
           grep -q 'ALLOW_DEMO = false' apps/native/android/app/build/generated/source/buildConfig/release/com/dbm/nativeapp/BuildConfig.java
@@ -222,7 +222,7 @@ jobs:
           xcodebuild -project apps/native/ios/DBM.xcodeproj -scheme DBM -configuration Release \
             -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/DBM-unsigned.xcarchive" \
             -derivedDataPath apps/native/ios/DerivedData-Release \
-            DBM_IOS_BUNDLE_ID=app.dbm.ios CODE_SIGNING_ALLOWED=NO archive
+            DBM_IOS_BUNDLE_ID=se.anyba.app CODE_SIGNING_ALLOWED=NO archive
       - name: Export native UI screenshots for review
         if: always() && github.event_name != 'push'
         run: |

@@ -19,7 +19,7 @@ concurrency:
 env:
   AWS_REGION: us-east-1
   RELEASE_SIGNER_ROLE: arn:aws:iam::395451633568:role/production-dbm-release-signer
-  DBM_IOS_BUNDLE_ID: app.dbm.ios
+  DBM_IOS_BUNDLE_ID: se.anyba.app
 
 jobs:
   resolve:
@@ -278,5 +278,5 @@ jobs:
           # BUILD.json name the released commit.
           gh release create mobile-latest --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
             --prerelease --latest=false --title 'Anybase mobile (latest)' \
-            --notes "Signed Android build from $RELEASE_SHA. Install and update through Google Play internal testing: https://play.google.com/apps/testing/com.dbm.nativeapp (tester enrollment required). If the Play upload was saved as a draft, roll it out in Play Console first. The APK below is an alternative download, not the Play install. iPhone delivery runs separately through TestFlight; check this run's iPhone job for its result. Native clients remain read-only and require verified TLS. Desktop downloads and updates are unchanged." \
+            --notes "Signed Android build from $RELEASE_SHA. Install and update through Google Play internal testing: https://play.google.com/apps/testing/se.anyba.app (tester enrollment required). If the Play upload was saved as a draft, roll it out in Play Console first. The APK below is an alternative download, not the Play install. iPhone delivery runs separately through TestFlight; check this run's iPhone job for its result. Native clients remain read-only and require verified TLS. Desktop downloads and updates are unchanged." \
             release/DBM-Android.apk release/BUILD.json release/SHA256SUMS
