@@ -176,9 +176,12 @@ jobs:
           path: dist/mobile/play/DBM-Android-Play.aab
           if-no-files-found: error
           retention-days: 30
-      - name: Roll out to Google Play internal testers
+      - name: Roll out to Google Play internal and closed testers
         env:
           ANDROID_NOTES: ${{ needs.resolve.outputs.android_notes }}
+          # internal: Friends & Family, immediately. alpha: the public beta
+          # (members of anybase-testers@googlegroups.com), after Google's review.
+          PLAY_TRACK: internal,alpha
         run: |
           set -euo pipefail
           umask 077

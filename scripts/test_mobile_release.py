@@ -155,6 +155,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
     def test_play_rollout_requires_dbm_credentials_without_shared_fallback(self):
         step = workflow("mobile-release.yml")["jobs"]["android"]["steps"][-2]
         self.assertNotIn("if", step)
+        self.assertEqual(step["env"]["PLAY_TRACK"], "internal,alpha")
         executable(self.bin / "aws", '#!/bin/sh\nprintf "%s" "$SIGNING_SECRET"\n')
         python = self.directory / "mobile-python/bin/python"
         python.parent.mkdir(parents=True)
@@ -436,6 +437,45 @@ class TesterDistributionTests(unittest.TestCase):
                         self.assertEqual(call.call_count, 3)
                     self.assertIn("/se.anyba.app/edits", call.call_args_list[0].args[2])
                     self.assertEqual(call.call_args_list[2].args[3]["releases"][0]["versionCodes"], ["902"])
+
+    def test_play_rolls_out_internal_and_keeps_closed_track_draft_until_published(self):
+        script = load_script("play-upload")
+        with tempfile.TemporaryDirectory() as temporary:
+            key = Path(temporary) / "account.json"
+            key.write_text("{}")
+            bundle = Path(temporary) / "bundle.aab"
+            bundle.write_bytes(b"fixture bundle")
+            replies = [
+                (200, {"id": "first"}),
+                (200, {"versionCode": 903}),
+                (200, {}),
+                (200, {}),
+                (400, {"errors": ["Only draft releases are allowed until the app is published"]}),
+                (200, {}),
+                (200, {"id": "second"}),
+                (200, {"versionCode": 903}),
+                (200, {}),
+                (200, {}),
+                (200, {}),
+            ]
+            with (
+                patch.dict(
+                    os.environ, {"GOOGLE_PLAY_SERVICE_ACCOUNT": str(key), "PLAY_TRACK": "internal, alpha"}, clear=True
+                ),
+                patch.object(script.sys, "argv", ["play-upload.py", str(bundle)]),
+                patch.object(script, "access_token", return_value="fixture"),
+                patch.object(script, "call", side_effect=replies) as call,
+            ):
+                script.main()
+            calls = call.call_args_list
+            self.assertTrue(calls[4].args[2].endswith("/edits/first:commit"))
+            self.assertTrue(calls[5].args[2].endswith("/edits/first"))
+            self.assertEqual(calls[5].args[1], "DELETE")
+            self.assertEqual(calls[8].args[3]["track"], "internal")
+            self.assertEqual(calls[8].args[3]["releases"][0]["status"], "completed")
+            self.assertEqual(calls[9].args[3]["track"], "alpha")
+            self.assertEqual(calls[9].args[3]["releases"][0]["status"], "draft")
+            self.assertTrue(calls[10].args[2].endswith("/edits/second:commit"))
 
 
 if __name__ == "__main__":

@@ -47,13 +47,14 @@ planned.
 
 ## Mobile status
 
-Both native mobile apps are available as **read-only development builds**, not
-public Play Store/App Store releases or desktop-parity clients.
+Both native mobile apps are **read-only public betas**, not Play Store/App Store
+releases or desktop-parity clients. Open [anyba.se/mobile](https://anyba.se/mobile)
+on your phone to join.
 
 | Platform | Availability |
 | --- | --- |
-| Android 8.0+ (Kotlin/Compose) | [Google Play internal testing](https://play.google.com/apps/testing/se.anyba.app) for enrolled testers, or [download the signed APK](https://github.com/joswayski/anybase/releases/download/mobile-latest/DBM-Android.apk) |
-| iPhone, iOS 17+ (UIKit) | TestFlight internal testing; a tester invitation is required |
+| Android 8.0+ (Kotlin/Compose) | Join the [testers group](https://groups.google.com/g/anybase-testers), then [opt in on Google Play](https://play.google.com/apps/testing/se.anyba.app), or [download the signed APK](https://github.com/joswayski/anybase/releases/download/mobile-latest/DBM-Android.apk) |
+| iPhone, iOS 17+ (UIKit) | [TestFlight public beta](https://testflight.apple.com/join/mFPKjTcv) |
 
 Browse PostgreSQL, MySQL, and Redis and run read-only SQL/Redis commands through
 the in-process Rust core. Mobile requires verified TLS, keeps passwords only in

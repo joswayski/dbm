@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { detectDownload, DOWNLOADS, type DownloadId } from "../downloads";
+import {
+  ANDROID_TESTERS_GROUP_URL,
+  detectDownload,
+  detectMobile,
+  DOWNLOADS,
+  PLAY_TESTING_URL,
+  TESTFLIGHT_URL,
+  type DownloadId,
+  type MobileId,
+} from "../downloads";
 import { formatRelativeTime, type LatestChange } from "../latestChanges";
 import {
   AUTHOR_URL,
@@ -35,18 +44,19 @@ export function Home({ latestChanges, builtAt }: HomeProps) {
   const [now, setNow] = useState(builtAt);
   // undefined until the browser has been checked; null for phones and unknown systems.
   const [platform, setPlatform] = useState<DownloadId | null | undefined>(undefined);
+  const [mobile, setMobile] = useState<MobileId | null>(null);
   const [viewing, setViewing] = useState<number | null>(null);
   const closeViewer = useCallback(() => setViewing(null), []);
 
   useEffect(() => {
     const nav = navigator as Navigator & { userAgentData?: { platform?: string } };
-    setPlatform(
-      detectDownload({
-        userAgent: nav.userAgent,
-        platform: nav.userAgentData?.platform,
-        maxTouchPoints: nav.maxTouchPoints,
-      }),
-    );
+    const hints = {
+      userAgent: nav.userAgent,
+      platform: nav.userAgentData?.platform,
+      maxTouchPoints: nav.maxTouchPoints,
+    };
+    setMobile(detectMobile(hints));
+    setPlatform(detectDownload(hints));
 
     setNow(Date.now());
     const interval = window.setInterval(() => setNow(Date.now()), 60_000);
@@ -72,7 +82,7 @@ export function Home({ latestChanges, builtAt }: HomeProps) {
         </p>
 
         <div className="mt-8 min-h-11">
-          <DownloadAction platform={platform} />
+          <DownloadAction platform={platform} mobile={mobile} />
         </div>
 
         <FeedbackList />
@@ -152,10 +162,37 @@ export function Home({ latestChanges, builtAt }: HomeProps) {
   );
 }
 
-/** One button for the visitor's desktop; phones get a note instead. */
-function DownloadAction({ platform }: { platform: DownloadId | null | undefined }) {
+/** One button for the visitor's desktop, the phone beta on iPhone and Android, or a note otherwise. */
+function DownloadAction({ platform, mobile }: { platform: DownloadId | null | undefined; mobile: MobileId | null }) {
   // Prerendered HTML can't know the visitor's system; hold the space until it does.
   if (platform === undefined) return null;
+
+  if (mobile === "ios") {
+    return (
+      <>
+        <div className="flex flex-col gap-2.5 sm:flex-row sm:flex-wrap sm:items-center">
+          <a href={TESTFLIGHT_URL} className="download-button">
+            <AppleIcon className="h-[1.15rem] w-[1.15rem] shrink-0" />
+            Get the iPhone beta
+          </a>
+          <SourceButton />
+        </div>
+        <MobileBetaNote store="TestFlight" />
+      </>
+    );
+  }
+
+  if (mobile === "android") {
+    return (
+      <>
+        <AndroidBetaSteps />
+        <div className="mt-3.5">
+          <SourceButton />
+        </div>
+        <MobileBetaNote store="Google Play" />
+      </>
+    );
+  }
 
   const download = DOWNLOADS.find((item) => item.id === platform);
   if (!download) {
@@ -185,6 +222,47 @@ function DownloadAction({ platform }: { platform: DownloadId | null | undefined 
       </a>
       <SourceButton />
     </div>
+  );
+}
+
+// A Play closed test only admits members of its Google Group, who then opt in on
+// Google Play. Google can't chain those two pages, so the steps are numbered here;
+// the group opens in a new tab so this page is still waiting for step 2.
+function AndroidBetaSteps() {
+  return (
+    <ol className="beta-steps">
+      <li>
+        <a className="download-button" href={ANDROID_TESTERS_GROUP_URL} target="_blank" rel="noreferrer">
+          <span className="beta-step-number" aria-hidden="true">
+            1
+          </span>
+          Join the testers group
+        </a>
+        <p>
+          Tap <strong>Join group</strong>, then come back here.
+        </p>
+      </li>
+      <li>
+        <a className="download-button" href={PLAY_TESTING_URL}>
+          <span className="beta-step-number" aria-hidden="true">
+            2
+          </span>
+          Install from Google Play
+        </a>
+        <p>
+          Tap <strong>Become a tester</strong>, then install {PRODUCT_NAME}.
+        </p>
+      </li>
+    </ol>
+  );
+}
+
+function MobileBetaNote({ store }: { store: string }) {
+  return (
+    <p className="mt-4 text-xs leading-relaxed text-ink-muted">
+      The phone app is a beta through {store}: read-only connections over verified TLS. For the full app on macOS,
+      Windows, or Linux, open this page on your computer.
+    </p>
   );
 }
 

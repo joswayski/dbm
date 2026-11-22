@@ -3,8 +3,9 @@
 ## Product
 
 - Anybase (formerly DBM) is a database client. AppKit macOS, Win32 Windows, and
-  GTK 4 Linux are released desktop apps; Compose Android and UIKit iPhone are development
-  clients, not store releases or desktop-parity products.
+  GTK 4 Linux are released desktop apps; Compose Android and UIKit iPhone are read-only
+  public betas (TestFlight and Google Play closed testing), not store releases or
+  desktop-parity products.
 - The current milestone is PostgreSQL, MySQL, and Redis: saved connections, schema or keyspace exploration, paginated table and key browsing, SQL/Redis workbench tabs, PK-backed or key-backed edits, and safe local profile storage.
 - Clearly separate current features from roadmap ideas. Do not present Redis Sentinel/Cluster, SSH jump hosts, encrypted profile sync, or other follow-ups as shipped unless the repository already implements them.
 - Prefer TablePlus/DataGrip-like defaults when UX is ambiguous: fast path to query, obvious refresh, non-destructive confirms for bulk writes.

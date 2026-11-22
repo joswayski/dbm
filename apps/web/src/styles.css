@@ -149,6 +149,27 @@
     @apply inline-flex min-h-11 w-full items-center justify-center gap-2.5 rounded-[7px] border border-border-strong bg-chrome px-5 py-2.5 text-sm font-semibold text-ink-strong no-underline transition-colors duration-150 ease-out hover:bg-control sm:w-auto;
   }
 
+  /* Android's beta: numbered steps, each a full-width button with its hint below. */
+  .beta-steps {
+    @apply m-0 grid list-none gap-3.5 p-0;
+  }
+
+  .beta-steps li {
+    @apply grid gap-1.5;
+  }
+
+  .beta-steps p {
+    @apply text-xs leading-relaxed text-ink-muted;
+  }
+
+  .beta-steps strong {
+    @apply font-semibold text-ink-strong;
+  }
+
+  .beta-step-number {
+    @apply inline-grid h-5 w-5 place-items-center rounded-full border-[1.5px] border-current text-[0.6875rem] leading-none tabular-nums;
+  }
+
   .download-button:focus-visible,
   .source-button:focus-visible,
   .viewer-button:focus-visible,

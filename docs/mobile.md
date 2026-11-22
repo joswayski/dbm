@@ -10,6 +10,22 @@ Anybase has no server, account, pairing service, telemetry, or connection sync.
 
 ## Distribution status
 
+Both apps are public betas, linked from the phone view of anyba.se and from
+[anyba.se/mobile](https://anyba.se/mobile):
+
+- **iPhone:** the TestFlight **Public Testing** group's public link,
+  https://testflight.apple.com/join/mFPKjTcv. It admits testers once Apple's
+  beta review approves a build; the internal **Personal** group gets every build
+  without review.
+- **Android:** Google Play **closed testing** (`alpha`), whose testers are the
+  members of [anybase-testers@googlegroups.com](https://groups.google.com/g/anybase-testers).
+  Testers join the group, then opt in at
+  https://play.google.com/apps/testing/se.anyba.app. Google reviews each closed
+  testing release; internal testing (the Friends & Family list) gets the same
+  bundle immediately.
+
+Neither link works until the first build passes that platform's review.
+
 The [mobile release on 7 October 2026 (UTC)](https://github.com/joswayski/anybase/actions/runs/37552184568)
 completed both platform jobs:
 
@@ -175,14 +191,17 @@ The release reads `production/signing/release` through GitHub OIDC role
   `DBM_BUILD_NUMBER`, then `bash apps/native/android/build.sh assembleRelease bundleRelease`.
   Debug `.debug` installs are separate, and CI debug keys are not stable.
 - **Google Play:** every approved Android release uploads the signed AAB to
-  `se.anyba.app` on the **internal testing** track, using DBM's own service
+  `se.anyba.app` on the **internal testing** and **closed testing** (`alpha`)
+  tracks in one edit (`PLAY_TRACK: internal,alpha`), using DBM's own service
   account in `dbm_google_play.service_account_json`. It never falls back to
   Caper's `google_play` key. No repository opt-in variable is needed.
   Missing credentials or denied access fail the Android job rather than silently
   skipping Play. Testers install and update through the Play Store after joining
   https://play.google.com/apps/testing/se.anyba.app with an enrolled account.
-  If Google accepts only a draft, the job warns; finish its rollout in Play
-  Console before expecting an install or update.
+  Closed-testing members opt in at the same link after joining
+  anybase-testers@googlegroups.com. If Google accepts only a draft on a track,
+  the job warns; finish that rollout in Play Console before expecting an
+  install or update.
 - **Downloads:** the signed `DBM-Android.apk`, revision/version `BUILD.json`
   and `SHA256SUMS` go in the `mobile-latest` **prerelease**, never GitHub's
   desktop `releases/latest` target. This is an alternative to Play testing.
@@ -231,8 +250,9 @@ stores. See
    `./scripts/store-deploy-notification-webhook.sh --profile production`.
 3. Register Apple App ID `se.anyba.app` and its App Store Connect app. The shared
    API key needs **Admin** access for cloud-managed distribution signing. Add
-   yourself to a TestFlight internal group; a public link is not required.
-   External testing additionally needs beta contact/review information.
+   yourself to a TestFlight internal group. The public beta is the external
+   **Public Testing** group with a public link, plus the beta description,
+   contact, and review notes under TestFlight → Test Information.
 4. Create DBM in the same Play Console developer account as Caper. The first
    bundle establishes package `se.anyba.app`; the display name can change,
    but the package cannot. Create a separate `dbm-play-release` service account

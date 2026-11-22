@@ -11,6 +11,8 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as R404RouteImport } from './routes/404'
+import { Route as DownloadRouteImport } from './routes/download'
+import { Route as MobileRouteImport } from './routes/mobile'
 import { Route as PrivacyRouteImport } from './routes/privacy'
 
 const IndexRoute = IndexRouteImport.update({
@@ -23,6 +25,16 @@ const R404Route = R404RouteImport.update({
   path: '/404',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DownloadRoute = DownloadRouteImport.update({
+  id: '/download',
+  path: '/download',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MobileRoute = MobileRouteImport.update({
+  id: '/mobile',
+  path: '/mobile',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PrivacyRoute = PrivacyRouteImport.update({
   id: '/privacy',
   path: '/privacy',
@@ -32,30 +44,38 @@ const PrivacyRoute = PrivacyRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/404': typeof R404Route
+  '/download': typeof DownloadRoute
+  '/mobile': typeof MobileRoute
   '/privacy': typeof PrivacyRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/404': typeof R404Route
+  '/download': typeof DownloadRoute
+  '/mobile': typeof MobileRoute
   '/privacy': typeof PrivacyRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/404': typeof R404Route
+  '/download': typeof DownloadRoute
+  '/mobile': typeof MobileRoute
   '/privacy': typeof PrivacyRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/404' | '/privacy'
+  fullPaths: '/' | '/404' | '/download' | '/mobile' | '/privacy'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/404' | '/privacy'
-  id: '__root__' | '/' | '/404' | '/privacy'
+  to: '/' | '/404' | '/download' | '/mobile' | '/privacy'
+  id: '__root__' | '/' | '/404' | '/download' | '/mobile' | '/privacy'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   R404Route: typeof R404Route
+  DownloadRoute: typeof DownloadRoute
+  MobileRoute: typeof MobileRoute
   PrivacyRoute: typeof PrivacyRoute
 }
 
@@ -75,6 +95,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof R404RouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/download': {
+      id: '/download'
+      path: '/download'
+      fullPath: '/download'
+      preLoaderRoute: typeof DownloadRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/mobile': {
+      id: '/mobile'
+      path: '/mobile'
+      fullPath: '/mobile'
+      preLoaderRoute: typeof MobileRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/privacy': {
       id: '/privacy'
       path: '/privacy'
@@ -88,6 +122,8 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   R404Route: R404Route,
+  DownloadRoute: DownloadRoute,
+  MobileRoute: MobileRoute,
   PrivacyRoute: PrivacyRoute,
 }
 export const routeTree = rootRouteImport
