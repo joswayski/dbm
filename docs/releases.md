@@ -253,7 +253,7 @@ Optional repository variables `DBM_RELEASE_NOTES_MODEL` and
 override `gemini-4-hydrogen` and `medium`.
 
 The optional repository secret `OPENROUTER_API_KEY`
-(`gh secret set OPENROUTER_API_KEY --repo joswayski/dbm`) adds a fallback: when
+(`gh secret set OPENROUTER_API_KEY --repo joswayski/anybase`) adds a fallback: when
 Gemini fails, such as when its credits run out, or its answer fails validation,
 the same prompt goes to `meta/muse-spark-1.3` on OpenRouter with the same schema
 and checks. The variable `DBM_RELEASE_NOTES_FALLBACK_MODEL` overrides that model

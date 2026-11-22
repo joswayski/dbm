@@ -148,6 +148,23 @@ export function Home({ latestChanges, builtAt }: HomeProps) {
           ))}
         </ol>
       </section>
+
+      <footer className="mt-14 flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-border pt-8 text-xs text-ink-faint">
+        <a
+          href="/privacy"
+          className="text-ink-muted no-underline transition-colors duration-150 ease-out hover:text-ink-strong"
+        >
+          Privacy
+        </a>
+        <a
+          href={`${REPO_URL}/releases/latest`}
+          target="_blank"
+          rel="noreferrer"
+          className="text-ink-muted no-underline transition-colors duration-150 ease-out hover:text-ink-strong"
+        >
+          All downloads
+        </a>
+      </footer>
     </main>
   );
 }
@@ -268,7 +285,7 @@ function CopyEmailRow({ email }: { email: string }) {
         {status === "copied"
           ? "Email address copied to clipboard."
           : status === "failed"
-            ? `Couldn’t copy. Email ${email}`
+            ? `Couldn’t copy. Email ${email}.`
             : ""}
       </span>
     </>

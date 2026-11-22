@@ -2,7 +2,6 @@ export const PRODUCT_NAME = "Anybase";
 export const SITE_URL = "https://anyba.se";
 export const SITE_DESCRIPTION = "A fast database client for PostgreSQL, MySQL, and Redis.";
 
-/** The repository keeps its old name until the GitHub rename (docs/anybase-migration.md). */
 export const REPOSITORY = "joswayski/anybase";
 export const REPO_URL = `https://github.com/${REPOSITORY}`;
 export const AUTHOR_URL = "https://josevalerio.com";
@@ -11,16 +10,17 @@ export const X_URL = "https://x.com/josevalerio";
 export const CAPER_INVITE_URL = "https://caper.chat/invite/zHclS7oDTX";
 
 export const FEATURES = [
-  "Browse databases, schemas, tables, and Redis keys, with filters, sorting, and CSV export.",
+  "Native desktop apps for macOS, Windows, and Linux.",
+  "Browse databases, schemas, tables, and Redis keys with filters, sorting, and CSV export.",
   "Edit rows safely: changes are staged, previewed, and saved together.",
   "SQL and Redis workbench tabs with per-connection history.",
-  "Color-coded connections, with passwords kept in your OS keychain.",
+  "Color-coded connections with passwords stored in your OS credential store—no accounts, telemetry, or sync.",
 ] as const;
 
 export const SCREENSHOTS = [
   {
     src: "/screenshots/change-preview.webp",
-    alt: "Editing a table, with a before and after preview of a staged change",
+    alt: "Editing a table in Anybase, with a before-and-after preview of a staged change",
     caption: "Preview every staged change before saving",
   },
   {
@@ -30,7 +30,7 @@ export const SCREENSHOTS = [
   },
   {
     src: "/screenshots/query.webp",
-    alt: "A SQL query with results and history",
+    alt: "A SQL query with results and per-connection history",
     caption: "SQL workbench with history",
   },
   {
@@ -40,7 +40,7 @@ export const SCREENSHOTS = [
   },
   {
     src: "/screenshots/connection.webp",
-    alt: "The connection settings dialog",
+    alt: "Connection settings dialog with color picker and TLS options",
     caption: "Color-coded connections",
   },
 ] as const;

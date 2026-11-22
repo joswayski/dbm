@@ -267,8 +267,8 @@ stores. See
    Rerun the workflow afterwards; the higher version code avoids reusing the
    manually uploaded build. Later approved releases update Play automatically.
 
-Check both platform jobs, join the Play testing link and install DBM from the
-Play Store on Android, and install DBM from TestFlight on the actual iPhone.
+Check both platform jobs, join the Play testing link and install Anybase from the
+Play Store on Android, and install Anybase from TestFlight on the actual iPhone.
 For a regression, revert the app change and release a new, higher build number;
 do not rotate keys or downgrade installed versions.
 App registration, infrastructure apply, secret sync, and the first upload are

@@ -367,10 +367,10 @@ impl Welcome {
         );
         let message = match (profile, connected) {
             (Some(_), true) => {
-                "Choose a table from the sidebar or open a new query with the plus button above."
+                "Pick a table or key from the sidebar, or open a new tab with + above."
             }
             (Some(_), false) => {
-                "This connection is selected but not connected. Select it again to connect."
+                "Not connected yet. Click the connection in the sidebar to connect."
             }
             (None, _) if state.profiles.is_empty() => {
                 "Create a connection from the sidebar to get started."
