@@ -149,15 +149,19 @@ jobs:
             xcrun simctl list
             runtimes="$(xcrun simctl list runtimes --json)"
           fi
-          # iPhone 16 when the runtime runs it; otherwise its first iPhone (the
-          # self-hosted Mac's iOS 27.1 runtime only runs iPhone Duo).
+          # The UI tests assert iPhone 16 layouts. Some SDK-matched runtimes run
+          # only newer devices (the self-hosted Mac's iOS 27.1 runs only iPhone
+          # Duo), so fall back to the newest installed iOS runtime that runs it.
           iphone16=com.apple.CoreSimulator.SimDeviceType.iPhone-16
-          device_type="$(jq -r --arg runtime "$runtime" --arg preferred "$iphone16" '
-            [.runtimes[] | select(.identifier == $runtime) | .supportedDeviceTypes[]?
-              | select(.productFamily == "iPhone") | .identifier] as $types
-            | if any($types[]; . == $preferred) then $preferred else ($types[0] // $preferred) end' <<< "$runtimes")"
-          echo "Creating a $device_type simulator on $runtime"
-          device="$(xcrun simctl create 'DBM UI Tests' "$device_type" "$runtime")"
+          runtime="$(jq -r --arg sdk "$runtime" --arg type "$iphone16" '
+            [.runtimes[] | select(.isAvailable and (.identifier | startswith("com.apple.CoreSimulator.SimRuntime.iOS-"))
+              and any(.supportedDeviceTypes[]?; .identifier == $type))] as $ok
+            | (($ok | map(select(.identifier == $sdk)) | first)
+              // ($ok | sort_by(.version | split(".") | map(tonumber)) | last)
+              | .identifier) // empty' <<< "$runtimes")"
+          [[ -n "$runtime" ]] || { echo "No installed iOS simulator runtime runs iPhone 16." >&2; exit 1; }
+          echo "Creating an iPhone 16 simulator on $runtime"
+          device="$(xcrun simctl create 'DBM UI Tests' "$iphone16" "$runtime")"
           # Boot in the background while the app builds; the wait for a
           # finished boot happens right before the UI tests.
           xcrun simctl boot "$device"
