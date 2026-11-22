@@ -84,7 +84,7 @@ test("summarizes desktop changes, including merged pull requests, for Gemini", a
     env,
     recentHighlights,
     fetch: async (url, options) => {
-      assert.equal(url, "https://generativelanguage.googleapis.com/v1beta/models/gemini-4-neon:generateContent");
+      assert.equal(url, "https://generativelanguage.googleapis.com/v1beta/models/gemini-4-hydrogen:generateContent");
       assert.equal(options.headers["x-goog-api-key"], "test-key");
       request = JSON.parse(options.body);
       return reply([highlight(after)], {
@@ -210,4 +210,36 @@ test("quiet ranges skip the API; missing key, baseline or budget return null", a
   });
   assert.equal(await releaseHighlights(f.base, f.git("rev-parse", "HEAD"), options), null);
   assert.equal(calls, 0);
+});
+
+test("OpenRouter writes the highlights when Gemini fails or answers invalidly", async () => {
+  const f = fixture();
+  const after = f.commit({ "crates/dbm-core/src/lib.rs": "query" }, "Faster queries");
+  const geminiFailures = [
+    async () => new Response('{"error":{"status":"RESOURCE_EXHAUSTED"}}', { status: 429 }),
+    async () => reply([{ ...highlight(after), commits: [f.base] }]),
+  ];
+  for (const gemini of geminiFailures) {
+    const requests = [];
+    const highlights = await releaseHighlights(f.base, after, {
+      cwd: f.cwd,
+      env: { ...env, OPENROUTER_API_KEY: "router-key" },
+      fetch: async (url, options) => {
+        requests.push(JSON.parse(options.body));
+        if (!url.startsWith("https://openrouter.ai/")) return gemini();
+        assert.equal(url, "https://openrouter.ai/api/v1/chat/completions");
+        assert.equal(options.headers.Authorization, "Bearer router-key");
+        const [geminiRequest, request] = requests;
+        assert.equal(request.model, "meta/muse-spark-1.3");
+        assert.equal(request.messages[1].content, geminiRequest.contents[0].parts[0].text);
+        const content = JSON.stringify({ highlights: [highlight(after)] });
+        return Response.json({ choices: [{ finish_reason: "stop", message: { content } }] });
+      },
+      warn: () => assert.fail("the fallback answered"),
+    });
+    assert.deepEqual(highlights, [
+      { title: "Copy rows as CSV", body: "Select rows and copy them straight into a spreadsheet." },
+    ]);
+    assert.equal(requests.length, 2);
+  }
 });

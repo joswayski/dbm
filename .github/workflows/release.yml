@@ -99,9 +99,13 @@ jobs:
         continue-on-error: true
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          # Empty variables fall back to the generator defaults (Gemini 4 Neon, medium thinking).
+          # Empty variables fall back to the generator defaults (Gemini 4 Hydrogen,
+          # medium thinking, and the OpenRouter fallback model).
           GEMINI_MODEL: ${{ vars.DBM_RELEASE_NOTES_MODEL }}
           GEMINI_THINKING_LEVEL: ${{ vars.DBM_RELEASE_NOTES_THINKING_LEVEL }}
+          # Writes the notes when Gemini fails or answers invalidly, such as when credits run out.
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          OPENROUTER_MODEL: ${{ vars.DBM_RELEASE_NOTES_FALLBACK_MODEL }}
           DBM_RELEASE_SHA: ${{ github.sha }}
           PREVIOUS_TAG: ${{ steps.notes.outputs.previous_tag }}
           PREVIOUS_MANIFEST: ${{ runner.temp }}/previous/native-latest.json
