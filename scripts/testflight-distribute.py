@@ -185,6 +185,15 @@ def main() -> None:
         )
         if status == 409:
             print("Beta app review: already submitted or not required for this build")
+        elif status == 422 and any(
+            error.get("code") == "ENTITY_UNPROCESSABLE.ANOTHER_BUILD_IN_REVIEW" for error in body.get("errors", [])
+        ):
+            # Apple reviews one build per version at a time. This build is
+            # uploaded and in its groups; the next release submits a newer one.
+            print(
+                f"::warning::Build {build_number} is in TestFlight, but an earlier build is still in beta app review; "
+                "external testers get builds once Apple finishes it, and the next release submits its own build."
+            )
         elif status >= 300:
             sys.exit(f"Submitting for beta app review failed with HTTP {status}: {json.dumps(body)[:2000]}")
         else:

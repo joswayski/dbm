@@ -214,7 +214,9 @@ The release reads `production/signing/release` through GitHub OIDC role
   iPhone Duo shows it full screen) and build number `<run number>.<attempt>`.
   The existing `apple` App Store Connect API key handles cloud-managed signing,
   upload, processing, What to Test, and tester-group assignment. External groups
-  may still await Apple's beta review. Android publication does not wait for
+  may still await Apple's beta review; Apple reviews one build per version at a
+  time, so while an earlier build is in review the job warns instead of
+  submitting, and the next release submits its own build. Android publication does not wait for
   Apple; the Mobile release run fails if either platform fails, including partial
   uploads. A TestFlight success is not physical-device acceptance.
 - **Release notes:** TestFlight's What to Test and Google Play's release notes

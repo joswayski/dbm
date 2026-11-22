@@ -110,11 +110,13 @@ class ReleaseWorkflowTests(unittest.TestCase):
         result = self.run_step(script, RELEASE_SHA=SHA)
         self.assertEqual(result.returncode, 0, result.stderr)
         calls = (self.directory / "calls").read_text().splitlines()
-        self.assertEqual(len(calls), 3)
+        self.assertEqual(len(calls), 4)
         self.assertTrue(calls[0].startswith("release view mobile-latest "))
         self.assertTrue(calls[1].startswith("release delete mobile-latest "))
-        self.assertIn("--prerelease --latest=false", calls[2])
-        self.assertIn(f"--target {SHA}", calls[2])
+        # The tag targets main's head when publishing, not the dispatched SHA.
+        self.assertTrue(calls[2].startswith("api repos/joswayski/anybase/commits/main "))
+        self.assertIn("--prerelease --latest=false", calls[3])
+        self.assertIn(f"--target {SHA}", calls[3])
         self.assertEqual(release["jobs"]["publish"]["needs"], ["resolve", "android"])
 
     def test_distribution_installs_workflow_locks_not_selected_source_metadata(self):
@@ -382,6 +384,30 @@ class TesterDistributionTests(unittest.TestCase):
             ("POST", "/betaGroups/external/relationships/builds", {"data": [{"type": "builds", "id": "build"}]}),
         )
         self.assertEqual(call.call_args_list[-1].args[1], "/betaAppReviewSubmissions")
+
+    def test_testflight_only_tolerates_review_busy_with_an_earlier_build(self):
+        script = load_script("testflight-distribute")
+        groups = (200, {"data": [{"id": "external", "attributes": {"isInternalGroup": False}}]})
+        busy = {"errors": [{"code": "ENTITY_UNPROCESSABLE.ANOTHER_BUILD_IN_REVIEW", "status": "422"}]}
+        other = {"errors": [{"code": "ENTITY_UNPROCESSABLE.BUILD_MISSING_TEST_INFO", "status": "422"}]}
+        for review, succeeds in [(busy, True), (other, False)]:
+            replies = [
+                (200, {"data": [{"id": "app"}]}),
+                (200, {"data": [{"id": "build", "attributes": {"processingState": "VALID"}}]}),
+                groups,
+                (204, {}),
+                (422, review),
+            ]
+            with (
+                self.subTest(succeeds=succeeds),
+                patch.dict(os.environ, {"BUILD_NUMBER": "9.2"}, clear=True),
+                patch.object(script, "call", side_effect=replies),
+            ):
+                if succeeds:
+                    script.main()
+                else:
+                    with self.assertRaisesRegex(SystemExit, "beta app review failed with HTTP 422"):
+                        script.main()
 
     def test_testflight_rejected_build_is_never_assigned(self):
         script = load_script("testflight-distribute")

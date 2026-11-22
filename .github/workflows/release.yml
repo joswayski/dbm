@@ -585,7 +585,17 @@ jobs:
           sha256sum -- * > ../SHA256SUMS
           cp ../SHA256SUMS SHA256SUMS
           cat SHA256SUMS
-      - uses: actions/attest-build-provenance@v2
+      # Sigstore's transparency log occasionally fails to return a fresh entry
+      # ("error fetching tlog entry - (404)"); attest again once after a pause.
+      - id: attest
+        uses: actions/attest-build-provenance@v2
+        continue-on-error: true
+        with:
+          subject-path: assets/*
+      - if: steps.attest.outcome == 'failure'
+        run: sleep 30
+      - if: steps.attest.outcome == 'failure'
+        uses: actions/attest-build-provenance@v2
         with:
           subject-path: assets/*
       - name: Upload the assets, then publish
