@@ -257,6 +257,49 @@ Still open: a grid on screen costs 20–35 MB for eight columns and grows with
 the column count, because every cell is a widget. The Win32 grid draws its
 cells itself; doing the same in GTK is the remaining large saving.
 
+### Measurements: AppKit memory against PostgreSQL (macOS, 2026-11-22)
+
+Physical footprint from `footprint` for `build.sh` builds on an Apple Silicon
+MacBook Pro with an XDR display, walking the states below against a local
+PostgreSQL 18 table (300,000 wide rows) with a throwaway profile store and
+keychain. Two passes per build; "before" is commit `05e5c33`, "after" is
+`326dc22`.
+
+| State | Before | After |
+| --- | ---: | ---: |
+| Launch, no connection | 27.6–31.7 MB | 13.6–13.7 MB |
+| Connected, query tab | 57.4–59.1 MB | 26.7–26.8 MB |
+| Table tab open | 75.1–75.5 MB | 38.5–38.6 MB |
+| After scrolling five table pages | 126.5–128.8 MB | 37.3–37.8 MB |
+| 10,000-row wide result | 149.0–152.8 MB | 49.8–50.1 MB |
+| That result scrolled top to bottom | 237.1–254.6 MB | 50.4–50.8 MB |
+| Four table tabs and three 10,000-row result tabs | 259.7–286.4 MB | 78.9 MB (one pass) |
+| Those tabs closed | 201.5–230.9 MB | 52.5–53.7 MB |
+| Disconnected | 83.3–83.5 MB | 32.8–36.1 MB |
+| Idle 60 s later | 62.1–85.1 MB | 33.4–34.7 MB |
+
+Idle CPU was 0.0% in both builds, and launch to first window about 170 ms in
+both (median of eight alternating launches each).
+
+What changed:
+
+- The grids built a new row view for every row shown and `NSTableView` kept
+  all of them, each with a layer backing store: 5,041 row views after
+  scrolling a 10,000-row result. Row views are now reused, and a row draws its
+  cells into one layer.
+- The window inherited an extended-range color space on wide-gamut and XDR
+  displays, which enlarged every backing store. It now uses sRGB; colors shift
+  by at most 12/255.
+- Panels, including the window-sized root, painted their fills and hairlines
+  into full-size bitmaps. They now use layer properties and keep no backing
+  store.
+
+Still open: while anything redraws, the footprint rises by 85–100 MB of
+graphics memory that macOS frees about a second after drawing stops, in both
+builds, so a sample taken mid-draw reads that much higher (the second "after"
+pass of the seven-tab state did). About 18 MB above the launch level remains
+after disconnecting.
+
 ### Measurements: egui vs Tauri (Linux, 2026-09-25)
 
 Release builds of the egui workbench and the former Tauri app, same VM, same
