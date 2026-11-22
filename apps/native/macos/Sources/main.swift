@@ -146,6 +146,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, NS
         window.title = demo ? "Anybase — DEMO" : "Anybase"
         window.minSize = NSSize(width: 900, height: 600)
         window.backgroundColor = Graphite.bg
+        window.colorSpace = .sRGB
         window.delegate = self
         window.setFrameAutosaveName(demo ? "" : "DBMNativeMain")
 
