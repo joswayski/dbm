@@ -62,6 +62,8 @@ pub struct TableView {
     reflow_filters: Rc<dyn Fn()>,
     filter_rows: gtk::Box,
     filter_signature: RefCell<String>,
+    /// Set by Add filter: the row it adds takes the keyboard.
+    focus_new_filter: Cell<bool>,
     limit: gtk::SpinButton,
     sort: gtk::DropDown,
     sort_names: RefCell<Vec<String>>,
@@ -407,6 +409,7 @@ impl TableView {
             reflow_filters,
             filter_rows,
             filter_signature: RefCell::new("unset".into()),
+            focus_new_filter: Cell::new(false),
             limit,
             sort,
             sort_names: RefCell::new(Vec::new()),
@@ -501,7 +504,11 @@ impl TableView {
             button.set_popover(Some(&popover));
         });
         let handle = app.clone();
+        let weak = Rc::downgrade(self);
         add_filter.connect_clicked(move |_| {
+            if let Some(view) = weak.upgrade() {
+                view.focus_new_filter.set(true);
+            }
             handle.update(|state| {
                 if let Some(table) = state.tables.get_mut(&tab) {
                     let first = table
@@ -1002,6 +1009,8 @@ impl TableView {
         }
         *self.filter_signature.borrow_mut() = signature;
         ui::clear(&self.filter_rows);
+        let focus_last = self.focus_new_filter.take();
+        let mut new_value = None;
         let column_list: Vec<&str> = columns.iter().map(String::as_str).collect();
         let operator_list: Vec<&str> = FILTER_OPERATORS.iter().map(|(_, l)| *l).collect();
         for (index, filter) in table.filters.iter().enumerate() {
@@ -1050,6 +1059,9 @@ impl TableView {
                 let handle = self.app.clone();
                 value.connect_activate(move |_| handle.update(|state| apply_filters(state, tab)));
                 row.append(&value);
+                if focus_last && index + 1 == table.filters.len() {
+                    new_value = Some(value);
+                }
             } else {
                 let none = ui::label("No value needed", &["faint"]);
                 none.set_hexpand(true);
@@ -1100,6 +1112,10 @@ impl TableView {
             });
             row.append(&remove);
             self.filter_rows.append(&row);
+        }
+        // A new filter is ready to type its value into.
+        if let Some(value) = new_value {
+            value.grab_focus();
         }
     }
 

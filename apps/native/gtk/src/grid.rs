@@ -175,6 +175,8 @@ pub struct ResultGrid {
     /// is busy.
     value: Values,
     key: RefCell<Option<ResultKey>>,
+    /// Name and type of each column the view was built for.
+    shape: RefCell<Vec<(String, String)>>,
     cells: Cells<Cell>,
 }
 
@@ -197,6 +199,7 @@ impl ResultGrid {
             store,
             value: Rc::new(value),
             key: RefCell::new(None),
+            shape: RefCell::default(),
             cells: Rc::default(),
         }
     }
@@ -211,6 +214,17 @@ impl ResultGrid {
             return;
         }
         *self.key.borrow_mut() = key;
+        // The same columns again (a re-run, usually) keep the view's
+        // columns, and with them the widths the user dragged.
+        let shape = columns
+            .iter()
+            .map(|c| (c.name.clone(), c.data_type.clone()))
+            .collect::<Vec<_>>();
+        if !shape.is_empty() && *self.shape.borrow() == shape {
+            fill(&self.store, rows.len());
+            return;
+        }
+        *self.shape.borrow_mut() = shape;
         while let Some(column) = self
             .view
             .columns()
