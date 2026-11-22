@@ -175,6 +175,15 @@ final class PendingRow {
         xmin = row.count > count ? (row[count] as? String).map { $0 as Any } ?? NSNull() : NSNull()
     }
 
+    /// A staged edit saved before an update's restart (`Session`).
+    init(json: [String: Any]) {
+        original = json["original"] as? [Any] ?? []
+        changes = json["changes"] as? [Any] ?? original
+        primaryKey = json["primaryKey"] as? [Any] ?? []
+        xmin = json["xmin"] ?? NSNull()
+        deleted = bool(json["deleted"])
+    }
+
     var json: [String: Any] {
         ["original": original, "changes": changes, "primaryKey": primaryKey, "xmin": xmin, "deleted": deleted]
     }
@@ -257,6 +266,33 @@ final class TableState {
             self.order = (string(order["column"]), bool(order["descending"]))
         } else {
             order = nil
+        }
+    }
+
+    /// Paging, filters, sort, and staged edits, as an update's restart saves them.
+    var sessionPage: [String: Any] {
+        [
+            "index": pageIndex, "limit": limit, "filters": applied,
+            "order": order.map { ["column": $0.column, "descending": $0.descending] as Any } ?? NSNull(),
+            "pending": pending.keys.sorted().compactMap { pending[$0]?.json },
+        ]
+    }
+
+    /// A table view with a saved page's paging, filters, and sort; its edits
+    /// are put back once the page loads.
+    convenience init(sessionPage page: [String: Any]) {
+        self.init()
+        limit = max(1, optionalInt(page["limit"]) ?? maxPreviewRows)
+        pageIndex = int(page["index"])
+        applied = page["filters"] as? [[String: Any]] ?? []
+        filters = applied.map { filter in
+            var draft = FilterDraft(column: string(filter["column"]))
+            draft.operatorName = string(filter["operator"])
+            draft.value = string(filter["value"])
+            return draft
+        }
+        if let order = page["order"] as? [String: Any] {
+            self.order = (string(order["column"]), bool(order["descending"]))
         }
     }
 

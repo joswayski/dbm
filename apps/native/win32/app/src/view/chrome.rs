@@ -153,7 +153,6 @@ impl Workbench {
         let mut col = ui.child(rect, Dir::Down);
         col.spacing.y = 0.0;
         let label = self.updates.label();
-        let detail = self.updates.detail();
         let right = |ui: &Ui, w: f32| {
             Rect::from_min_size(pos2(rect.right() - w, ui.cursor().y), vec2(w, 0.0))
         };
@@ -170,11 +169,7 @@ impl Workbench {
                 let r = right(&col, w);
                 let br = Rect::from_min_size(r.min, vec2(w, 24.0));
                 col.advance_past(br);
-                if button
-                    .show_in(&mut col, br)
-                    .on_hover_text(detail.clone())
-                    .clicked
-                {
+                if button.show_in(&mut col, br).clicked {
                     if let updates::State::Available(update) = &self.updates.state {
                         self.confirm_update = Some(update.clone());
                     } else {
@@ -202,7 +197,7 @@ impl Workbench {
         // Click copies the version, for bug reports.
         let response = col
             .interact(r, id, Sense::CLICK)
-            .on_hover_text(format!("{detail}\nClick to copy the version"));
+            .on_hover_text("Click to copy the version");
         if response.clicked {
             let text = version.trim_start_matches("Version ").to_string();
             col.ctx.copy_text(&text);

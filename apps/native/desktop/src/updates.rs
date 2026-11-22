@@ -58,6 +58,9 @@ pub struct Updates {
     /// The newest build whose highlights this install has shown or skipped.
     acknowledged: Option<u64>,
     acknowledged_changed: bool,
+    /// A verified download waiting for the app to save its tabs and call
+    /// [`Updates::restart`].
+    downloaded: Option<PathBuf>,
     next_check: f64,
     sender: Sender<Event>,
     receiver: Receiver<Event>,
@@ -75,6 +78,7 @@ impl Updates {
             current: dbm_update::current_build(),
             acknowledged: None,
             acknowledged_changed: false,
+            downloaded: None,
             next_check: FIRST_CHECK_AFTER,
             sender,
             receiver,
@@ -105,12 +109,7 @@ impl Updates {
                         },
                     };
                 }
-                Event::Downloaded(Ok(path)) => {
-                    if let Err(error) = replace_and_restart(&path) {
-                        self.state = State::Failed(error);
-                        self.failure_open = true;
-                    }
-                }
+                Event::Downloaded(Ok(path)) => self.downloaded = Some(path),
                 Event::Downloaded(Err(error)) => {
                     self.state = State::Failed(error);
                     self.failure_open = true;
@@ -167,6 +166,24 @@ impl Updates {
             let _ = sender.send(Event::Downloaded(result));
             wake();
         });
+    }
+
+    /// The update is downloaded and verified: the app saves its open tabs
+    /// (`crate::session`) and then calls [`Updates::restart`].
+    pub fn ready_to_restart(&self) -> bool {
+        self.downloaded.is_some()
+    }
+
+    /// Puts the download in place and restarts into it. Returns only when
+    /// that failed, with the failure dialog open.
+    pub fn restart(&mut self) {
+        let Some(path) = self.downloaded.take() else {
+            return;
+        };
+        if let Err(error) = replace_and_restart(&path) {
+            self.state = State::Failed(error);
+            self.failure_open = true;
+        }
     }
 
     /// Starts What's new for this launch from the stored acknowledgement. A
@@ -271,18 +288,6 @@ impl Updates {
             dbm_update::current_version().unwrap_or_default()
         )
     }
-
-    pub fn detail(&self) -> String {
-        match &self.state {
-            State::Available(update) if !update.notes.is_empty() => update.notes.clone(),
-            State::Available(update) => update.version.clone(),
-            State::Failed(message) => message.clone(),
-            _ => format!(
-                "Installed {}",
-                dbm_update::current_version().unwrap_or_default()
-            ),
-        }
-    }
 }
 
 /// Where Windows keeps the replaced executable until the next launch; a
@@ -311,8 +316,8 @@ fn appimage() -> Option<PathBuf> {
 }
 
 /// Puts the verified download in place of this executable (or AppImage),
-/// starts it with the same arguments, and exits. The user confirmed losing
-/// unsaved work.
+/// starts it with the same arguments, and exits. The app saved its open tabs
+/// first.
 fn replace_and_restart(download: &Path) -> Result<(), String> {
     let failed = |error: std::io::Error| format!("Couldn't install the update: {error}");
     let current = match appimage() {
@@ -390,6 +395,7 @@ mod tests {
             highlights: vec![dbm_update::Highlight {
                 title: title.into(),
                 body: String::new(),
+                commits: Vec::new(),
             }],
         }
     }

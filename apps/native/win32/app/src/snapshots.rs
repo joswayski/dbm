@@ -89,6 +89,7 @@ const STEPS: &[(&str, fn(&mut Workbench))] = &[
             highlights: Some(vec![dbm_update::Highlight {
                 title: "Faster Windows app".into(),
                 body: "Anybase now draws with Direct2D instead of egui.".into(),
+                commits: vec!["2937930046c2f0e986a1b71dc2faf2fbda55e4ba".into()],
             }]),
             released: Some("November 12, 2026".into()),
             commit: Some("2937930046c2f0e986a1b71dc2faf2fbda55e4ba".into()),

@@ -99,6 +99,9 @@ impl App {
                 .get(settings::WHATS_NEW)
                 .and_then(|value| value.parse().ok());
             state.updates.start_whats_new(acknowledged);
+            if let Some(path) = settings::session_path() {
+                state.restore_session(path);
+            }
         }
         let window = gtk::ApplicationWindow::builder()
             .application(application)
@@ -202,10 +205,13 @@ impl App {
         let next_check = self.quiet_with(|state, now| {
             state.drain();
             if state.demo {
-                None
-            } else {
-                state.updates.poll(now)
+                return None;
             }
+            let next = state.updates.poll(now);
+            if state.updates.ready_to_restart() {
+                state.restart_for_update();
+            }
+            next
         });
         if let Some(delay) = next_check.flatten() {
             self.schedule(self.now() + delay.as_secs_f64());
@@ -631,12 +637,7 @@ impl App {
         let updates = &state.updates;
         let enabled = updates.enabled() && !state.demo;
         let signature = if enabled {
-            format!(
-                "{}|{}|{}",
-                updates.label(),
-                updates.detail(),
-                updates.version_label()
-            )
+            format!("{}|{}", updates.label(), updates.version_label())
         } else {
             String::new()
         };
@@ -652,10 +653,9 @@ impl App {
         let column = ui::vbox(0);
         column.set_valign(gtk::Align::Center);
         let label = updates.label();
-        let detail = updates.detail();
         match &updates.state {
             Update::Available(update) => {
-                let button = ui::button("accent-button", None, &label, &detail);
+                let button = ui::button("accent-button", None, &label, "");
                 button.add_css_class("small");
                 let app = self.clone();
                 let update = update.clone();
@@ -666,7 +666,7 @@ impl App {
                 column.append(&button);
             }
             Update::Failed(_) => {
-                let button = ui::button("secondary-button", None, &label, &detail);
+                let button = ui::button("secondary-button", None, &label, "");
                 button.add_css_class("small");
                 let app = self.clone();
                 // Shows the error with Try again and the download fallback.
@@ -680,7 +680,6 @@ impl App {
         }
         let version = ui::label(&updates.version_label(), &["update-version"]);
         version.set_xalign(1.0);
-        version.set_tooltip_text(Some(&detail));
         // Selectable, so the version can be copied into bug reports.
         version.set_selectable(true);
         column.append(&version);

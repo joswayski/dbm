@@ -98,6 +98,10 @@ pub struct Release {
 pub struct Highlight {
     pub title: String,
     pub body: String,
+    /// The full source commits the highlight describes, each linked from
+    /// the update review. Highlights before this field have none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub commits: Vec<String>,
 }
 
 /// Releases published on the same UTC day, newest first.
@@ -242,6 +246,11 @@ pub fn days(releases: &[Release], after: u64, through: u64) -> Vec<Day> {
         }
     }
     days.into_iter().map(|(_, day)| day).collect()
+}
+
+/// The GitHub release page of a version, e.g. "2026.10.18.2".
+pub fn release_url(version: &str) -> String {
+    format!("{REPOSITORY_URL}/releases/tag/v{version}")
 }
 
 /// The GitHub page of a release's source commit.
@@ -493,6 +502,7 @@ mod tests {
                 .map(|title| Highlight {
                     title: (*title).into(),
                     body: format!("{title} body"),
+                    commits: Vec::new(),
                 })
                 .collect(),
         }

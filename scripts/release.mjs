@@ -110,7 +110,11 @@ function releaseEntry(value) {
     version,
     commit,
     publishedAt,
-    highlights: highlights.map(({ title, body }) => ({ title, body })),
+    highlights: highlights.map(({ title, body, commits }) => {
+      // The commits each highlight cites, which the update review links.
+      const cited = Array.isArray(commits) ? commits.filter((c) => /^[0-9a-f]{40}$/u.test(c)) : [];
+      return cited.length ? { title, body, commits: cited } : { title, body };
+    }),
   };
 }
 
@@ -208,7 +212,7 @@ async function main() {
     }
     const recentHighlights = releaseHistory(previous, null)
       .slice(0, 3)
-      .flatMap((release) => release.highlights);
+      .flatMap((release) => release.highlights.map(({ title, body }) => ({ title, body })));
     const highlights = await releaseHighlights(process.env.PREVIOUS_TAG || null, commit, {
       recentHighlights,
     });

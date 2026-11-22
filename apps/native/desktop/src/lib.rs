@@ -1,7 +1,8 @@
 //! The UI-free part of the Windows and Linux desktop apps: the per-connection
-//! database worker and the self-updater. Each UI toolkit supplies a [`Wake`]
+//! database worker, the self-updater, and the tabs kept across an update. Each UI toolkit supplies a [`Wake`]
 //! that schedules its next frame or main-loop turn when work finishes.
 
+pub mod session;
 pub mod updates;
 pub mod worker;
 

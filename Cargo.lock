@@ -546,6 +546,8 @@ version = "0.1.0"
 dependencies = [
  "dbm-core",
  "dbm-update",
+ "serde",
+ "serde_json",
  "tokio",
  "uuid",
 ]

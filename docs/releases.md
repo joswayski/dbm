@@ -112,12 +112,12 @@ Windows and Linux. The top bar normally shows a small, non-clickable **Version
 <version>** label; manual checks show non-clickable status text above it.
 When the manifest lists a higher build number, an **Update to v<version>**
 button appears above the installed version. Failed manual checks offer
-**Retry update**. Installing asks for
-confirmation, because unsaved query text and staged edits are discarded. It
-then downloads the platform's artifact, verifies its minisign signature
+**Retry update**. The button opens the update review (below) with **Update
+now** and **Not now**. Installing downloads the platform's artifact, verifies its minisign signature
 against the public key in `crates/dbm-update` (including that the signed
 `file:` name in the trusted comment matches the artifact's URL, so release
-assets must keep the name they were signed under), swaps it in, and restarts.
+assets must keep the name they were signed under), saves the open tabs, swaps
+it in, and restarts.
 When the release has a patch from the installed build, it downloads that
 instead (see [Patch updates](#patch-updates)).
 
@@ -146,11 +146,28 @@ same menu.
 platform's URL and signature, and `releases`: recent releases' highlights
 (below). `darwin-aarch64` and `darwin-x86_64` both point at the universal zip.
 
-The install confirmation is the update review: "Version X · date", the
-version linking to its source commit, then the highlights of every listed
-release newer than the installed build, newest first, with a title an older
-release repeats kept once. If the offered release has no highlights listed, it
-shows the plain notes instead.
+The update review, as Captures words its update notice: **Update
+available**, "Version X · date" linking to the version's GitHub release, then
+the highlights of every listed release newer than the installed build, newest
+first, with a title an older release repeats kept once. Each highlight ends
+with links to the commits it cites (short hashes; releases before this field
+have none). If the offered release has no highlights listed, it shows the
+plain notes instead. With tabs open, it says they reopen after the update.
+
+**Open tabs survive the restart**, as Captures reopens open captures: just
+before the new build replaces it, the app writes its tabs to
+`update-session.json` beside its settings (`~/Library/Application
+Support/io.github.dbm` on macOS, `%APPDATA%\DBM\data` on Windows,
+`~/.local/share/dbm` on Linux; user-only permissions on Unix). The restarted app
+reads and deletes it, connects each profile that had tabs, and reopens them
+in place: query text, titles, collapsed state, the active tab, and table tabs'
+page, page size, filters, and sort. Results are fetched again; a query tab
+showing the editable table viewer re-runs its `SELECT *`. Staged edits and
+deletes come back on their rows, matched by primary key and carrying the
+original values and `xmin` they were staged against, so saving still reports
+rows another writer changed meanwhile. Edits whose row isn't on the reloaded
+page are dropped with a notice. Nothing in the file leaves the machine, and it
+never holds passwords.
 
 **What's new** (Anybase menu on macOS, Help menu on Windows and Linux) shows the
 listed releases up to the installed build, grouped under their UTC publication

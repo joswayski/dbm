@@ -65,6 +65,9 @@ label { color: inherit; }
 .modified-text { color: @modified; }
 .section-label { font-size: 11px; font-weight: 700; color: @muted; }
 .eyebrow { font-size: 10.5px; font-weight: 700; color: @faint; }
+/* Links in release notes: accent text that brightens and underlines on hover. */
+.links link { color: @accent_text; text-decoration: none; transition: color 120ms ease-out; }
+.links link:hover { color: @text_strong; text-decoration: underline; }
 
 /* ---- surfaces ------------------------------------------------------- */
 

@@ -51,6 +51,10 @@ impl View {
                 .get(store::WHATS_NEW)
                 .and_then(|v| v.parse().ok());
             view.app.updates.start_whats_new(acknowledged);
+            if let Some(dir) = store::data_dir() {
+                view.app
+                    .restore_session(dir.join(dbm_desktop::session::FILE_NAME));
+            }
         }
         view
     }
@@ -60,10 +64,13 @@ impl View {
         app.now = ui.ctx.time();
         let screen = ui.ctx.screen_rect();
         app.window_width = screen.width();
-        if !app.demo
-            && let Some(next) = app.updates.poll(app.now)
-        {
-            ui.ctx.request_repaint_after(next.as_secs_f64());
+        if !app.demo {
+            if let Some(next) = app.updates.poll(app.now) {
+                ui.ctx.request_repaint_after(next.as_secs_f64());
+            }
+            if app.updates.ready_to_restart() {
+                app.restart_for_update();
+            }
         }
         app.drain();
         if ui.ctx.close_requested()

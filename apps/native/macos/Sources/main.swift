@@ -44,6 +44,15 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, NS
     private var exportRows: [UUID: Int] = [:]
     private var panes: [UUID: NSView] = [:]
     private var sheet: ProfileSheet?
+    /// Tabs saved before the update that restarted the app (`Session`),
+    /// each reopened when its profile connects.
+    private var restoring: [[String: Any]] = []
+    private var restoringActive: Int?
+    /// Saved table settings for a query tab's table viewer, applied when its
+    /// re-run `SELECT *` opens the viewer.
+    private var restoringPages: [UUID: [String: Any]] = [:]
+    /// Saved staged edits, put back on their rows when the page loads.
+    private var restoringEdits: [UUID: [[String: Any]]] = [:]
 
     // MARK: Lifecycle
 
@@ -52,10 +61,17 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, NS
         NSApp.appearance = NSAppearance(named: .darkAqua)
         installMenu()
         buildWindow()
+        if !demo, let saved = Session.take() {
+            restoring = saved["tabs"] as? [[String: Any]] ?? []
+            restoringActive = optionalInt(saved["active"])
+            // Indexes are positions in the saved list.
+            for index in restoring.indices { restoring[index]["_index"] = index }
+        }
         loadProfiles(openOnStartup: true)
         updater.onChange = { [weak self] in self?.updateChanged() }
         updater.onWhatsNew = { [weak self] days in self?.showWhatsNew(days) }
         updater.onInstallFailed = { [weak self] message in self?.showUpdateFailed(message) }
+        updater.beforeRestart = { [weak self] in self?.saveSession() }
         topBar.updateButton.handler = { [weak self] in self?.updateClicked() }
         topBar.showUpdate(updater)
         if !demo {
@@ -73,8 +89,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, NS
         topBar.showUpdate(updater)
     }
 
-    /// Checks on demand, or installs a found build after confirming that
-    /// unsaved query text and staged edits will be discarded.
+    /// Checks on demand, or reviews a found build: Captures' update notice
+    /// with the version, what's new, and that open tabs come back.
     private func updateClicked() {
         if case .failed(let message) = updater.state {
             showUpdateFailed(message)
@@ -85,11 +101,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, NS
             return
         }
         let alert = NSAlert()
-        alert.messageText = "Install Anybase \(string(update["version"])) and restart now?"
-        alert.informativeText = "Unsaved query text and pending table edits will be lost."
-        alert.accessoryView = ReleaseNotes.accessory(ReleaseNotes.review(update))
-        alert.addButton(withTitle: "Install and Restart")
-        alert.addButton(withTitle: "Later")
+        alert.messageText = "Update available"
+        alert.accessoryView = ReleaseNotes.accessory(ReleaseNotes.review(update, tabsOpen: !tabs.isEmpty))
+        alert.addButton(withTitle: "Update now")
+        alert.addButton(withTitle: "Not now")
         alert.beginSheetModal(for: window) { [weak self] response in
             if response == .alertFirstButtonReturn { self?.updater.install(update) }
         }
@@ -289,8 +304,12 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, NS
                 self.profiles = array(value).map { Profile(raw: dictionary($0["profile"])) }
                     .sorted { $0.name.lowercased() < $1.name.lowercased() }
                 self.refresh()
+                let known = Set(self.profiles.map(\.id))
+                self.restoring.removeAll { !known.contains(string($0["profileId"])) }
                 if openOnStartup && !self.demo {
-                    for profile in self.profiles where profile.openOnStartup {
+                    // Profiles with tabs to restore connect too.
+                    let restoring = Set(self.restoring.map { string($0["profileId"]) })
+                    for profile in self.profiles where profile.openOnStartup || restoring.contains(profile.id) {
                         self.connect(profile.id, activate: false)
                     }
                 }
@@ -419,12 +438,73 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, NS
         if let index = profiles.firstIndex(where: { $0.id == id }) { profiles[index] = profile }
         workspaces[id] = Workspace(profile: profile, databases: databases)
         collapsedProfiles.remove(id)
+        restoreTabs(id)
         if activeProfileID == nil || activeProfileID == id {
             activate(id)
         } else if !tabs.contains(where: { $0.profileID == id }) {
             openQuery(id, activate: false)
         }
         loadSchema(id, announce: false)
+    }
+
+    // MARK: Update session
+
+    /// Open tabs, with tabs still waiting for their profile, for the
+    /// restarted app.
+    private func saveSession() {
+        guard !demo else { return }
+        var saved: [[String: Any]] = tabs.map { tab in
+            var entry: [String: Any] = ["profileId": tab.profileID, "title": tab.title, "sql": tab.sql,
+                                        "collapsed": tab.collapsed]
+            if tab.kind == .table { entry["table"] = [tab.schema, tab.table] }
+            if tab.embedded != nil, let sql = tab.lastExecuted { entry["embeddedSql"] = sql }
+            if var page = tab.tableState?.sessionPage ?? restoringPages[tab.id] {
+                var pending = page["pending"] as? [[String: Any]] ?? []
+                pending += restoringEdits[tab.id] ?? []
+                page["pending"] = pending
+                entry["page"] = page
+            }
+            return entry
+        }
+        let active = activeTab.flatMap { active in tabs.firstIndex { $0 === active } }
+        saved += restoring.map { $0.filter { $0.key != "_index" } }
+        Session.save(["tabs": saved, "active": active.map { $0 as Any } ?? NSNull()])
+    }
+
+    /// Reopens the saved tabs of a profile that just connected.
+    private func restoreTabs(_ id: String) {
+        let mine = restoring.filter { string($0["profileId"]) == id }
+        restoring.removeAll { string($0["profileId"]) == id }
+        for saved in mine {
+            let table = saved["table"] as? [String]
+            let tab = WorkTab(profileID: id, kind: table?.count == 2 ? .table : .query, title: string(saved["title"]))
+            tab.sql = string(saved["sql"])
+            tab.selection = NSRange(location: (tab.sql as NSString).length, length: 0)
+            let active = optionalInt(saved["_index"]) == restoringActive
+            tab.collapsed = bool(saved["collapsed"]) && !active
+            tabs.append(tab)
+            if active {
+                activeTab = tab
+                activeProfileID = id
+            }
+            let page = saved["page"] as? [String: Any]
+            if let table, table.count == 2 {
+                tab.schema = table[0]
+                tab.table = table[1]
+                tab.tableState = restoredTable(tab, page)
+                loadTable(tab)
+            } else if let sql = saved["embeddedSql"] as? String {
+                // A table viewer comes back by re-running its `SELECT *`.
+                restoringPages[tab.id] = page
+                execute(tab, sql: sql, refresh: true)
+            }
+        }
+    }
+
+    private func restoredTable(_ tab: WorkTab, _ page: [String: Any]?) -> TableState {
+        guard let page else { return TableState() }
+        if let edits = page["pending"] as? [[String: Any]], !edits.isEmpty { restoringEdits[tab.id] = edits }
+        return TableState(sessionPage: page)
     }
 
     /// Keeps or restores the profile's workbench: its current tab, its latest
@@ -668,7 +748,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, NS
             case .success(let value):
                 tab.lastExecuted = sql
                 tab.embedded = Helpers.resolveFullTableSelect(sql, tree: self.schemas[tab.profileID] ?? [])
-                tab.tableState = tab.embedded == nil ? nil : TableState()
+                let page = self.restoringPages.removeValue(forKey: tab.id)
+                tab.tableState = tab.embedded == nil ? nil : self.restoredTable(tab, page)
                 tab.result = dictionary(value)
                 if tab.embedded != nil { self.loadTable(tab) }
             case .failure(let error):
@@ -702,6 +783,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, NS
             switch result {
             case .success(let value):
                 state.loaded(TablePage(dictionary(value)))
+                if let edits = self.restoringEdits.removeValue(forKey: tab.id) {
+                    let missing = Session.reapply(edits, to: state)
+                    if missing > 0 { state.message = .error(Session.missingRowsMessage(missing)) }
+                }
                 // Once the independently paged table has loaded, its original
                 // query rows are redundant. Keep result metadata for the
                 // completion-time label, and retain rows if table loading fails.

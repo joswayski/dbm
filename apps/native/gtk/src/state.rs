@@ -20,8 +20,8 @@ use dbm_core::sql_text::{
     csv_document, describe_schema_refresh, requires_confirmation, resolve_full_table_select,
     safe_file_name,
 };
-use dbm_desktop::updates;
 use dbm_desktop::worker::{Command, ExportRequest, Lane, Payload, RequestId, Work, Worker};
+use dbm_desktop::{session, updates};
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -889,6 +889,17 @@ pub struct State {
     pub updates: updates::Updates,
     /// An update awaiting the user's go-ahead.
     pub confirm_update: Option<dbm_update::Available>,
+    /// Where open tabs are saved before an update restarts the app; `None`
+    /// for `--demo`.
+    pub session_path: Option<PathBuf>,
+    /// Tabs saved before the update that restarted the app, each reopened
+    /// when its profile connects, and whether it was the active tab.
+    pub restoring: Vec<(session::Tab, bool)>,
+    /// Restored table settings for a query tab's table viewer, applied when
+    /// its re-run `SELECT *` opens the viewer.
+    pub restoring_pages: HashMap<u64, session::Page>,
+    /// Restored staged edits, put back on their rows when the page loads.
+    pub restoring_edits: HashMap<u64, Vec<RowMutation>>,
     pub renaming: Option<u64>,
     pub sidebar_collapsed: bool,
     pub now: f64,
@@ -930,6 +941,10 @@ impl State {
             saving_results: HashSet::new(),
             updates,
             confirm_update: None,
+            session_path: None,
+            restoring: Vec::new(),
+            restoring_pages: HashMap::new(),
+            restoring_edits: HashMap::new(),
             renaming: None,
             sidebar_collapsed: false,
             now: 0.0,
@@ -1175,11 +1190,21 @@ impl State {
             }
             Payload::Profiles(profiles) => {
                 self.profiles = profiles;
+                let profiles = &self.profiles;
+                self.restoring
+                    .retain(|(tab, _)| profiles.iter().any(|p| p.id == tab.profile_id));
                 if !self.demo {
+                    // Profiles with tabs to restore connect too.
                     let startup: Vec<_> = self
                         .profiles
                         .iter()
-                        .filter(|profile| profile.open_on_startup)
+                        .filter(|profile| {
+                            profile.open_on_startup
+                                || self
+                                    .restoring
+                                    .iter()
+                                    .any(|(tab, _)| tab.profile_id == profile.id)
+                        })
                         .map(|profile| profile.id)
                         .collect();
                     for id in startup {
@@ -1249,6 +1274,31 @@ impl State {
                     let latest = state.in_flight == 0;
                     if let Some(request) = state.requested.take_if(|_| latest) {
                         state.loaded(page, request);
+                        if let Some(edits) =
+                            target.and_then(|tab| self.restoring_edits.remove(&tab))
+                            && let Some(page) = state.page.clone()
+                        {
+                            let (matched, missing) = session::match_rows(&page, edits);
+                            for (row, edit) in matched {
+                                state.pending.insert(
+                                    row,
+                                    PendingRow {
+                                        original: edit.original,
+                                        changes: edit.changes,
+                                        primary_key: edit.primary_key,
+                                        xmin: edit.xmin,
+                                        deleted: edit.deleted,
+                                    },
+                                );
+                            }
+                            state.version += 1;
+                            if missing > 0 {
+                                state.message = Some(Message::error(
+                                    session::missing_rows_message(missing),
+                                    self.now,
+                                ));
+                            }
+                        }
                         // The paged table now owns the displayed rows; keep the
                         // query's metadata for its completion label only.
                         if embedded
@@ -1348,6 +1398,7 @@ impl State {
         }
         self.workspaces.insert(id, workspace);
         self.collapsed_profiles.remove(&id);
+        self.restore_tabs(id);
         if self.active_profile.is_none() || self.active_profile == Some(id) {
             self.activate_profile(id);
         } else if !self.tabs.iter().any(|tab| tab.profile_id == id) {
@@ -1379,7 +1430,10 @@ impl State {
         self.query_results.insert(tab_id, result);
         self.tables.remove(&tab_id);
         if embedded {
-            let table = self.new_table_state();
+            let table = match self.restoring_pages.remove(&tab_id) {
+                Some(page) => self.restored_table(tab_id, page),
+                None => self.new_table_state(),
+            };
             self.tables.insert(tab_id, table);
             self.load_table(tab_id);
         }
@@ -2300,6 +2354,165 @@ impl State {
         }
     }
 
+    /// Reads the tabs saved before an update restarted the app; they reopen
+    /// as their profiles connect.
+    pub fn restore_session(&mut self, path: PathBuf) {
+        if let Some(saved) = session::take(&path) {
+            self.restoring = saved
+                .tabs
+                .into_iter()
+                .enumerate()
+                .map(|(index, tab)| (tab, saved.active == Some(index)))
+                .collect();
+        }
+        self.session_path = Some(path);
+    }
+
+    /// Reopens the saved tabs of a profile that just connected.
+    fn restore_tabs(&mut self, profile: Uuid) {
+        let (tabs, rest) = std::mem::take(&mut self.restoring)
+            .into_iter()
+            .partition(|(tab, _)| tab.profile_id == profile);
+        self.restoring = rest;
+        for (saved, active) in tabs {
+            let id = self.next_id;
+            self.next_id += 1;
+            let kind = match saved.table {
+                Some((schema, table)) => TabKind::Table { schema, table },
+                None => TabKind::Query,
+            };
+            self.tabs.push(Tab {
+                id,
+                profile_id: profile,
+                title: saved.title,
+                kind: kind.clone(),
+                selection: (saved.sql.len(), saved.sql.len()),
+                sql: saved.sql,
+                last_executed: None,
+                embedded: None,
+                collapsed: saved.collapsed && !active,
+            });
+            if active {
+                self.active_tab = Some(id);
+                self.active_profile = Some(profile);
+                self.focus_editor = (kind == TabKind::Query).then_some(id);
+            }
+            match (kind, saved.page) {
+                (TabKind::Table { .. }, page) => {
+                    let table = match page {
+                        Some(page) => self.restored_table(id, page),
+                        None => self.new_table_state(),
+                    };
+                    self.tables.insert(id, table);
+                    self.load_table(id);
+                }
+                (TabKind::Query, page) => {
+                    // A table viewer comes back by re-running its `SELECT *`.
+                    if let Some(sql) = saved.embedded_sql {
+                        if let Some(page) = page {
+                            self.restoring_pages.insert(id, page);
+                        }
+                        self.run_query(id, sql, true, true);
+                    }
+                }
+            }
+        }
+    }
+
+    /// A table state with a saved page's paging, filters, and sort; its
+    /// staged edits wait in `restoring_edits` for the page to load.
+    fn restored_table(&mut self, tab: u64, page: session::Page) -> TableState {
+        if !page.pending.is_empty() {
+            self.restoring_edits.insert(tab, page.pending);
+        }
+        TableState {
+            page_index: page.index,
+            limit: if page.limit == 0 {
+                MAX_PREVIEW_ROWS
+            } else {
+                page.limit
+            },
+            filters: page
+                .filters
+                .iter()
+                .map(|f| FilterDraft {
+                    column: f.column.clone(),
+                    operator: f.operator,
+                    value: f.value.clone().unwrap_or_default(),
+                })
+                .collect(),
+            applied: page.filters,
+            order: page.order,
+            ..self.new_table_state()
+        }
+    }
+
+    /// Open tabs as an update's restart saves them, with tabs still waiting
+    /// for their profile to connect.
+    pub fn session(&self) -> session::Session {
+        let mut tabs: Vec<session::Tab> = self
+            .tabs
+            .iter()
+            .map(|tab| {
+                let page = self.tables.get(&tab.id).map(|table| {
+                    let mut pending: Vec<RowMutation> = table
+                        .pending
+                        .values()
+                        .map(|p| RowMutation {
+                            original: p.original.clone(),
+                            changes: p.changes.clone(),
+                            primary_key: p.primary_key.clone(),
+                            xmin: p.xmin.clone(),
+                            deleted: p.deleted,
+                        })
+                        .collect();
+                    pending.extend(
+                        self.restoring_edits
+                            .get(&tab.id)
+                            .cloned()
+                            .unwrap_or_default(),
+                    );
+                    session::Page {
+                        index: table.page_index,
+                        limit: table.limit,
+                        filters: table.applied.clone(),
+                        order: table.order.clone(),
+                        pending,
+                    }
+                });
+                session::Tab {
+                    profile_id: tab.profile_id,
+                    title: tab.title.clone(),
+                    table: match &tab.kind {
+                        TabKind::Table { schema, table } => Some((schema.clone(), table.clone())),
+                        TabKind::Query => None,
+                    },
+                    sql: tab.sql.clone(),
+                    embedded_sql: tab.embedded.as_ref().and(tab.last_executed.clone()),
+                    collapsed: tab.collapsed,
+                    page: page.or_else(|| self.restoring_pages.get(&tab.id).cloned()),
+                }
+            })
+            .collect();
+        let active = self
+            .active_tab
+            .and_then(|id| self.tabs.iter().position(|tab| tab.id == id));
+        tabs.extend(self.restoring.iter().map(|(tab, _)| tab.clone()));
+        session::Session { tabs, active }
+    }
+
+    /// The update is downloaded: save the open tabs and restart into it.
+    /// Returns only if the restart failed, with the failure dialog open.
+    pub fn restart_for_update(&mut self) {
+        if let Some(path) = &self.session_path {
+            let _ = session::save(path, &self.session());
+        }
+        self.updates.restart();
+        if let Some(path) = &self.session_path {
+            session::discard(path);
+        }
+    }
+
     pub fn close_requested(&mut self) -> bool {
         let dirty = self.tabs.iter().any(|tab| self.tab_dirty(tab.id));
         // Reads can be abandoned; a save or export stopped halfway can't.
@@ -2695,6 +2908,53 @@ pub mod tests {
             ("public", "customers")
         );
         assert_eq!(batch.mutations.len(), 1);
+    }
+
+    #[test]
+    fn tabs_and_staged_edits_survive_an_update_restart() {
+        let mut app = app();
+        let profile = DemoStore::new().profiles().remove(0);
+        let id = profile.id;
+        let workspace = WorkspaceInfo {
+            profile,
+            databases: vec![],
+        };
+        app.workspaces.insert(id, workspace.clone());
+        app.open_query(id, true);
+        app.tabs[0].sql = "select 42;".into();
+        app.open_table(id, "public".into(), "customers".into());
+        let tab = app.active_tab.unwrap();
+        let page = page();
+        let table = app.tables.get_mut(&tab).unwrap();
+        table.loaded(page.clone(), table.request(id, "public", "customers"));
+        stage_cell(table, 0, 1, "Renamed");
+        let staged = table.pending[&0].clone();
+        let path = std::env::temp_dir().join(format!("dbm-session-{}.json", Uuid::new_v4()));
+        session::save(&path, &app.session()).unwrap();
+
+        let mut restarted = super::tests::app();
+        restarted.restore_session(path.clone());
+        assert!(!path.exists(), "the session is read once");
+        restarted.apply(
+            Payload::Workspace(workspace),
+            &meta(None, RequestKind::Other),
+        );
+        assert_eq!(restarted.tabs.len(), 2);
+        assert_eq!(restarted.tabs[0].sql, "select 42;");
+        let tab = restarted.active_tab.unwrap();
+        assert_eq!(restarted.tab(tab).unwrap().title, "public.customers");
+        // Another writer reordered the rows: the edit follows its key.
+        let mut reordered = page.clone();
+        reordered.rows.reverse();
+        let moved = reordered.rows.len() - 1;
+        assert_ne!(moved, 0);
+        restarted.apply(
+            Payload::Table(reordered),
+            &meta(Some(tab), RequestKind::Table),
+        );
+        let table = &restarted.tables[&tab];
+        assert_eq!(table.pending.keys().copied().collect::<Vec<_>>(), [moved]);
+        assert_eq!(table.pending[&moved], staged);
     }
 
     #[test]

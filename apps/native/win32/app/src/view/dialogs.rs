@@ -74,49 +74,64 @@ fn button_row<R>(ui: &mut Ui, f: impl FnOnce(&mut Ui) -> R) -> R {
     f(&mut row)
 }
 
-/// "Version 2026.10.18.2 · October 18, 2026", the version linking to the
-/// release's source commit when it is known.
-fn version_line(ui: &mut Ui, version: &str, commit: Option<&str>, date: Option<&str>) {
+/// Accent text that opens `url`, brightening and underlining on hover.
+fn link(ui: &mut Ui, text: &str, url: &str, font: dbm_ui::Font) {
+    let w = ui.ctx.fonts.width(text, font);
+    let r = ui.allocate(vec2(w, font.line_height()));
+    let id = ui.make_id(("link", url));
+    let resp = ui.interact(r, id, Sense::CLICK).on_hover_text(url);
+    let mut node = dbm_ui::a11y::Node::new(id.0, dbm_ui::a11y::Role::Link, text, r);
+    node.focusable = true;
+    ui.a11y(node);
+    let color = if resp.hovered || resp.has_focus {
+        theme::TEXT_STRONG
+    } else {
+        theme::ACCENT_TEXT
+    };
+    ui.painter()
+        .text_styled(r.min, text, font, color, resp.hovered, false);
+    if resp.clicked {
+        ui.ctx.open_url(url);
+    }
+}
+
+/// "Version 2026.10.18.2 · October 18, 2026", the version linking to its
+/// GitHub release page.
+fn version_line(ui: &mut Ui, version: &str, date: Option<&str>) {
     let font = theme::ui(12.0);
     ui.horizontal(18.0, |ui| {
         ui.spacing.x = 0.0;
-        let text = format!("Version {version}");
-        match commit.and_then(dbm_update::commit_url) {
-            Some(url) => {
-                let w = ui.ctx.fonts.width(&text, font);
-                let r = ui.allocate(vec2(w, font.line_height()));
-                let id = ui.make_id(("version-link", version));
-                let resp = ui.interact(r, id, Sense::CLICK).on_hover_text(url.clone());
-                let mut node = dbm_ui::a11y::Node::new(id.0, dbm_ui::a11y::Role::Link, &text, r);
-                node.focusable = true;
-                ui.a11y(node);
-                ui.painter().text_styled(
-                    r.min,
-                    text,
-                    font,
-                    theme::ACCENT_TEXT,
-                    resp.hovered,
-                    false,
-                );
-                if resp.clicked {
-                    ui.ctx.open_url(&url);
-                }
-            }
-            None => {
-                ui.label(&text, font, theme::MUTED);
-            }
-        }
+        link(
+            ui,
+            &format!("Version {version}"),
+            &dbm_update::release_url(version),
+            font,
+        );
         if let Some(date) = date {
             ui.label(&format!(" · {date}"), font, theme::MUTED);
         }
     });
 }
 
-/// Bold titles over short, muted descriptions.
+/// Bold titles over short, muted descriptions, then links to the commits
+/// each describes, as Captures links pull requests.
 fn release_highlights(ui: &mut Ui, highlights: &[dbm_update::Highlight]) {
     for h in highlights {
         ui.label_wrapped(&h.title, theme::bold(13.0), theme::TEXT_STRONG, false);
         ui.label_wrapped(&h.body, theme::ui(12.5), theme::SECONDARY, false);
+        let commits: Vec<(String, &str)> = h
+            .commits
+            .iter()
+            .filter_map(|c| dbm_update::commit_url(c).map(|url| (url, &c[..7])))
+            .collect();
+        if !commits.is_empty() {
+            ui.horizontal(18.0, |ui| {
+                ui.spacing.x = 10.0;
+                for (url, short) in &commits {
+                    link(ui, short, url, theme::ui(11.5));
+                }
+            });
+        }
         ui.add_space(8.0);
     }
 }
@@ -254,18 +269,10 @@ impl Workbench {
             }
         }
         if let Some(update) = self.confirm_update.clone() {
-            let out = modal(ui, "Install update", 460.0, |ui| {
-                dialog_title(
-                    ui,
-                    None,
-                    &format!("Install Anybase {} and restart now?", update.version),
-                );
-                version_line(
-                    ui,
-                    &update.version,
-                    update.commit.as_deref(),
-                    update.released.as_deref(),
-                );
+            let tabs_open = !self.tabs.is_empty();
+            let out = modal(ui, "Update available", 460.0, |ui| {
+                dialog_title(ui, None, "Update available");
+                version_line(ui, &update.version, update.released.as_deref());
                 ui.add_space(12.0);
                 ui.label("What’s new", theme::bold(10.5), theme::FAINT);
                 ui.separator(theme::BORDER);
@@ -297,15 +304,17 @@ impl Workbench {
                         );
                     }
                 }
+                if tabs_open {
+                    ui.add_space(14.0);
+                    ui.label_wrapped(
+                        "Your open tabs will reopen after the update. Unsaved queries and staged edits are kept.",
+                        theme::ui(12.0),
+                        theme::MUTED,
+                        false,
+                    );
+                }
                 ui.add_space(14.0);
-                ui.label_wrapped(
-                    "Unsaved query text and pending table edits will be lost.",
-                    theme::ui(12.0),
-                    theme::MUTED,
-                    false,
-                );
-                ui.add_space(14.0);
-                confirm_buttons(ui, primary_button("Install and restart"), "Later", true)
+                confirm_buttons(ui, primary_button("Update now"), "Not now", true)
             });
             let escape = self.dialog_escape;
             if let Some(install) = out
@@ -393,7 +402,7 @@ impl Workbench {
                         ui.separator(theme::BORDER);
                         ui.add_space(4.0);
                         for release in &day.releases {
-                            version_line(ui, &release.version, Some(&release.commit), None);
+                            version_line(ui, &release.version, None);
                             ui.add_space(4.0);
                             release_highlights(ui, &release.highlights);
                         }

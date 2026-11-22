@@ -21,6 +21,8 @@ final class Updater {
     var onWhatsNew: (([[String: Any]]) -> Void)?
     /// An install failed; the app shows the error with the download fallback.
     var onInstallFailed: ((String) -> Void)?
+    /// The update is staged and the app is about to exit: save open tabs.
+    var beforeRestart: (() -> Void)?
     /// Where to download Anybase by hand when an update can't install itself.
     static let downloadPage = URL(string: "https://anyba.se")!
     /// The newest build whose release highlights this install has shown.
@@ -101,7 +103,8 @@ final class Updater {
                     self?.state = .failed(failure.localizedDescription)
                     self?.onInstallFailed?(failure.localizedDescription)
                 } else {
-                    // The user confirmed that unsaved work is discarded.
+                    // Open tabs come back in the restarted build.
+                    self?.beforeRestart?()
                     exit(0)
                 }
             }
@@ -213,8 +216,7 @@ final class Updater {
         try swap.run()
     }
 
-    /// The top bar button's label and tooltip, as the desktop's
-    /// `UpdateControl` words them.
+    /// The top bar button's label, as the desktop's `UpdateControl` words it.
     var label: String {
         switch state {
         case .idle: return ""
@@ -228,13 +230,5 @@ final class Updater {
 
     var versionLabel: String {
         "Version \(Bundle.main.object(forInfoDictionaryKey: "DBMVersion") as? String ?? "build \(currentBuild ?? 0)")"
-    }
-
-    var detail: String {
-        switch state {
-        case .available(let update): return string(update["notes"]).isEmpty ? string(update["version"]) : string(update["notes"])
-        case .failed(let message): return message
-        default: return "Installed \(Bundle.main.object(forInfoDictionaryKey: "DBMVersion") as? String ?? "build \(currentBuild ?? 0)")"
-        }
     }
 }

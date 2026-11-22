@@ -494,10 +494,8 @@ final class TopBar: PanelView {
         updateStatus.stringValue = updater.label
         version.isHidden = !updater.enabled
         version.stringValue = updater.versionLabel
-        version.toolTip = updater.detail
         updateButton.title = updater.label
         updateButton.invalidateIntrinsicContentSize()
-        updateButton.toolTip = updater.detail
         var available = false
         var busy = false
         switch updater.state {

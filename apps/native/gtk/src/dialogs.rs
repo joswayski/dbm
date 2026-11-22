@@ -87,7 +87,7 @@ pub fn build(app: &App, state: &State) -> Option<gtk::Widget> {
     } else if let Some(confirm) = &state.confirm_query {
         (query_dialog(app, &confirm.sql), 480)
     } else if let Some(update) = &state.confirm_update {
-        (update_dialog(app, update), 460)
+        (update_dialog(app, update, !state.tabs.is_empty()), 460)
     } else if let Some(error) = update_failure(state) {
         (update_failed_dialog(app, error), 440)
     } else if !matches!(state.updates.whats_new, WhatsNew::Closed) {
@@ -304,18 +304,22 @@ fn export_dialog(app: &App, total: Option<&str>) -> gtk::Box {
     content
 }
 
-/// "Version 2026.10.18.2 · October 18, 2026", the version linking to the
-/// release's source commit when it is known.
-fn version_line(version: &str, commit: Option<&str>, date: Option<&str>) -> gtk::Label {
-    let text = format!("Version {version}");
-    let mut markup = match commit.and_then(dbm_update::commit_url) {
-        Some(url) => format!(
-            "<a href=\"{}\">{}</a>",
-            glib::markup_escape_text(&url),
-            glib::markup_escape_text(&text)
-        ),
-        None => glib::markup_escape_text(&text).to_string(),
-    };
+/// A link in label markup; `.links` labels color it and underline it on hover.
+fn link_markup(url: &str, text: &str) -> String {
+    format!(
+        "<a href=\"{}\">{}</a>",
+        glib::markup_escape_text(url),
+        glib::markup_escape_text(text)
+    )
+}
+
+/// "Version 2026.10.18.2 · October 18, 2026", the version linking to its
+/// GitHub release page.
+fn version_line(version: &str, date: Option<&str>) -> gtk::Label {
+    let mut markup = link_markup(
+        &dbm_update::release_url(version),
+        &format!("Version {version}"),
+    );
     if let Some(date) = date {
         markup.push_str(&glib::markup_escape_text(&format!(" · {date}")));
     }
@@ -324,13 +328,24 @@ fn version_line(version: &str, commit: Option<&str>, date: Option<&str>) -> gtk:
     label.set_xalign(0.0);
     label.add_css_class("size-12");
     label.add_css_class("muted");
+    label.add_css_class("links");
     label
 }
 
+/// Bold titles over muted descriptions, each ending with links to the
+/// commits it describes, as Captures links pull requests.
 fn highlights(content: &gtk::Box, items: &[dbm_update::Highlight]) {
     for item in items {
         content.append(&body(&item.title, &["bold", "strong"]));
-        let text = body(&item.body, &["secondary"]);
+        let mut markup = glib::markup_escape_text(&item.body).to_string();
+        for commit in &item.commits {
+            if let Some(url) = dbm_update::commit_url(commit) {
+                markup.push_str("  ");
+                markup.push_str(&link_markup(&url, &commit[..7]));
+            }
+        }
+        let text = body("", &["secondary", "links"]);
+        text.set_markup(&markup);
         text.set_margin_bottom(8);
         content.append(&text);
     }
@@ -378,17 +393,18 @@ pub fn open_download_page(app: &App) {
     );
 }
 
-fn update_dialog(app: &App, update: &dbm_update::Available) -> gtk::Box {
+/// Captures' update notice: "Update available", the version, what's new,
+/// and that open tabs come back.
+/// Shown when tabs are open: they reopen after the restart.
+const RESTORE_NOTE: &str =
+    "Your open tabs will reopen after the update. Unsaved queries and staged edits are kept.";
+
+fn update_dialog(app: &App, update: &dbm_update::Available, tabs_open: bool) -> gtk::Box {
     let content = ui::vbox(2);
-    content.append(&title(
-        &format!("Install Anybase {} and restart now?", update.version),
-        None,
-    ));
-    content.append(&version_line(
-        &update.version,
-        update.commit.as_deref(),
-        update.released.as_deref(),
-    ));
+    let heading = title("Update available", None);
+    heading.set_margin_bottom(0);
+    content.append(&heading);
+    content.append(&version_line(&update.version, update.released.as_deref()));
     let eyebrow = ui::label("What’s new", &["eyebrow"]);
     eyebrow.set_margin_top(12);
     content.append(&eyebrow);
@@ -406,16 +422,15 @@ fn update_dialog(app: &App, update: &dbm_update::Available) -> gtk::Box {
             &["secondary"],
         )),
     }
-    let warning = body(
-        "Unsaved query text and pending table edits will be lost.",
-        &["size-12", "muted"],
-    );
-    warning.set_margin_top(14);
-    content.append(&warning);
-    let later = ui::button("secondary-button", None, "Later", "");
+    if tabs_open {
+        let note = body(RESTORE_NOTE, &["size-12", "muted"]);
+        note.set_margin_top(14);
+        content.append(&note);
+    }
+    let later = ui::button("secondary-button", None, "Not now", "");
     let handle = app.clone();
     later.connect_clicked(move |_| handle.update(|state| state.confirm_update = None));
-    let install = ui::button("primary", None, "Install and restart", "");
+    let install = ui::button("primary", None, "Update now", "");
     let handle = app.clone();
     let update = update.clone();
     install.connect_clicked(move |_| {
@@ -468,7 +483,7 @@ fn whats_new_dialog(app: &App, whats_new: &WhatsNew) -> gtk::Box {
                 content.append(&ui::label(&day.date, &["size-12", "muted"]));
                 content.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
                 for release in &day.releases {
-                    let line = version_line(&release.version, Some(&release.commit), None);
+                    let line = version_line(&release.version, None);
                     line.set_margin_top(4);
                     content.append(&line);
                     highlights(&content, &release.highlights);

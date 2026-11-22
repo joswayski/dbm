@@ -88,6 +88,9 @@ test("release history puts the new release first and keeps valid entries only", 
     releaseHistory(history, entry(4, "Rewritten")).map(({ highlights }) => highlights[0].title),
     ["Rewritten", "Release 3", "Release 2", "Release 1"],
   );
+  // Cited commits stay with their highlight; anything else is dropped.
+  const cited = { ...entry(5), highlights: [{ title: "T", body: "B", commits: ["a".repeat(40), "nope"] }] };
+  assert.deepEqual(releaseHistory([], cited)[0].highlights, [{ title: "T", body: "B", commits: ["a".repeat(40)] }]);
   // Without new highlights the history carries on unchanged.
   assert.deepEqual(releaseHistory(previous, null), history.slice(1));
   assert.deepEqual(releaseHistory(undefined, null), []);

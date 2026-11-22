@@ -113,6 +113,11 @@ impl Settings {
     }
 }
 
+/// Where open tabs wait while an update restarts the app.
+pub fn session_path() -> Option<PathBuf> {
+    storage_dir().map(|dir| dir.join(dbm_desktop::session::FILE_NAME))
+}
+
 /// eframe's `storage_dir("DBM")` on Linux.
 fn storage_dir() -> Option<PathBuf> {
     std::env::var_os("XDG_DATA_HOME")
