@@ -2459,6 +2459,54 @@ mod tests {
         state.disconnect(id).await;
     }
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_server_that_stops_answering_fails_the_run_instead_of_hanging() {
+        use crate::models::QueryRequest;
+        use crate::state::AppState;
+
+        let Some((server, observer)) = start_test_redis().await else {
+            eprintln!("skipping live Redis test because redis-server is unavailable");
+            return;
+        };
+        let directory = tempfile::tempdir().unwrap();
+        let state = AppState::mobile(&directory.path().join("state.sqlite3")).unwrap();
+        let profile = observer.profile().clone();
+        let run = |sql: &str| {
+            state.run_query(QueryRequest {
+                profile_id: profile.id,
+                sql: sql.into(),
+                max_rows: None,
+            })
+        };
+        state.connect(profile.clone()).await.unwrap();
+        run("SET waiting 1").await.unwrap();
+
+        // A stopped process keeps its sockets open and answers nothing, like
+        // a server behind a dropped VPN.
+        let signal = |name: &str| {
+            Command::new("kill")
+                .args([name, &server.child.id().to_string()])
+                .status()
+                .unwrap()
+        };
+        signal("-STOP");
+        // With the clock paused, Tokio jumps to the next timer whenever only
+        // I/O is pending, so the timeouts elapse without the test waiting.
+        tokio::time::pause();
+        let started = std::time::Instant::now();
+        let error = run("INCR waiting").await.unwrap_err().to_string();
+        tokio::time::resume();
+        signal("-CONT");
+        // The check timed out, and so did the reconnect it triggered.
+        assert!(error.contains("connecting to “test-redis”"), "{error}");
+        assert!(started.elapsed() < Duration::from_secs(5), "{error}");
+
+        // The command was never sent, and the next run works again.
+        let value = run("GET waiting").await.unwrap();
+        assert_eq!(value.rows, vec![vec![JsonValue::String("1".into())]]);
+    }
+
     #[tokio::test]
     async fn string_edits_keep_the_key_expiry() {
         let Some((_server, session)) = start_test_redis().await else {

@@ -14,6 +14,9 @@ use crate::redis::RedisSession;
 /// fallback, so an unreachable host fails promptly instead of waiting on the OS.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
 
+/// Upper bound for a polite close; the connection is dropped either way.
+const CLOSE_TIMEOUT: Duration = Duration::from_secs(5);
+
 pub enum DbSession {
     Postgres(PgSession),
     Mysql(MysqlSession),
@@ -133,7 +136,9 @@ impl DbSession {
 
     pub async fn close(&self) {
         if let Self::Mysql(session) = self {
-            session.close().await;
+            // Closing says goodbye to the server; one that stopped answering
+            // must not hold up the reconnect that replaces this session.
+            let _ = tokio::time::timeout(CLOSE_TIMEOUT, session.close()).await;
         }
     }
 }

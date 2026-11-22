@@ -149,7 +149,9 @@ What the app does today, what is deliberately not built yet, and what it stores 
   selected database, then retries read-only schema and table browsing. Before
   submitting SQL or a Redis command, the workbench checks the connection and
   reconnects once if it has closed, so the requested command can run without an
-  initial error. This adds one round trip per run and preserves healthy session
+  initial error. A server that does not answer the check within 10 seconds
+  (after sleep or a dropped VPN, for example) counts as closed too. This adds
+  one round trip per run and preserves healthy session
   state. Reconnecting cannot restore a lost transaction, temporary tables, or
   session variables. Submitted commands are never replayed automatically: even
   `SELECT` can have side effects. A connection error after submission attempts

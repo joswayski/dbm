@@ -39,5 +39,9 @@ native-tls = { workspace = true, features = ["vendored"] }
 redis_rs = { package = "redis", version = "0.32", default-features = false, features = ["tokio-rustls-comp"] }
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
 
+[dev-dependencies]
+# Paused time, for tests of timeouts.
+tokio = { workspace = true, features = ["test-util"] }
+
 [lints]
 workspace = true

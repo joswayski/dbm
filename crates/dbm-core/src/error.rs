@@ -103,6 +103,12 @@ fn has_lost_connection_io_error(error: &(dyn StdError + 'static)) -> bool {
 }
 
 impl AppError {
+    /// A lost connection that no driver error reported, such as a server that
+    /// stopped answering. Callers that reconnect on lost connections do so.
+    pub(crate) fn connection_lost(detail: &str) -> Self {
+        Self::Database(format!("{CONNECTION_LOST}: {detail}"))
+    }
+
     /// A database error, marked as a lost connection when typed checks say so
     /// even though its message would not.
     fn database_with_connection_state(error: &(dyn StdError + 'static), lost: bool) -> Self {

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::sync::Arc;
+use std::time::Duration;
 
 use tokio::sync::Mutex;
 use uuid::Uuid;
@@ -14,6 +15,12 @@ use crate::models::{
 use crate::session::DbSession;
 use crate::sql_text::history_text;
 use crate::storage::LocalStore;
+
+/// How long the connection check before a query may take. After sleep, a
+/// dropped VPN, or a NAT timeout a socket can stay half-open: the check is
+/// sent and never answered, and the OS only gives up after minutes. Past this
+/// limit the connection counts as lost and is reopened.
+const PREFLIGHT_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub struct AppState {
     pub store: LocalStore,
@@ -166,7 +173,13 @@ impl AppState {
         // is submitted, a lost response cannot prove it did not execute.
         let ready = self
             .with_session_retry(request.profile_id, |session| async move {
-                session.check_connection().await?;
+                tokio::time::timeout(PREFLIGHT_TIMEOUT, session.check_connection())
+                    .await
+                    .map_err(|_| {
+                        AppError::connection_lost(
+                            "the server did not answer a connection check in time",
+                        )
+                    })??;
                 Ok(session)
             })
             .await;
