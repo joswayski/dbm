@@ -34,9 +34,10 @@ function reply(highlights, { parts = [{ text: JSON.stringify({ highlights }) }],
   return Response.json({ candidates: [{ content: { role: "model", parts }, finishReason }] });
 }
 const env = { GEMINI_API_KEY: "test-key" };
-const highlight = (commit) => ({
+const highlight = (commit, platforms = ["macOS", "Windows", "Linux"]) => ({
   title: "Copy rows as CSV",
   body: "Select rows and copy them straight into a spreadsheet.",
+  platforms,
   commits: [commit],
 });
 
@@ -87,16 +88,22 @@ test("summarizes desktop changes, including merged pull requests, for Gemini", a
       assert.equal(url, "https://generativelanguage.googleapis.com/v1beta/models/gemini-4-hydrogen:generateContent");
       assert.equal(options.headers["x-goog-api-key"], "test-key");
       request = JSON.parse(options.body);
-      return reply([highlight(after)], {
+      const answer = highlight(after, ["Linux", "Windows"]);
+      return reply([answer], {
         parts: [
           { text: "not release prose", thought: true },
-          { text: JSON.stringify({ highlights: [highlight(after)] }), thoughtSignature: "x" },
+          { text: JSON.stringify({ highlights: [answer] }), thoughtSignature: "x" },
         ],
       });
     },
   });
+  // Tagged with the apps that show it, in a fixed order.
   assert.deepEqual(highlights, [
-    { title: "Copy rows as CSV", body: "Select rows and copy them straight into a spreadsheet." },
+    {
+      title: "Copy rows as CSV",
+      body: "Select rows and copy them straight into a spreadsheet.",
+      platforms: ["windows", "linux"],
+    },
   ]);
   assert.equal(request.generationConfig.thinkingConfig.thinkingLevel, "MEDIUM");
   assert.equal(request.generationConfig.maxOutputTokens, 32768);
@@ -110,6 +117,31 @@ test("summarizes desktop changes, including merged pull requests, for Gemini", a
   assert.deepEqual(source.commits[0].apps, ["Linux", "Windows"]);
   assert.match(source.commits[0].diff, /COPY-AS-CSV/u);
   assert.doesNotMatch(request.contents[0].parts[0].text, /WEB-ONLY|DEPENDENCY|TEST-ONLY|MOBILE-ONLY|FUTURE-CHANGE/u);
+});
+
+test("platform tags must name only apps the cited commits reach", async () => {
+  const f = fixture();
+  const windows = f.commit({ "apps/native/win32/app/src/view/table.rs": "w" }, "Snappier tabs on Windows");
+  const mac = f.commit({ "apps/native/macos/Sources/Grid.swift": "m" }, "Grid fix on macOS");
+  const run = (highlights) =>
+    releaseHighlights(f.base, mac, { cwd: f.cwd, env, fetch: async () => reply(highlights), warn: () => {} });
+  const untagged = highlight(windows);
+  delete untagged.platforms;
+  for (const invalid of [
+    [highlight(windows, ["macOS"])],
+    [highlight(windows, ["Windows", "Linux"])],
+    [highlight(windows, ["Android"])],
+    [highlight(windows, ["Windows", "Windows"])],
+    [highlight(windows, [])],
+    [untagged],
+  ])
+    assert.equal(await run(invalid), null, JSON.stringify(invalid));
+  assert.deepEqual(
+    (await run([highlight(windows, ["Windows"]), { ...highlight(mac, ["macOS"]), commits: [windows, mac] }])).map(
+      (item) => item.platforms,
+    ),
+    [["windows"], ["macos"]],
+  );
 });
 
 test("oversized diffs keep every commit and mark truncation within the request budget", async () => {

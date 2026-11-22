@@ -193,6 +193,12 @@ The release reads `production/signing/release` through GitHub OIDC role
   may still await Apple's beta review. Android publication does not wait for
   Apple; the Mobile release run fails if either platform fails, including partial
   uploads. A TestFlight success is not physical-device acceptance.
+- **Release notes:** TestFlight's What to Test and Google Play's release notes
+  list the commit subjects since the commit `mobile-latest` names (or the last
+  20 commits) that changed that app's own directory, or only the shared core
+  (`crates/dbm-core`, `apps/native/bridge`). Commits for another app, tooling
+  subjects, and subjects naming only desktop apps are left out; Play's list is
+  cut to whole lines within 500 characters (`scripts/release.mjs mobile-notes`).
 
 The Google Play and TestFlight API scripts run through pinned uv 0.12.23 with
 Python 3.12. Releases check out the selected application's `git_sha` separately

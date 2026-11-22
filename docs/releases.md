@@ -257,7 +257,8 @@ release tag, keeping only desktop app sources (`apps/native/macos`,
 `apps/native/desktop`, `apps/native/windows`, and `crates/`; tests, fixtures,
 mobile, website, docs, and secret-looking paths are excluded), and tells the
 model which app each change reaches so it can say "on macOS", "on Windows" or
-"on Linux". The last three releases' highlights are
+"on Linux". Each highlight is tagged with the desktop apps that show it, and
+every app it names must be one a cited commit reaches. The last three releases' highlights are
 included so they are not repeated. Requests are capped at 400,000 characters by
 shortening diffs evenly and marking them truncated; commit metadata is always
 kept. Every highlight must cite commits in the range and pass plain-text,
@@ -267,7 +268,15 @@ is accurate.
 `scripts/release.mjs highlights` then builds `releases`: this release's entry
 (build, version, commit, publication time, highlights) ahead of the previous
 release's list, read from its `native-latest.json`, capped at 30 releases and
-64 KiB. The publish job stamps the entry with the publication time. A release
+64 KiB. A highlight for some desktop apps carries `platforms` (`macos`,
+`windows`, `linux`); one for every app, and every highlight from before tags,
+has none. `crates/dbm-update` drops highlights tagged for other apps when it
+reads the manifest, so the update review and What's new on each app list only
+its own and untagged ones; a release with nothing left for an app drops out of
+its What's new. Builds from before tags ignore the field (no manifest struct
+rejects unknown fields) and keep showing every highlight. The plain `notes`
+(the GitHub release page, the manifests' `notes`, and what older installs show)
+label tagged highlights, such as "Snappier tabs (Windows only) — …". The publish job stamps the entry with the publication time. A release
 with nothing user-facing has an empty list. Missing credentials, provider
 errors, or rejected output leave this release out and keep the commit-based
 notes; they never fail the release.

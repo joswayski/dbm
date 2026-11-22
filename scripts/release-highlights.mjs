@@ -42,6 +42,11 @@ Each commit lists the desktop apps its files belong to: the macOS app, the
 Windows app, and the Linux app. Shared code alone does not prove every app
 exposes a feature. Say "on macOS", "on Windows" or "on Linux" (or name two of
 them) when a change is specific to some of them. The mobile apps are not part of this release.
+Each app only shows its own highlights, so list in platforms the desktop apps
+where you would actually see the change: all three only when it reaches every
+app, and never an app none of the cited commits reach. Keep a change that only
+some apps get in its own highlight instead of bundling it with changes for
+other apps.
 Connections, query history and data stay on the device. Never suggest cloud
 sync, accounts, telemetry, SSH jump hosts, or Redis Sentinel or Cluster support
 unless the evidence implements it.
@@ -51,8 +56,12 @@ Group related changes into at most five highlights total; zero is valid.
 Omit maintenance, dependencies, tests, documentation, release tooling and
 implementation details.
 Never invent capabilities, benchmarks, guarantees or numeric performance claims.
-Plain text only: no HTML, Markdown or control characters. Supply title, body and
-full evidence commit SHAs only; the host assigns all release metadata.`;
+Plain text only: no HTML, Markdown or control characters. Supply title, body,
+platforms and full evidence commit SHAs only; the host assigns all release
+metadata.`;
+
+// The desktop apps, as the evidence names them and highlights tag them.
+const DESKTOP = ["macOS", "Windows", "Linux"];
 
 const SCHEMA = {
   type: "object",
@@ -65,7 +74,7 @@ const SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["title", "body", "commits"],
+        required: ["title", "body", "platforms", "commits"],
         properties: {
           title: {
             type: "string",
@@ -74,6 +83,13 @@ const SCHEMA = {
           body: {
             type: "string",
             description: "One or two casual sentences, ideally under 200 characters, at most 500.",
+          },
+          platforms: {
+            type: "array",
+            description: "The desktop apps that show this change; all three when it reaches every app.",
+            minItems: 1,
+            uniqueItems: true,
+            items: { type: "string", enum: DESKTOP },
           },
           commits: {
             type: "array",
@@ -300,20 +316,32 @@ async function ask(source, env, fetch) {
 function validated(result, source) {
   if (!exactKeys(result, ["highlights"]) || !Array.isArray(result.highlights) || result.highlights.length > 5)
     throw new Error("invalid highlights");
-  const candidates = new Set(source.commits.map(({ commit }) => commit));
+  const apps = new Map(source.commits.map(({ commit, apps }) => [commit, apps]));
   for (const item of result.highlights) {
     if (
-      !exactKeys(item, ["title", "body", "commits"]) ||
+      !exactKeys(item, ["title", "body", "platforms", "commits"]) ||
       !plainText(item.title, 100) ||
       !plainText(item.body, 500) ||
       !Array.isArray(item.commits) ||
       !item.commits.length ||
       new Set(item.commits).size !== item.commits.length ||
-      !item.commits.every((commit) => candidates.has(commit))
+      !item.commits.every((commit) => apps.has(commit)) ||
+      !Array.isArray(item.platforms) ||
+      !item.platforms.length ||
+      new Set(item.platforms).size !== item.platforms.length ||
+      // Each app it names must be one a cited commit reaches.
+      !item.platforms.every((app) => item.commits.some((commit) => apps.get(commit).includes(app)))
     )
       throw new Error("unsupported highlight");
   }
-  return result.highlights.map(({ title, body }) => ({ title: title.trim(), body: body.trim() }));
+  // A highlight for every desktop app carries no tag, like those from before tags.
+  return result.highlights.map(({ title, body, platforms }) => ({
+    title: title.trim(),
+    body: body.trim(),
+    ...(platforms.length < DESKTOP.length && {
+      platforms: DESKTOP.filter((app) => platforms.includes(app)).map((app) => app.toLowerCase()),
+    }),
+  }));
 }
 
 /**

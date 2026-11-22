@@ -33,6 +33,8 @@ jobs:
     outputs:
       sha: ${{ steps.release.outputs.sha }}
       android_build: ${{ steps.release.outputs.android_build }}
+      ios_notes: ${{ steps.notes.outputs.ios_notes }}
+      android_notes: ${{ steps.notes.outputs.android_notes }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -65,6 +67,17 @@ jobs:
           [[ "$build" -le 2100000000 ]] || { echo "Android version code overflow." >&2; exit 1; }
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "android_build=$build" >> "$GITHUB_OUTPUT"
+      - name: Write each app's release notes
+        id: notes
+        env:
+          DBM_RELEASE_SHA: ${{ steps.release.outputs.sha }}
+          GH_TOKEN: ${{ github.token }}
+        # Each store lists only the commits that ship in its app since the
+        # commit mobile-latest names; this workflow's scripts write them.
+        run: |
+          set -euo pipefail
+          PREVIOUS_MOBILE_SHA="$(gh release view mobile-latest --repo "$GITHUB_REPOSITORY" --json body --jq .body 2>/dev/null \
+            | grep -oE '[0-9a-f]{40}' | head -1 || true)" node scripts/release.mjs mobile-notes
 
   android:
     name: Android / signed APK and Play bundle
@@ -164,6 +177,8 @@ jobs:
           if-no-files-found: error
           retention-days: 30
       - name: Roll out to Google Play internal testers
+        env:
+          ANDROID_NOTES: ${{ needs.resolve.outputs.android_notes }}
         run: |
           set -euo pipefail
           umask 077
@@ -171,7 +186,7 @@ jobs:
             --query SecretString --output text | jq -er '.dbm_google_play.service_account_json | strings' > "$RUNNER_TEMP/play.json"
           export GOOGLE_PLAY_SERVICE_ACCOUNT="$RUNNER_TEMP/play.json"
           export PLAY_RELEASE_NAME="0.1.$DBM_BUILD_NUMBER"
-          export PLAY_RELEASE_NOTES="$(git log -1 --format=%s)"
+          export PLAY_RELEASE_NOTES="$ANDROID_NOTES"
           "$RUNNER_TEMP/mobile-python/bin/python" scripts/play-upload.py dist/mobile/play/DBM-Android-Play.aab
       - name: Remove signing material
         if: always()
@@ -244,9 +259,11 @@ jobs:
       - name: Archive and upload
         run: bash apps/native/ios/upload-testflight.sh
       - name: Wait for processing and assign tester groups
+        env:
+          IOS_NOTES: ${{ needs.resolve.outputs.ios_notes }}
         run: |
           set -euo pipefail
-          export WHAT_TO_TEST="$(git log -1 --format=%s)"
+          export WHAT_TO_TEST="$IOS_NOTES"
           "$RUNNER_TEMP/mobile-python/bin/python" scripts/testflight-distribute.py
       - name: Remove signing material
         if: always()

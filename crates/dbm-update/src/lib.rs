@@ -97,6 +97,28 @@ pub struct Release {
 pub struct Highlight {
     pub title: String,
     pub body: String,
+    /// The apps that show it ([`os`] names), or empty for every app. Releases
+    /// before tags have none; builds before tags ignore them and show all.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub platforms: Vec<String>,
+}
+
+impl Highlight {
+    /// Whether the app on `os` (an [`os`] name) shows this highlight.
+    pub fn applies_to(&self, os: &str) -> bool {
+        self.platforms.is_empty() || self.platforms.iter().any(|platform| platform == os)
+    }
+}
+
+/// This app's name in [`Highlight::platforms`]: `macos`, `windows` or `linux`.
+pub fn os() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "macos"
+    } else if cfg!(target_os = "windows") {
+        "windows"
+    } else {
+        "linux"
+    }
 }
 
 /// Releases published on the same UTC day, newest first.
@@ -156,6 +178,18 @@ pub struct Available {
     /// The patch from the installed build, when the release has one.
     #[serde(default)]
     pub patch: Option<Box<Patch>>,
+}
+
+impl Manifest {
+    /// The manifest with only the highlights the app on `os` shows.
+    pub fn for_os(mut self, os: &str) -> Self {
+        for release in &mut self.releases {
+            release
+                .highlights
+                .retain(|highlight| highlight.applies_to(os));
+        }
+        self
+    }
 }
 
 /// The newer build `manifest` offers this platform, if any.
@@ -322,7 +356,9 @@ fn fetch_manifest() -> Result<Manifest, String> {
         .map_err(|error| format!("Couldn't reach the update channel: {error}"))?
         .into_string()
         .map_err(|error| format!("Couldn't read the update manifest: {error}"))?;
-    serde_json::from_str(&body).map_err(|error| format!("The update manifest is invalid: {error}"))
+    serde_json::from_str::<Manifest>(&body)
+        .map(|manifest| manifest.for_os(os()))
+        .map_err(|error| format!("The update manifest is invalid: {error}"))
 }
 
 /// Verifies `data` against a `tools/dbm-sign` signature and [`PUBLIC_KEY`].
@@ -526,6 +562,7 @@ mod tests {
                 .map(|title| Highlight {
                     title: (*title).into(),
                     body: format!("{title} body"),
+                    platforms: Vec::new(),
                 })
                 .collect(),
         }
@@ -666,6 +703,49 @@ mod tests {
         let old = r#"{"build":8,"version":"v","notes":"","url":"u","signature":"s"}"#;
         let available: Available = serde_json::from_str(old).unwrap();
         assert_eq!(available.highlights, None);
+    }
+
+    #[test]
+    fn each_app_keeps_only_its_own_and_untagged_highlights() {
+        let text = r#"{"build":8,"version":"2026.10.18.8","notes":"","platforms":{
+            "darwin-aarch64":{"url":"u","signature":"s"},"windows-x86_64":{"url":"u","signature":"s"}},
+            "releases":[
+            {"build":8,"version":"8","publishedAt":"2026-10-18T12:00:00Z","highlights":[
+                {"title":"Snappier tabs","body":"b","platforms":["windows"]}]},
+            {"build":7,"version":"7","publishedAt":"2026-10-17T12:00:00Z","highlights":[
+                {"title":"Copy as CSV","body":"b"},
+                {"title":"Menu bar search","body":"b","platforms":["macos"]},
+                {"title":"Sharper text","body":"b","platforms":["windows","linux"]}]}]}"#;
+        let manifest: Manifest = serde_json::from_str(text).unwrap();
+        let titles = |os: &str, platform: &str| -> Vec<String> {
+            let update = select(&manifest.clone().for_os(os), 6, platform).unwrap();
+            update
+                .highlights
+                .unwrap()
+                .into_iter()
+                .map(|h| h.title)
+                .collect()
+        };
+        assert_eq!(
+            titles("macos", "darwin-aarch64"),
+            ["Copy as CSV", "Menu bar search"]
+        );
+        assert_eq!(
+            titles("windows", "windows-x86_64"),
+            ["Snappier tabs", "Copy as CSV", "Sharper text"]
+        );
+        // A release with nothing for this app drops out of What's new, and
+        // the update review falls back to its empty-list wording, not notes.
+        let mac = manifest.clone().for_os("macos");
+        let listed: Vec<u64> = days(&mac.releases, 0, 8)
+            .iter()
+            .flat_map(|day| day.releases.iter().map(|release| release.build))
+            .collect();
+        assert_eq!(listed, [7]);
+        assert_eq!(
+            select(&mac, 7, "darwin-aarch64").unwrap().highlights,
+            Some(Vec::new())
+        );
     }
 
     #[test]

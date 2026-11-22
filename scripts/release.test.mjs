@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 
-import { highlightNotes, nextReleaseVersion, releaseDate, releaseHistory, releaseNotes } from "./release.mjs";
+import {
+  highlightNotes,
+  mobileNotes,
+  nextReleaseVersion,
+  releaseDate,
+  releaseHistory,
+  releaseNotes,
+} from "./release.mjs";
 
 test("uses the New York calendar date across UTC midnight", () => {
   assert.equal(releaseDate(new Date("2026-09-25T02:30:00Z")), "2026-09-24");
@@ -76,13 +83,18 @@ test("release history puts the new release first and keeps valid entries only", 
     { ...entry(0), commit: "abc1234" },
     { ...entry(3), extra: "dropped" },
     "not a release",
+    { ...entry(-1), highlights: [{ title: "t", body: "b", platforms: ["ios"] }] },
   ];
-  const history = releaseHistory(previous, entry(4));
+  const tagged = { ...entry(4), highlights: [{ title: "Tabs", body: "b", platforms: ["windows", "linux"] }] };
+  const history = releaseHistory(previous, tagged);
   assert.deepEqual(
     history.map(({ build }) => build),
     [4, 3, 2, 1],
   );
   assert.equal("extra" in history[1], false);
+  // Platform tags carry on; untagged highlights stay untagged.
+  assert.deepEqual(history[0].highlights[0].platforms, ["windows", "linux"]);
+  assert.equal("platforms" in history[1].highlights[0], false);
   // A rerun replaces its own entry instead of listing it twice.
   assert.deepEqual(
     releaseHistory(history, entry(4, "Rewritten")).map(({ highlights }) => highlights[0].title),
@@ -110,4 +122,39 @@ test("highlights read as plain notes for the release page and older installs", (
     ]),
     "* Copy rows as CSV — Paste them anywhere.\n* Saved filters — They stay put.",
   );
+  // Older installs show every highlight, so ones for some apps say which.
+  assert.equal(
+    highlightNotes([
+      { title: "Snappier tabs", body: "Fast.", platforms: ["windows"] },
+      { title: "Sharper text", body: "Crisp.", platforms: ["macos", "linux"] },
+    ]),
+    "* Snappier tabs (Windows only) — Fast.\n* Sharper text (macOS and Linux) — Crisp.",
+  );
+});
+
+test("mobile notes list only the commits that ship in that app", () => {
+  const commits = [
+    { subject: "Swipe to refresh on Android", body: "", paths: ["apps/native/android/app/src/Main.kt"] },
+    { subject: "Faster Postgres connects", body: "", paths: ["crates/dbm-core/src/postgres.rs", "Cargo.lock"] },
+    { subject: "Windows tab strip", body: "", paths: ["apps/native/win32/app/src/view/tabs.rs"] },
+    // Core work for a desktop feature is that feature's, not the phones'.
+    {
+      subject: "Edit rows on macOS",
+      body: "",
+      paths: ["crates/dbm-core/src/edit.rs", "apps/native/macos/Sources/Grid.swift"],
+    },
+    {
+      subject: "Dynamic Type on iPhone",
+      body: "",
+      paths: ["apps/native/ios/Sources/DBM/Theme.swift", "crates/dbm-core/src/x.rs"],
+    },
+    { subject: "Update the website", body: "", paths: ["apps/web/src/index.tsx"] },
+    { subject: "Keep typing fast on macOS", body: "", paths: ["apps/native/bridge/src/lib.rs"] },
+    { subject: "Tests: isolate Redis", body: "", paths: ["crates/dbm-core/src/redis.rs"] },
+  ];
+  assert.equal(mobileNotes("ios", commits, 4000), "* Faster Postgres connects\n* Dynamic Type on iPhone");
+  assert.equal(mobileNotes("android", commits, 4000), "* Swipe to refresh on Android\n* Faster Postgres connects");
+  assert.equal(mobileNotes("android", commits.slice(2), 500), "* Maintenance release");
+  // Whole lines within the store's limit.
+  assert.equal(mobileNotes("android", commits, 40), "* Swipe to refresh on Android");
 });

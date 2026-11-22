@@ -3,6 +3,7 @@
 //   node scripts/release.mjs version     # next CalVer for the commit being released
 //   node scripts/release.mjs notes       # Markdown notes since the previous release
 //   node scripts/release.mjs highlights  # user-facing highlights and their history
+//   node scripts/release.mjs mobile-notes  # TestFlight and Play notes per mobile app
 //
 // Each writes its results to $GITHUB_OUTPUT when it is set.
 
@@ -88,6 +89,20 @@ export function releaseNotes(commits) {
   return lines.length > 0 ? lines.join("\n") : "* Maintenance release";
 }
 
+// Apps a highlight's `platforms` can name, with how notes label them. A
+// highlight without `platforms` applies to every desktop app.
+const PLATFORM_LABELS = { macos: "macOS", windows: "Windows", linux: "Linux" };
+
+function validPlatforms(platforms) {
+  return (
+    platforms === undefined ||
+    (Array.isArray(platforms) &&
+      platforms.length > 0 &&
+      new Set(platforms).size === platforms.length &&
+      platforms.every((platform) => Object.hasOwn(PLATFORM_LABELS, platform)))
+  );
+}
+
 const MAX_HISTORY = 30;
 const MAX_HISTORY_BYTES = 64 * 1024;
 
@@ -102,7 +117,10 @@ function releaseEntry(value) {
     !/^[0-9a-f]{40}$/u.test(commit) ||
     !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/u.test(publishedAt) ||
     !Array.isArray(highlights) ||
-    !highlights.every((item) => item && typeof item.title === "string" && typeof item.body === "string")
+    !highlights.every(
+      (item) =>
+        item && typeof item.title === "string" && typeof item.body === "string" && validPlatforms(item.platforms),
+    )
   )
     return null;
   return {
@@ -110,7 +128,7 @@ function releaseEntry(value) {
     version,
     commit,
     publishedAt,
-    highlights: highlights.map(({ title, body }) => ({ title, body })),
+    highlights: highlights.map(({ title, body, platforms }) => ({ title, body, ...(platforms && { platforms }) })),
   };
 }
 
@@ -130,9 +148,57 @@ export function releaseHistory(previous, release) {
   return kept;
 }
 
-/** Highlights as the release page and the manifests' plain `notes` show them. */
+/**
+ * Highlights as the release page and the manifests' plain `notes` show them,
+ * which every platform's older installs read: one for some apps names them.
+ */
 export function highlightNotes(highlights) {
-  return highlights.map(({ title, body }) => `* ${title} — ${body}`).join("\n");
+  return highlights
+    .map(({ title, body, platforms }) => {
+      const label = platforms
+        ? ` (${platforms.map((platform) => PLATFORM_LABELS[platform]).join(" and ")}${platforms.length === 1 ? " only" : ""})`
+        : "";
+      return `* ${title}${label} — ${body}`;
+    })
+    .join("\n");
+}
+
+// App directories, and the shared code every app that links it ships.
+const APP_DIRS = [
+  ["apps/native/ios/", "ios"],
+  ["apps/native/android/", "android"],
+  ["apps/native/macos/", "macos"],
+  ["apps/native/win32/", "windows"],
+  ["apps/native/windows/", "windows"],
+  ["apps/native/gtk/", "linux"],
+  ["apps/native/desktop/", "desktop"],
+  ["crates/dbm-update/", "desktop"],
+];
+const SHARED_DIRS = ["crates/dbm-core/", "apps/native/bridge/"];
+
+/**
+ * TestFlight or Play notes for `platform` (`ios` or `android`): the commits
+ * that changed its app, or only the shared core it links, so another app's
+ * change never shows up there. At most `max` characters of whole lines.
+ */
+export function mobileNotes(platform, commits, max) {
+  const relevant = commits.filter(({ subject, paths }) => {
+    // Subjects are written for users: skip tooling and ones naming only desktop apps.
+    if (
+      /^(?:chore|docs|tests?|ci|build)(?:\([^)]*\))?:/iu.test(subject) ||
+      (/\b(?:macOS|Windows|Linux|desktop)\b/iu.test(subject) && !/\b(?:iPhone|iOS|Android|mobile)\b/iu.test(subject))
+    )
+      return false;
+    const apps = new Set(
+      paths.flatMap((path) => APP_DIRS.filter(([dir]) => path.startsWith(dir)).map(([, app]) => app)),
+    );
+    return (
+      apps.has(platform) || (apps.size === 0 && paths.some((path) => SHARED_DIRS.some((dir) => path.startsWith(dir))))
+    );
+  });
+  const lines = releaseNotes(relevant).split("\n");
+  while (lines.length > 1 && lines.join("\n").length > max) lines.pop();
+  return lines.join("\n").slice(0, max);
 }
 
 function git(...args) {
@@ -155,17 +221,24 @@ function previousReleaseTag(sha) {
   }
 }
 
+/** First-parent commits since `tag` (or the last 20), with the paths each changed. */
 function commitsSince(tag, sha) {
   const range = tag ? `${tag}..${sha}` : sha;
   const limit = tag ? [] : ["--max-count=20"];
-  const separator = "\u001e";
-  return git("log", "--first-parent", ...limit, `--format=%s%x1f%b${separator}`, range)
-    .split(separator)
-    .map((entry) => entry.trim())
-    .filter(Boolean)
+  return git(
+    "log",
+    "--first-parent",
+    "--diff-merges=first-parent",
+    "--name-only",
+    ...limit,
+    "--format=%x1e%s%x1f%b%x1f",
+    range,
+  )
+    .split("\u001e")
+    .filter((entry) => entry.trim())
     .map((entry) => {
-      const [subject, body = ""] = entry.split("\u001f");
-      return { subject: subject.trim(), body };
+      const [subject, body = "", files = ""] = entry.split("\u001f");
+      return { subject: subject.trim(), body: body.trim(), paths: files.split("\n").filter(Boolean) };
     });
 }
 
@@ -230,7 +303,27 @@ async function main() {
     process.stdout.write(`${notes}\n`);
     return;
   }
-  throw new Error("usage: node scripts/release.mjs <version|notes|highlights>");
+  if (command === "mobile-notes") {
+    // Since the previous mobile release's commit, when it is an earlier one.
+    const previous = process.env.PREVIOUS_MOBILE_SHA || "";
+    const commit = git("rev-parse", `${sha}^{commit}`).trim();
+    let base = null;
+    if (/^[0-9a-f]{40}$/u.test(previous) && previous !== commit) {
+      try {
+        git("merge-base", "--is-ancestor", previous, commit);
+        base = previous;
+      } catch {
+        // Not an ancestor: fall back to the recent commits.
+      }
+    }
+    const commits = commitsSince(base, commit);
+    const ios = mobileNotes("ios", commits, 4000);
+    const android = mobileNotes("android", commits, 500);
+    writeOutputs({ ios_notes: ios, android_notes: android });
+    process.stdout.write(`iPhone:\n${ios}\n\nAndroid:\n${android}\n`);
+    return;
+  }
+  throw new Error("usage: node scripts/release.mjs <version|notes|highlights|mobile-notes>");
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

@@ -163,7 +163,11 @@ class ReleaseWorkflowTests(unittest.TestCase):
         caper = {"service_account_json": json.dumps({"client_email": "caper-release@example.invalid"})}
         secret = json.dumps({"dbm_google_play": {"service_account_json": account}, "google_play": caper})
         result = self.run_step(
-            step["run"], SIGNING_SECRET=secret, RUNNER_TEMP=str(self.directory), DBM_BUILD_NUMBER="902"
+            step["run"],
+            SIGNING_SECRET=secret,
+            RUNNER_TEMP=str(self.directory),
+            DBM_BUILD_NUMBER="902",
+            ANDROID_NOTES="* Swipe to refresh",
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual((self.directory / "play.json").read_text().strip(), account)
@@ -179,6 +183,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
             SIGNING_SECRET=json.dumps({"google_play": caper}),
             RUNNER_TEMP=str(self.directory),
             DBM_BUILD_NUMBER="902",
+            ANDROID_NOTES="* Swipe to refresh",
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse((self.directory / "calls").exists())
