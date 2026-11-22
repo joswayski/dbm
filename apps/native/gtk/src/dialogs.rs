@@ -812,7 +812,7 @@ fn form_dialog(app: &App, state: &State, form: &ProfileForm) -> gtk::Box {
     } else if form.id.is_some() && !form.password_loaded {
         "Loading saved password…"
     } else {
-        "Stored in OS keychain"
+        "Stored in system keyring"
     }));
     let handle = app.clone();
     let preview_ref = preview.downgrade();
@@ -883,7 +883,7 @@ fn form_dialog(app: &App, state: &State, form: &ProfileForm) -> gtk::Box {
     );
     fields.append(&labeled("CA certificate path (optional)", &ca));
     let read_only =
-        gtk::CheckButton::with_label("Read-only profile (blocks GUI edits and mutations)");
+        gtk::CheckButton::with_label("Read-only profile (blocks edits and write queries)");
     read_only.set_active(form.read_only);
     let handle = app.clone();
     read_only.connect_toggled(move |check| {
@@ -921,7 +921,7 @@ fn form_dialog(app: &App, state: &State, form: &ProfileForm) -> gtk::Box {
         content.append(&feedback);
     }
     content.append(&body(
-        "Passwords are stored in your operating system credential manager and are never written to Anybase's profile database.",
+        "Passwords are stored in your system keyring and never written to Anybase’s profile database.",
         &["note"],
     ));
     let actions = ui::hbox(8);

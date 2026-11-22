@@ -100,7 +100,7 @@ final class ProfileSheet: NSWindowController {
     private lazy var passwordButton = GButton("Show", style: .secondary) { [weak self] in self?.togglePassword() }
     private let tlsPopup = GPopUp(items: ["Preferred", "Required", "Disabled"])
     private let caField = GTextField("", placeholder: "/path/to/root-ca.pem")
-    private let readOnlyBox = NSButton(checkboxWithTitle: "Read-only profile (blocks GUI edits and mutations)", target: nil, action: nil)
+    private let readOnlyBox = NSButton(checkboxWithTitle: "Read-only profile (blocks edits and write queries)", target: nil, action: nil)
     private let openOnStartupBox = NSButton(checkboxWithTitle: "Open on startup", target: nil, action: nil)
     private let usernameLabel = label("", font: Graphite.ui(12), color: Graphite.muted)
     private let databaseLabel = label("", font: Graphite.ui(12), color: Graphite.muted)
@@ -247,7 +247,7 @@ final class ProfileSheet: NSWindowController {
         feedbackBox.radius = 7
         feedbackBox.pin(feedback, insets: NSEdgeInsets(top: 9, left: 12, bottom: 9, right: 12))
         feedbackBox.isHidden = true
-        let note = label("Passwords are stored in your operating system credential manager and are never written to Anybase's profile database.",
+        let note = label("Passwords are stored in macOS Keychain and never written to Anybase’s profile database.",
                          font: Graphite.ui(11.5), color: Graphite.faint)
         note.maximumNumberOfLines = 2
         note.lineBreakMode = .byWordWrapping
@@ -293,7 +293,7 @@ final class ProfileSheet: NSWindowController {
         usernameField.stringValue = original?.username ?? engine.presetUser
         databaseField.stringValue = original?.database ?? engine.defaults.database
         passwordField.placeholderAttributedString = NSAttributedString(
-            string: original == nil ? "Stored in OS keychain" : "Loading saved password…",
+            string: original == nil ? "Stored in macOS Keychain" : "Loading saved password…",
             attributes: [.font: Graphite.ui(12.5), .foregroundColor: Graphite.faint])
         tlsPopup.selectItem(withTitle: (original?.tlsMode ?? "preferred").capitalized)
         caField.stringValue = original?.caCertPath ?? ""
@@ -399,7 +399,7 @@ final class ProfileSheet: NSWindowController {
             guard let self else { return }
             defer {
                 self.passwordField.placeholderAttributedString = NSAttributedString(
-                    string: "Stored in OS keychain", attributes: [.font: Graphite.ui(12.5), .foregroundColor: Graphite.faint])
+                    string: "Stored in macOS Keychain", attributes: [.font: Graphite.ui(12.5), .foregroundColor: Graphite.faint])
                 self.updateURLPreview()
                 if let error = self.passwordLoadError, !self.passwordWasEdited {
                     self.show(error.localizedDescription, color: Graphite.danger)

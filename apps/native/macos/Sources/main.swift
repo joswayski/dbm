@@ -118,7 +118,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, NS
         alert.messageText = "The update couldn’t install"
         alert.informativeText = "\(message)\n\nTry again, or download the latest version from anyba.se and install it over this one. Your connections and history stay."
         alert.addButton(withTitle: "Download from anyba.se")
-        alert.addButton(withTitle: "Try Again")
+        alert.addButton(withTitle: "Try again")
         alert.addButton(withTitle: "Close")
         alert.beginSheetModal(for: window) { [weak self] response in
             switch response {
