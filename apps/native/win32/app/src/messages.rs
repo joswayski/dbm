@@ -1,7 +1,7 @@
 //! Message surfaces: the app error strip under the top bar, inline errors
 //! and notices in query and table views, the export result, and the toast.
-//! Errors fade after 10 seconds and notices after 6; an export result stays
-//! until dismissed. The same rules as the egui app's `messages.rs`.
+//! Errors fade after 10 seconds and notices after 6; an export result and
+//! a failed query's error stay until dismissed.
 
 use std::path::PathBuf;
 
@@ -31,6 +31,8 @@ pub struct Message {
     pub shown_at: f64,
     /// A finished export: the file and how many rows it holds.
     pub export: Option<(PathBuf, u64)>,
+    /// Stays until it is dismissed or replaced instead of fading out.
+    pub kept: bool,
 }
 
 impl Message {
@@ -40,6 +42,7 @@ impl Message {
             kind: Kind::Error,
             shown_at: now,
             export: None,
+            kept: false,
         }
     }
 
@@ -49,6 +52,7 @@ impl Message {
             kind: Kind::Notice,
             shown_at: now,
             export: None,
+            kept: false,
         }
     }
 
@@ -58,11 +62,18 @@ impl Message {
             kind: Kind::Notice,
             shown_at: now,
             export: Some((path, rows)),
+            kept: false,
         }
     }
 
+    /// Stays until it is dismissed or replaced.
+    pub fn kept(mut self) -> Self {
+        self.kept = true;
+        self
+    }
+
     fn lifetime(&self) -> Option<f64> {
-        match (self.export.is_some(), self.kind) {
+        match (self.export.is_some() || self.kept, self.kind) {
             (true, _) => None,
             (false, Kind::Error) => Some(ERROR_SECONDS),
             (false, Kind::Notice) => Some(NOTICE_SECONDS),

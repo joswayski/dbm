@@ -276,7 +276,7 @@ impl App {
                 if let Some(View::Query(view)) = self.views.borrow().get(&tab) {
                     let state = self.state.borrow();
                     if let Some(tab) = state.tab(tab) {
-                        view.set_text(&tab.sql);
+                        view.replace_text(&tab.sql);
                     }
                 }
             }
@@ -499,7 +499,14 @@ impl App {
         self.shell.tabs.render(self, &state);
         self.render_content(&state);
         self.render_toast(&state);
-        self.render_dialog(&state);
+        // A dialog that closed took the focused widget with it: the query
+        // editor behind it gets the keyboard back.
+        let closed = self.render_dialog(&state);
+        let focus_editor = focus_editor.or_else(|| {
+            state
+                .active_tab
+                .filter(|id| closed && state.tab(*id).is_some_and(|t| t.kind == TabKind::Query))
+        });
         let busy = self.ticks_needed(&state);
         drop(state);
         self.rendering.set(false);
@@ -730,9 +737,12 @@ impl App {
         }
     }
 
-    fn render_dialog(&self, state: &State) {
+    /// Shows the open dialog, if any. Returns whether the last one closed.
+    fn render_dialog(&self, state: &State) -> bool {
         let signature = dialogs::signature(state);
+        let mut closed = false;
         if *self.dialog_signature.borrow() != signature {
+            closed = signature.is_empty();
             *self.dialog_signature.borrow_mut() = signature;
             ui::clear(&self.shell.modal);
             if let Some(dialog) = dialogs::build(self, state) {
@@ -743,6 +753,7 @@ impl App {
         self.shell
             .modal
             .set_visible(self.shell.modal.first_child().is_some());
+        closed
     }
 
     fn render_content(&self, state: &State) {

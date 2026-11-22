@@ -595,8 +595,10 @@ impl Workbench {
             RequestKind::Query => {
                 self.queue_history(meta.tab);
                 if let Some(tab) = meta.tab {
+                    // A failed query's error stays while the statement is
+                    // fixed: until the next run, or until it is dismissed.
                     self.query_errors
-                        .insert(tab, Message::error(error, self.now));
+                        .insert(tab, Message::error(error, self.now).kept());
                     return;
                 }
             }
@@ -1603,6 +1605,11 @@ mod tests {
         app.fail("boom".into(), &meta(Some(first), RequestKind::Query));
         assert!(app.query_errors.contains_key(&first));
         assert!(!app.query_errors.contains_key(&second));
+        // A failed query's error stays until the next run or a dismiss.
+        assert!(app.query_errors[&first].kept);
+        app.pending_requests.clear();
+        app.run_query(first, "SELECT 1".into(), false, false);
+        assert!(!app.query_errors.contains_key(&first));
         let mut state = TableState::default();
         let p = page();
         state.pending.insert(0, pending_row(&p, &p.rows[0]));

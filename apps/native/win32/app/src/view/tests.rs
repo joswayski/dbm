@@ -160,6 +160,35 @@ fn connecting_lands_in_the_editor_ready_to_type_and_run() {
 }
 
 #[test]
+fn a_failed_querys_error_stays_while_other_messages_fade() {
+    use crate::messages::Message;
+    let mut h = Harness::connected();
+    let tab = h.active_tab();
+    let now = h.time;
+    for (message, stays) in [
+        (
+            Message::error("syntax error at or near \"FORM\"", now).kept(),
+            true,
+        ),
+        (Message::error("Couldn't open the save dialog", now), false),
+    ] {
+        h.app().query_errors.insert(tab, message);
+        h.frame(Vec::new());
+        assert!(h.view.app.query_errors.contains_key(&tab));
+        h.time += 60.0;
+        h.frame(Vec::new());
+        assert_eq!(h.view.app.query_errors.contains_key(&tab), stays);
+        h.time = now;
+    }
+    // The next run replaces the kept error.
+    h.app()
+        .query_errors
+        .insert(tab, Message::error("boom", now).kept());
+    h.key(Modifiers::COMMAND, Key::Enter);
+    assert!(!h.view.app.query_errors.contains_key(&tab));
+}
+
+#[test]
 fn closing_a_tab_frees_its_editor_history() {
     use dbm_ui::text_edit::EditState;
     let mut h = Harness::connected();
@@ -320,6 +349,33 @@ fn a_dialog_takes_the_keyboard_from_the_editor() {
     assert_eq!(h.ctx.focused(), Some(h.editor()));
     h.text("x");
     assert_eq!(h.sql().len(), before.len() + 1);
+}
+
+#[test]
+fn enter_answers_a_confirmation_with_its_default_button() {
+    let mut h = Harness::connected();
+    let tab = h.active_tab();
+    h.key(Modifiers::COMMAND, Key::A);
+    h.text("DELETE FROM users");
+    h.key(Modifiers::COMMAND, Key::Enter);
+    assert!(h.view.app.confirm_query.is_some());
+    // Destructive: Cancel has the keyboard, so Enter runs nothing.
+    h.key(Modifiers::NONE, Key::Enter);
+    assert!(h.view.app.confirm_query.is_none());
+    assert!(!h.view.app.query_results.contains_key(&tab));
+    assert_eq!(
+        h.sql(),
+        "DELETE FROM users",
+        "Enter did not reach the editor"
+    );
+    assert_eq!(h.ctx.focused(), Some(h.editor()));
+
+    // Not destructive: the main action is the default. "Later" is a click.
+    h.app().updates.state = dbm_desktop::updates::State::Failed("Access is denied.".into());
+    h.app().updates.failure_open = true;
+    h.frame(Vec::new());
+    h.key(Modifiers::NONE, Key::Enter);
+    assert!(!h.view.app.updates.failure_open, "Download was pressed");
 }
 
 #[test]

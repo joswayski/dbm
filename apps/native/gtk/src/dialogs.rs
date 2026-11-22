@@ -121,6 +121,27 @@ pub fn build(app: &App, state: &State) -> Option<gtk::Widget> {
     let actions = content
         .last_child()
         .filter(|row| row.has_css_class("dialog-actions"));
+    // A confirmation takes the keyboard, so Enter and Space answer it
+    // instead of reaching the editor behind it: its main action, or Cancel
+    // when that action is destructive. The connection form focuses its own
+    // first field.
+    let form = state.confirm_delete.is_none() && state.profile_form.is_some();
+    if !form && let Some(actions) = &actions {
+        let buttons: Vec<gtk::Widget> =
+            std::iter::successors(actions.first_child(), |child| child.next_sibling()).collect();
+        let default = match buttons.last() {
+            Some(main) if main.has_css_class("danger-button") => buttons.first(),
+            main => main,
+        };
+        if let Some(button) = default {
+            let button = button.downgrade();
+            glib::idle_add_local_once(move || {
+                if let Some(button) = button.upgrade() {
+                    button.grab_focus();
+                }
+            });
+        }
+    }
     if let Some(feedback) = &feedback {
         feedback.set_margin_top(8);
         // Outside the scroller a wrapping label asks for its one-line width,

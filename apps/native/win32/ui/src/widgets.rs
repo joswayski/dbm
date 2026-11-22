@@ -93,6 +93,11 @@ impl<'a> ActionButton<'a> {
         self
     }
 
+    /// A destructive action (`danger_button`).
+    pub fn is_danger(&self) -> bool {
+        matches!(self.kind, ButtonKind::Danger)
+    }
+
     /// A stable id when the label changes ("Run" / "Running…").
     pub fn id(mut self, id: Id) -> Self {
         self.id = Some(id);

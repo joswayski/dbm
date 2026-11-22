@@ -714,6 +714,15 @@ impl Context {
         self.events.splice(0..0, events);
     }
 
+    /// Gives a dialog's default button the keyboard and shows the focus
+    /// ring on it, so it is clear what Enter will press.
+    pub fn focus_default(&mut self, id: Id) {
+        self.focus = Some(id);
+        self.focus_claimed = true;
+        self.keyboard_nav = true;
+        self.unstable = true;
+    }
+
     pub fn surrender_focus(&mut self, id: Id) {
         if self.focus == Some(id) {
             self.focus = None;

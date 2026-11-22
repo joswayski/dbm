@@ -144,6 +144,10 @@ What the app does today, what is deliberately not built yet, and what it stores 
   newly selected query tab puts the caret in its editor. On Windows, Tab and
   Shift+Tab indent and outdent the selected lines. The macOS app does not
   have these yet.
+- On Windows and Linux a failed query's error stays under the editor until
+  the next run or until it is dismissed, and picking a History entry can be
+  undone with Ctrl+Z. Keyword completion is not offered for a word that is
+  already a complete keyword, so Enter after `AS` or `IN` starts a new line.
   Query completion time appears beside the query title; results do not have
   a separate completion or table-viewer status bar.
   **Copy results** copies the displayed query results and headers to the

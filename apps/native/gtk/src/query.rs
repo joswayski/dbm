@@ -443,6 +443,15 @@ impl QueryView {
             gtk::glib::Propagation::Proceed
         });
         self.editor.add_controller(keys);
+        // The list belongs to the caret: it goes when the keyboard does.
+        let focus = gtk::EventControllerFocus::new();
+        let weak = Rc::downgrade(self);
+        focus.connect_leave(move |_| {
+            if let Some(view) = weak.upgrade() {
+                view.close_completion();
+            }
+        });
+        self.editor.add_controller(focus);
         let weak = Rc::downgrade(self);
         self.completion_list.connect_row_activated(move |_, row| {
             if let Some(view) = weak.upgrade() {
@@ -492,6 +501,21 @@ impl QueryView {
     pub fn set_text(&self, text: &str) {
         self.writing.set(true);
         self.buffer.set_text(text);
+        self.buffer.place_cursor(&self.buffer.end_iter());
+        self.writing.set(false);
+    }
+
+    /// Replaces the editor text as one undoable step (a History pick), so
+    /// Ctrl+Z brings back what it replaced. `set_text` clears the undo
+    /// history instead.
+    pub fn replace_text(&self, text: &str) {
+        self.close_completion();
+        self.writing.set(true);
+        self.buffer.begin_user_action();
+        let (mut start, mut end) = self.buffer.bounds();
+        self.buffer.delete(&mut start, &mut end);
+        self.buffer.insert(&mut start, text);
+        self.buffer.end_user_action();
         self.buffer.place_cursor(&self.buffer.end_iter());
         self.writing.set(false);
     }

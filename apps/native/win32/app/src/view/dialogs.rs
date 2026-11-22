@@ -121,7 +121,9 @@ fn release_highlights(ui: &mut Ui, highlights: &[dbm_update::Highlight]) {
     }
 }
 
-/// Cancel (Escape) and a confirm button; `Some(true)` confirms.
+/// Cancel (Escape) and a confirm button; `Some(true)` confirms. The dialog
+/// opens with the keyboard on the confirm button, or on Cancel when
+/// confirming is destructive, so Enter and Space answer it.
 fn confirm_buttons(
     ui: &mut Ui,
     confirm: widgets::ActionButton<'_>,
@@ -129,11 +131,18 @@ fn confirm_buttons(
     enabled: bool,
 ) -> Option<bool> {
     button_row(ui, |row| {
-        if confirm.enabled(enabled).show(row).clicked {
+        let safe = confirm.is_danger() || !enabled;
+        let confirm = confirm.enabled(enabled).show(row);
+        let cancel = secondary_button(cancel).show(row);
+        if confirm.clicked {
             return Some(true);
         }
-        if secondary_button(cancel).show(row).clicked {
+        if cancel.clicked {
             return Some(false);
+        }
+        if row.ctx.focused().is_none() {
+            row.ctx
+                .focus_default(if safe { cancel.id } else { confirm.id });
         }
         None
     })

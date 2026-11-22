@@ -142,7 +142,8 @@ pub enum Kind {
 }
 
 /// An error strip, inline message, or toast. Errors expire after 10 seconds
-/// and notices after 6; an export result stays until dismissed.
+/// and notices after 6; an export result and a failed query's error stay
+/// until dismissed.
 #[derive(Clone, Debug)]
 pub struct Message {
     pub text: String,
@@ -150,6 +151,8 @@ pub struct Message {
     pub shown_at: f64,
     /// A finished export: the file and how many rows it holds.
     pub export: Option<(PathBuf, u64)>,
+    /// Stays until it is dismissed or replaced instead of expiring.
+    pub kept: bool,
 }
 
 impl Message {
@@ -159,7 +162,14 @@ impl Message {
             kind: Kind::Error,
             shown_at: now,
             export: None,
+            kept: false,
         }
+    }
+
+    /// Stays until it is dismissed or replaced.
+    pub fn kept(mut self) -> Self {
+        self.kept = true;
+        self
     }
 
     pub fn notice(text: impl Into<String>, now: f64) -> Self {
@@ -178,7 +188,7 @@ impl Message {
 
     /// When it disappears, if ever.
     pub fn expires_at(&self) -> Option<f64> {
-        match (self.export.is_some(), self.kind) {
+        match (self.export.is_some() || self.kept, self.kind) {
             (true, _) => None,
             (false, Kind::Error) => Some(self.shown_at + ERROR_SECONDS),
             (false, Kind::Notice) => Some(self.shown_at + NOTICE_SECONDS),
@@ -1078,8 +1088,10 @@ impl State {
             RequestKind::Query => {
                 self.queue_history(meta.tab);
                 if let Some(tab) = meta.tab {
+                    // A failed query's error stays while the statement is
+                    // fixed: until the next run, or until it is dismissed.
                     self.query_errors
-                        .insert(tab, Message::error(error, self.now));
+                        .insert(tab, Message::error(error, self.now).kept());
                     return;
                 }
             }
@@ -2051,12 +2063,14 @@ impl State {
         }
     }
 
-    /// History picks replace the editor text.
+    /// History picks replace the editor text (undoable in the editor) and
+    /// hand it the keyboard.
     pub fn pick_history(&mut self, tab_id: u64, sql: String) {
         if let Some(tab) = self.tabs.iter_mut().find(|t| t.id == tab_id) {
             tab.selection = (sql.len(), sql.len());
             tab.sql = sql;
             self.effects.push(Effect::SetSql(tab_id));
+            self.focus_editor = Some(tab_id);
         }
     }
 
@@ -2828,6 +2842,36 @@ pub mod tests {
         assert_eq!(app.expire_messages(), None);
         assert!(app.banner.is_none());
         assert!(app.query_errors.contains_key(&tab), "export results stay");
+    }
+
+    #[test]
+    fn a_failed_querys_error_stays_until_the_next_run_or_a_dismiss() {
+        let mut app = app();
+        app.now = 100.0;
+        app.open_query(Uuid::from_u128(1), true);
+        let tab = app.active_tab.unwrap();
+        app.fail(
+            "syntax error at or near \"FORM\"".into(),
+            &meta(Some(tab), RequestKind::Query),
+        );
+        // No timer is armed for it, and it outlives the 10 seconds other
+        // errors get.
+        assert_eq!(app.expire_messages(), None);
+        app.now = 1_000.0;
+        assert_eq!(app.expire_messages(), None);
+        assert!(app.query_errors.contains_key(&tab));
+        // Running again clears it.
+        app.run_query(tab, "SELECT 1".into(), false, false);
+        assert!(!app.query_errors.contains_key(&tab));
+        // Other messages in the same slot still expire.
+        app.query_errors.insert(
+            tab,
+            Message::notice("Copied 3 result rows as CSV.", 1_000.0),
+        );
+        assert_eq!(app.expire_messages(), Some(1_006.0));
+        app.now = 1_006.0;
+        app.expire_messages();
+        assert!(!app.query_errors.contains_key(&tab));
     }
 
     #[test]

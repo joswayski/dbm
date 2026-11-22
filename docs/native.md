@@ -152,13 +152,14 @@ browsed.
 | Table: staged deletes, hover change preview, pending bar, conflict reload | Done | Done | Done |
 | Table: column resize, collapse, Reset columns; delayed Refreshing overlay | Done | Done | Done |
 | Messages: app error strip, inline query/table errors and notices, export result, toast | Done | Done | Done |
+| Messages: a failed query's error stays until the next run or a dismiss | Done | Done | Not implemented (it fades) |
 | Redis: typed key views and edits (strings, hashes, lists, sets, sorted sets), key index | Done through the shared table view | Done through the shared table view | Done through the shared table view |
 | Tabs: rename, collapse, close guards for staged edits | Done | Done | Done |
 | Keyboard: Delete stages deletion, Escape clears/reverts, Enter commits edits | Done | Done | Done |
 | Keyboard: new connection, new query, close tab (⌘N/⌘T/⌘W, Ctrl+N/T/W) | Done | Done | Done |
 | Keyboard: refresh (F5, Ctrl+R), save staged changes (Ctrl+S), next and previous tab (Ctrl+Tab, Ctrl+Shift+Tab) | Done | Done | Not implemented |
 | Keyboard: a new or newly selected query tab puts the caret in its editor; Ctrl+Enter also runs when the editor does not have the keyboard | Done | Done | Not implemented |
-| Keyboard: dialogs keep Tab and typing to themselves, one Escape closes them | Done | Not checked | Not checked |
+| Keyboard: dialogs keep Tab and typing to themselves, one Escape closes them; confirmations open on their default button (Cancel when the action is destructive) | Done | Done for Escape and the default button; Tab not checked | Not checked |
 | Editor: Tab indents the selected lines, Shift+Tab outdents them | Done | Not implemented | Not checked |
 | Updates: Check for updates / Update to …, signed download, in-place swap | Done | Done | Done |
 | Accessibility | UI Automation provider (names, roles, value, invoke, toggle, focus); screen readers not yet validated | GTK accessibility (AT-SPI) on standard widgets; screen readers not yet validated | Native AppKit controls; not yet validated |

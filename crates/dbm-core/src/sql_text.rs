@@ -957,8 +957,10 @@ const REDIS_COMMANDS: &[&str] = &[
 ];
 
 /// Keyword or command completions for the identifier prefix before the
-/// cursor, in the prefix's case (lowercase stays lowercase). The prefix
-/// itself is excluded.
+/// cursor, in the prefix's case (lowercase stays lowercase). A prefix that
+/// is already a whole keyword or command gets none: the editors accept the
+/// first completion on Enter, which would turn a finished `AS` into `ASC`
+/// or `IN` into `INDEX` at the end of a line.
 pub fn completions(engine: DatabaseEngine, prefix: &str) -> Vec<String> {
     if prefix.is_empty() {
         return Vec::new();
@@ -969,6 +971,9 @@ pub fn completions(engine: DatabaseEngine, prefix: &str) -> Vec<String> {
     } else {
         SQL_KEYWORDS
     };
+    if words.contains(&lower.as_str()) {
+        return Vec::new();
+    }
     let keep_lower = prefix.chars().all(|c| !c.is_ascii_uppercase());
     words
         .iter()
@@ -1800,6 +1805,22 @@ mod tests {
         assert_eq!(completions(PG, "sel"), vec!["select"]);
         assert_eq!(completions(PG, "SEL"), vec!["SELECT"]);
         assert!(completions(PG, "select").is_empty());
+        // A finished word is left alone, though longer keywords start with it.
+        for (engine, word, longer) in [
+            (PG, "as", "asc"),
+            (PG, "IN", "index"),
+            (PG, "or", "order"),
+            (DatabaseEngine::Redis, "get", "getdel"),
+        ] {
+            let words = if engine == PG {
+                SQL_KEYWORDS
+            } else {
+                REDIS_COMMANDS
+            };
+            assert!(words.contains(&longer), "{longer} is offered for a prefix");
+            assert!(completions(engine, word).is_empty(), "{word}");
+        }
+        assert!(completions(PG, "ord").contains(&"order".to_owned()));
         assert!(completions(DatabaseEngine::Redis, "hge").contains(&"hget".to_owned()));
         assert!(completions(PG, "").is_empty());
     }

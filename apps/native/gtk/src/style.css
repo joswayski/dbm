@@ -222,8 +222,8 @@ popover > arrow { background-color: @popover; border-color: @border_strong; }
 .menu-item.danger { color: @danger; }
 .menu-item.danger:hover { background-color: rgba(255,107,97,0.18); color: #ffb3ac; }
 .menu-item.selected { background-color: @accent_strong; color: white; }
-listview.completion row { min-height: 22px; padding: 0 6px; border-radius: 4px; font-size: 12.5px; }
-listview.completion row:selected { background-color: @accent_strong; color: white; }
+list.completion row { min-height: 22px; padding: 0 6px; border-radius: 4px; font-size: 12.5px; }
+list.completion row:selected { background-color: @accent_strong; color: white; }
 
 tooltip { background-color: @popover; border: 1px solid @border_strong; border-radius: 6px; color: @text; }
 tooltip label { font-size: 12px; }
