@@ -661,7 +661,7 @@ impl Workbench {
             } else if form.id.is_some() && !form.password_loaded {
                 "Loading saved password…"
             } else {
-                "Stored in Credential Manager"
+                "Stored in OS keychain"
             };
             let mut enter = false;
             columns(ui, |c, i| {
@@ -781,7 +781,7 @@ impl Workbench {
             widgets::checkbox(
                 ui,
                 &mut form.read_only,
-                "Read-only profile (blocks edits and write queries)",
+                "Read-only profile (blocks GUI edits and mutations)",
             );
             widgets::checkbox(ui, &mut form.open_on_startup, "Open on startup")
                 .on_hover_text("Connect to this profile's saved database when Anybase launches.");
@@ -818,7 +818,7 @@ impl Workbench {
             }
             ui.add_space(8.0);
             ui.frame(dbm_ui::Frame::new().fill(Color32::from_white_alpha(10)).radius(7.0).inner_margin(dbm_ui::Margin::symmetric(12.0, 10.0)), |ui| {
-                ui.label_wrapped("Passwords are stored in Windows Credential Manager and never written to Anybase’s profile database.", theme::ui(11.5), theme::FAINT, false);
+                ui.label_wrapped("Passwords are stored in your operating system credential manager and are never written to Anybase's profile database.", theme::ui(11.5), theme::FAINT, false);
             });
         });
         // Escape and a backdrop click belong to the delete confirmation while

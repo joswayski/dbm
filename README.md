@@ -4,7 +4,7 @@ A fast database client for PostgreSQL, MySQL, and Redis. Native desktop apps
 are released for macOS, Windows, and Linux; native Android and iPhone apps are
 available for [early-access testing](#mobile-status).
 
-**[anyba.se](https://anyba.se)** · Formerly DBM ([rename notes](docs/anybase-migration.md)).
+**[anyba.se](https://anyba.se)**. Formerly DBM ([the rename](docs/anybase-migration.md)).
 
 ## Download
 
@@ -17,7 +17,7 @@ available for [early-access testing](#mobile-status).
 > The Windows installer is not code-signed yet, so SmartScreen may warn on
 > first install. The macOS app is signed and notarized.
 
-![Editing a table in Anybase, with a before-and-after preview of a staged change](docs/screenshots/change-preview.png)
+![Editing a table in Anybase, with a before/after preview of a staged change](docs/screenshots/change-preview.png)
 
 | | |
 | --- | --- |
@@ -26,19 +26,21 @@ available for [early-access testing](#mobile-status).
 
 ## Features
 
-- Native desktop apps for macOS (AppKit), Windows (Win32/Direct2D), and Linux
-  (GTK 4), with bundled Space Mono for UI, SQL, and data.
-- Browse databases, schemas, tables, and Redis keys with filters, sorting, and
+- Released desktop apps are native: AppKit on macOS, Win32 (Direct2D) on
+  Windows, and GTK 4 on Linux, with bundled Space Mono typography for UI, SQL,
+  and data.
+- Browse databases, schemas, tables, and Redis keys, with filters, sorting, and
   CSV export.
 - Edit rows safely: changes are staged, previewed, and saved together.
-  PostgreSQL detects concurrent edits, and read-only profiles block writes.
+  PostgreSQL edits detect rows changed by someone else. Read-only profiles
+  block writes.
 - SQL and Redis workbench tabs with per-connection history.
-- Color-coded connections with passwords stored in your OS credential store.
-- Picks up where you left off: remembers your last database and can open
-  connections on startup.
-- Everything stays on your machine: no telemetry, accounts, or sync.
-- Automatic signed updates with release highlights built from source changes
-  (the app never sends data to generate them).
+- Color-coded saved connections, with passwords kept in your OS credential store.
+- Remembered database selections and per-connection **Open on startup** settings.
+- Your connections, history, and data stay on your machine: no telemetry,
+  accounts, or sync.
+- Updates show what's new. Release highlights are written when a release is
+  built, from source changes only; the app never sends anything to write them.
 
 See [docs/features.md](docs/features.md) for the full feature list and what is
 planned.

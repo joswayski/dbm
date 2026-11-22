@@ -774,8 +774,8 @@ final class WelcomeView: FlippedView {
         title.stringValue = profile?.name ?? "No connection selected"
         if profile != nil {
             message.stringValue = connected
-                ? "Pick a table or key from the sidebar, or open a new tab with + above."
-                : "Not connected yet. Click the connection in the sidebar to connect."
+                ? "Choose a table from the sidebar or open a new query with the plus button above."
+                : "This connection is selected but not connected. Select it again to connect."
         } else {
             message.stringValue = hasProfiles
                 ? "Select a saved connection from the sidebar to browse its data."

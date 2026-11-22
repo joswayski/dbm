@@ -49,18 +49,18 @@ What the app does today, what is deliberately not built yet, and what it stores 
   fullscreen windows are left unchanged.
 - Signed in-app updates from the GitHub Release published for each merge to
   `main`. The update review lists the highlights of every release being
-  installed, linking each version's release. Open tabs, unsaved queries, and
-  staged edits reopen after the restart, and **What's new** (Anybase menu on
-  macOS, Help menu on Windows and Linux) shows recent releases grouped by day;
-  it opens once after an update with highlights you haven't seen.
+  installed, linking each version's release;
+  open tabs, unsaved queries, and staged edits reopen after the restart; and **What's new** (Anybase menu on macOS, Help menu on
+  Windows and Linux) shows recent releases grouped by day; it opens once after an
+  update with highlights you haven't seen.
 - Database list, schemas, tables/views, a sidebar filter for tables and keys,
-  configurable previews up to 200 rows, structured multi-filtering, ordering,
-  visible-page CSV copy, and full filtered CSV export. Redis connections show
-  numbered databases, a SCAN-backed key index, and per-type key folders
-  (strings, hashes, lists, sets, sorted sets, streams) that each show up to 250
-  keys, sampled in one SCAN pass. The pass stops after inspecting about 20,000
-  keys, so on a larger keyspace a rare type's folder can be short or missing;
-  **Keys › all** still lists every key.
+  configurable previews up to 200 rows,
+  structured multi-filtering, ordering, visible-page CSV copy, and full filtered
+  CSV export. Redis connections show numbered databases, a SCAN-backed key
+  index, and per-type key folders (strings, hashes, lists, sets, sorted sets,
+  streams) that each show up to 250 keys, sampled in one SCAN pass. The pass
+  stops after inspecting about 20,000 keys, so on a larger keyspace a rare
+  type's folder can be short or missing; **Keys › all** still lists every key.
 - PostgreSQL and MySQL table pages count matching rows exactly up to 100,000.
   Past that, an unfiltered table shows the database's own estimate with a
   leading `~` (for example `~2,400,000 rows`; PostgreSQL has none until the
@@ -71,10 +71,9 @@ What the app does today, what is deliberately not built yet, and what it stores 
 - CSV exports of PostgreSQL and MySQL tables stream every matching row from
   one statement, so tables without a primary key export each row exactly once
   (PostgreSQL reads one consistent snapshot). Redis exports read the key list,
-  or the exported key, once and write its rows in order. The chosen file is
-  replaced only after every row is written successfully; a failed export leaves
-  an existing file unchanged. A connection lost mid-export reconnects once and
-  restarts the export.
+  or the exported key, once and write its rows in order. The chosen file is replaced only after every row is written
+  successfully; a failed export leaves an existing file unchanged. A connection
+  lost mid-export reconnects once and restarts the export.
 - Redis key-index pages scan the complete matching keyspace, deduplicate keys,
   and default to key-name order; browsing and export have no 5,000-key cutoff.
   Unfiltered key-name pages fetch type and TTL only for visible keys. Filtering
@@ -91,10 +90,11 @@ What the app does today, what is deliberately not built yet, and what it stores 
 - Resizable sidebars and columns, collapsible wide fields, and multi-row
   selection for staged edits and deletes.
 - A small copy button appears only on the hovered, expanded table or
-  query-result cell and copies its full value, including text truncated in the
-  grid and staged edits. Strings retain line breaks, structured values copy as
-  JSON, and null values as `NULL`. Copying a cell does not select or edit its
-  row; the existing CSV actions still copy rows with column headers.
+  query-result cell and copies its full value, including text truncated in
+  the grid and staged edits. Strings
+  retain line breaks, structured values copy as JSON, and null values as `NULL`.
+  Copying a cell does not select or edit its row; the existing CSV actions still
+  copy rows with column headers.
 - A row inspector next to table grids that shows every field of the selected
   row and can stage edits or a delete for it, plus a pending-changes bar with
   Discard and Save.
@@ -110,10 +110,11 @@ What the app does today, what is deliberately not built yet, and what it stores 
   have such a value can still be deleted. Key-index TTL edits take seconds:
   blank or negative removes the expiry, and 0 is rejected instead of deleting
   the key. Editing a string value keeps its expiry on Redis 6.0 and later.
-- Read-only profiles block GUI writes on every engine. PostgreSQL and MySQL
-  sessions for read-only profiles are also marked read-only on the server, so
-  writes the app cannot recognize are rejected too. Statements that would switch
-  such a session back to read-write (`BEGIN READ WRITE`, `SET ... READ WRITE`,
+  Read-only profile
+  mode blocks GUI writes on every engine; PostgreSQL and MySQL sessions for
+  read-only profiles are also marked read-only on the server, so writes the
+  app cannot recognize are rejected too. Statements that would switch such a
+  session back to read-write (`BEGIN READ WRITE`, `SET ... READ WRITE`,
   `SET transaction_read_only`, `RESET ALL`, `DISCARD ALL`) are refused.
 - PostgreSQL table edits share the SQL workbench connection. When a workbench
   transaction is open, a save runs inside a savepoint and becomes permanent
@@ -129,29 +130,28 @@ What the app does today, what is deliberately not built yet, and what it stores 
 - MySQL binary values (`BINARY`, `VARBINARY`, `BLOB`) that are not plain text
   are shown as `\x` hex, and hex entered that way is saved and filtered as bytes.
 - SQL tabs with syntax highlighting and keyword completion, query result
-  grids, a 10,000-row safety cap, and per-profile history. Connecting a profile
-  opens a query tab so you can run SQL immediately. Redis connections open a
-  command workbench (`PING` by default) instead of SQL, running the command on
-  the cursor's line, one command per run; `MULTI`/`EXEC`/`WATCH` are refused
-  because the connection is shared with the sidebar and key views. Scripts with
-  several statements show the last result set. The MySQL workbench keeps one
-  connection, so `USE`, session variables, and explicit transactions carry over
-  between runs. Drag the horizontal grip between the editor/history and results
-  to resize their heights, including when results open in the editable table
-  viewer.
+  grids, a 10,000-row safety cap, and per-profile history. Connecting a profile opens a query tab so you can run
+  SQL immediately. Redis connections open a command workbench (`PING` by
+  default) instead of SQL, running the command on the cursor's line, one
+  command per run; `MULTI`/`EXEC`/`WATCH` are refused because the connection
+  is shared with the sidebar and key views. Scripts with several statements
+  show the last result set. The MySQL workbench keeps one connection, so `USE`, session
+  variables, and explicit transactions carry over between runs.
+  Drag the horizontal grip between the editor/history and results to resize
+  their heights, including when results open in the editable table viewer.
 - Keyboard on Windows and Linux: F5 or Ctrl+R refreshes the tab (a table
   reloads its page, a query tab re-runs its last statement), Ctrl+S saves
   staged changes, Ctrl+Tab and Ctrl+Shift+Tab switch tabs, and a new or
   newly selected query tab puts the caret in its editor. On Windows, Tab and
   Shift+Tab indent and outdent the selected lines. The macOS app does not
   have these yet.
-- Query editor ergonomics on Windows and Linux: a failed query's error stays
-  under the editor until the next run or until dismissed, picking a History
-  entry can be undone with Ctrl+Z, and keyword completion is not offered for a
-  word that is already a complete keyword (so Enter after `AS` or `IN` starts a
-  new line). Query completion time appears beside the query title; results do
-  not have a separate completion or table-viewer status bar.
-- **Copy results** copies the displayed query results and headers to the
+- On Windows and Linux a failed query's error stays under the editor until
+  the next run or until it is dismissed, and picking a History entry can be
+  undone with Ctrl+Z. Keyword completion is not offered for a word that is
+  already a complete keyword, so Enter after `AS` or `IN` starts a new line.
+  Query completion time appears beside the query title; results do not have
+  a separate completion or table-viewer status bar.
+  **Copy results** copies the displayed query results and headers to the
   clipboard as CSV; **Save CSV** saves the same data to a file without
   re-running SQL or Redis commands. Both include all loaded rows, not just
   the rows currently on-screen. Results larger than the preview limit say
@@ -196,13 +196,13 @@ sync, and keep passwords in memory rather than the desktop OS keyring. See the
 [mobile contract](mobile.md) for exact capabilities, private-network guidance,
 lifecycle behavior, build workflows, and outstanding validation.
 
-## Planned follow-ups
+## Desktop deliberate follow-ups
 
 SSH jump-host transport, query cancellation with dedicated sessions, Redis
-Sentinel/Cluster, and encrypted profile sync are not built yet. The profile
-model already reserves the SSH shape, but the backend returns a clear
-unsupported-transport error until forwarding is implemented and tested on all
-three desktop OSes.
+Sentinel/Cluster, and encrypted profile sync are kept out of this vertical
+slice. The profile model already reserves the SSH shape, but the backend
+returns a clear unsupported-transport error until the forwarding
+implementation is added and tested on all three OSes.
 
 ## Local data
 
