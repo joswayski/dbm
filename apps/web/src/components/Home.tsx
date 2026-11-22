@@ -58,20 +58,9 @@ export function Home({ latestChanges, builtAt }: HomeProps) {
   return (
     <main className="mx-auto w-full max-w-2xl px-6 py-16 sm:py-24">
       <header>
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <img src="/icon-192.png" alt="" width={32} height={32} className="h-8 w-8" />
-            <h1 className="text-2xl font-semibold tracking-tight text-ink-strong sm:text-3xl">{PRODUCT_NAME}</h1>
-          </div>
-          <a
-            href={REPO_URL}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1.5 text-sm text-ink-muted no-underline transition-colors duration-150 ease-out hover:text-ink-strong"
-          >
-            <GitHubIcon className="h-4 w-4" />
-            GitHub
-          </a>
+        <div className="flex items-center gap-3">
+          <img src="/icon-192.png" alt="" width={32} height={32} className="h-8 w-8" />
+          <h1 className="text-2xl font-semibold tracking-tight text-ink-strong sm:text-3xl">{PRODUCT_NAME}</h1>
         </div>
 
         <p className="mt-5 max-w-xl text-[0.9375rem] leading-relaxed text-ink-secondary">
@@ -171,22 +160,39 @@ function DownloadAction({ platform }: { platform: DownloadId | null | undefined 
   const download = DOWNLOADS.find((item) => item.id === platform);
   if (!download) {
     return (
-      <div role="note" className="border-l-[3px] border-modified py-1 pl-4">
-        <p className="flex items-center gap-2 text-sm font-semibold text-modified">
-          <WarningIcon className="h-4 w-4 shrink-0" />
-          Desktop app
-        </p>
-        <p className="mt-2 text-sm leading-relaxed text-ink-secondary">
-          {PRODUCT_NAME} runs on macOS, Windows, and Linux. Open this page on your computer to download it.
-        </p>
-      </div>
+      <>
+        <div role="note" className="border-l-[3px] border-modified py-1 pl-4">
+          <p className="flex items-center gap-2 text-sm font-semibold text-modified">
+            <WarningIcon className="h-4 w-4 shrink-0" />
+            Desktop app
+          </p>
+          <p className="mt-2 text-sm leading-relaxed text-ink-secondary">
+            {PRODUCT_NAME} runs on macOS, Windows, and Linux. Open this page on your computer to download it.
+          </p>
+        </div>
+        <div className="mt-6">
+          <SourceButton />
+        </div>
+      </>
     );
   }
 
   return (
-    <a href={download.href} className="download-button">
-      <PlatformIcon id={download.id} />
-      Download for {download.platform}
+    <div className="flex flex-col gap-2.5 sm:flex-row sm:flex-wrap sm:items-center">
+      <a href={download.href} className="download-button">
+        <PlatformIcon id={download.id} />
+        Download for {download.platform}
+      </a>
+      <SourceButton />
+    </div>
+  );
+}
+
+function SourceButton() {
+  return (
+    <a href={REPO_URL} target="_blank" rel="noreferrer" className="source-button">
+      <GitHubIcon className="h-[1.15rem] w-[1.15rem] shrink-0" />
+      View source
     </a>
   );
 }
