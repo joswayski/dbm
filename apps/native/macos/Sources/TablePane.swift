@@ -489,11 +489,8 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
     func numberOfRows(in tableView: NSTableView) -> Int { state.page?.rows.count ?? 0 }
 
     func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
-        let view = GridRowView()
-        if let pending = state.pending[row] {
-            view.mark = pending.deleted ? .deleted : .modified
-        }
-        return view
+        let mark = state.pending[row].map { $0.deleted ? RowMark.deleted : .modified } ?? .none
+        return GridRowView.reusable(in: tableView, mark: mark)
     }
 
     // MARK: Change preview

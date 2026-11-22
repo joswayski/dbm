@@ -247,6 +247,21 @@ final class GridHeaderView: NSTableHeaderView {
 enum RowMark { case none, modified, deleted }
 
 final class GridRowView: NSTableRowView {
+    static let reuseIdentifier = NSUserInterfaceItemIdentifier("grid-row")
+
+    /// A recycled row view, reset for `row`. NSTableView keeps every row view
+    /// its delegate returns until the table goes away, unless the delegate
+    /// dequeues them by identifier; each one also holds its layer's backing
+    /// store, so a fresh view per row grew without bound while scrolling.
+    static func reusable(in tableView: NSTableView, mark: RowMark = .none) -> GridRowView {
+        let view = tableView.makeView(withIdentifier: reuseIdentifier, owner: nil) as? GridRowView ?? GridRowView()
+        view.identifier = reuseIdentifier
+        view.canDrawSubviewsIntoLayer = true
+        view.mark = mark
+        view.hovered = false
+        return view
+    }
+
     var mark = RowMark.none { didSet { needsDisplay = true } }
     /// `tbody tr:hover`: a faint wash, stronger on deleted rows.
     var hovered = false { didSet { if hovered != oldValue { needsDisplay = true } } }
@@ -591,7 +606,7 @@ final class ResultGrid: NSObject, NSTableViewDataSource, NSTableViewDelegate {
 
     func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
 
-    func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? { GridRowView() }
+    func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? { GridRowView.reusable(in: tableView) }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         guard rows.indices.contains(row), let tableColumn,
