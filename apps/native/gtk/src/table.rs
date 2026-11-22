@@ -57,6 +57,9 @@ pub struct TableView {
     inspector_toggle: gtk::Button,
     // filters
     filters: gtk::Box,
+    /// Puts the sort and limit controls beside the Filters header when
+    /// both fit, below it otherwise.
+    reflow_filters: Rc<dyn Fn()>,
     filter_rows: gtk::Box,
     filter_signature: RefCell<String>,
     limit: gtk::SpinButton,
@@ -212,14 +215,30 @@ impl TableView {
         // Windows app, and wrap below it otherwise.
         let top = ui::hbox(12);
         top.append(&header);
-        filters.append(&top);
+        // The row may be wider than the panel for a moment: without this
+        // frame, controls sitting in the row would set the panel's minimum
+        // width, so it could never get narrow enough to move them back down.
+        let top_frame = gtk::ScrolledWindow::new();
+        top_frame.set_policy(gtk::PolicyType::External, gtk::PolicyType::Never);
+        top_frame.set_propagate_natural_height(true);
+        top_frame.set_child(Some(&top));
+        filters.append(&top_frame);
         filters.append(&controls);
         filters.append(&filter_rows);
-        let (row, wrap) = (top.downgrade(), controls.downgrade());
-        filters.add_tick_callback(move |filters, _| {
-            let (Some(row), Some(controls)) = (row.upgrade(), wrap.upgrade()) else {
-                return glib::ControlFlow::Break;
+        let (row, wrap, panel) = (top.downgrade(), controls.downgrade(), filters.downgrade());
+        let row_frame = top_frame.downgrade();
+        let reflow_filters: Rc<dyn Fn()> = Rc::new(move || {
+            let (Some(row), Some(controls), Some(filters), Some(row_frame)) = (
+                row.upgrade(),
+                wrap.upgrade(),
+                panel.upgrade(),
+                row_frame.upgrade(),
+            ) else {
+                return;
             };
+            if filters.width() <= 0 {
+                return;
+            }
             let natural = |w: &gtk::Widget| w.measure(gtk::Orientation::Horizontal, -1).1;
             let header = row.first_child().map_or(0, |h| natural(&h));
             let fits = header + 12 + natural(controls.upcast_ref()) <= filters.width();
@@ -231,10 +250,25 @@ impl TableView {
                 if fits {
                     row.append(&controls);
                 } else {
-                    filters.insert_child_after(&controls, Some(&row));
+                    filters.insert_child_after(&controls, Some(&row_frame));
                 }
             }
-            glib::ControlFlow::Continue
+        });
+        // The row is chosen again when the panel's width changes (this
+        // zero-height probe reports it) and after each refresh, which can
+        // change what the controls hold. A per-frame callback did this
+        // before and kept every table tab awake 60 times a second.
+        let filters_frame = gtk::Overlay::new();
+        filters_frame.set_child(Some(&filters));
+        let probe = gtk::DrawingArea::new();
+        probe.set_valign(gtk::Align::Start);
+        probe.set_can_target(false);
+        filters_frame.add_overlay(&probe);
+        let reflow = reflow_filters.clone();
+        probe.connect_resize(move |_, _, _| {
+            // Not during allocation: moving the controls changes the layout.
+            let reflow = reflow.clone();
+            glib::idle_add_local_once(move || reflow());
         });
         let message = Slot::new();
         message.root.set_margin_bottom(8);
@@ -344,7 +378,7 @@ impl TableView {
         status.append(&page_label);
         status.append(&next);
         root.append(&toolbar);
-        root.append(&filters);
+        root.append(&filters_frame);
         root.append(&message.root);
         root.append(&middle);
         root.append(&pending_bar);
@@ -370,6 +404,7 @@ impl TableView {
             selected_label,
             inspector_toggle,
             filters,
+            reflow_filters,
             filter_rows,
             filter_signature: RefCell::new("unset".into()),
             limit,
@@ -791,6 +826,7 @@ impl TableView {
         self.filters.set_visible(true);
         self.status.set_visible(true);
         self.refresh_filters(table, &page);
+        (self.reflow_filters)();
         self.refresh_grid(app, table, &page, read_only);
         let interactive = !table.loading && !saving;
         self.view.set_sensitive(interactive);
