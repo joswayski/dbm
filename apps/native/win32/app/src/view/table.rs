@@ -7,7 +7,7 @@ use std::cell::RefCell;
 use std::sync::atomic::Ordering;
 
 use dbm_core::cell_values::{editable_text, numeric_column};
-use dbm_core::models::{FilterOperator, TableColumn, TablePage};
+use dbm_core::models::{FilterOperator, OrderSpec, TableColumn, TableMetadata, TablePage};
 use dbm_core::sql_text::{display_value, inline_diff};
 use dbm_ui::a11y::{Node, Role};
 use dbm_ui::icons::{self, Icon};
@@ -160,12 +160,12 @@ fn show(ui: &mut Ui, rect: Rect, cx: &Cx<'_>, state: &mut TableState) -> Vec<Act
         &mut actions,
     );
     let Some(page) = state.page.clone() else {
-        let mut c = ui.child(rest, Dir::Down);
-        message_panel(&mut c, state);
-        let area = c.available_rect();
         if state.loading {
-            loading_skeleton(&mut c, area);
+            first_load(ui, rest, cx, state);
         } else {
+            let mut c = ui.child(rest, Dir::Down);
+            message_panel(&mut c, state);
+            let area = c.available_rect();
             let b = secondary_button("Couldn't load rows · Retry").icon(Icon::Refresh);
             let w = b.width(&c);
             if b.show_in(&mut c, Rect::from_center_size(area.center(), vec2(w, 30.0)))
@@ -245,6 +245,90 @@ fn show(ui: &mut Ui, rect: Rect, cx: &Cx<'_>, state: &mut TableState) -> Vec<Act
     loading_overlay(ui, area, state);
     commit_unfocused_drafts(ui, cx.tab_id, state);
     actions
+}
+
+/// Until the first page arrives, draws the filters, inspector and status bar
+/// a loaded table opens with, disabled and empty, around the skeleton, so the
+/// page doesn't push the grid down when it lands.
+fn first_load(ui: &mut Ui, rect: Rect, cx: &Cx<'_>, state: &mut TableState) {
+    let page = TablePage {
+        metadata: TableMetadata {
+            schema: String::new(),
+            table: String::new(),
+            columns: vec![],
+            primary_key: vec![],
+            has_xmin: false,
+        },
+        columns: vec![],
+        rows: vec![],
+        total_rows: None,
+        total_is_estimate: false,
+        offset: 0,
+        limit: state.limit,
+        has_more: false,
+    };
+    let mut placeholder = TableState {
+        limit: state.limit,
+        filters: vec![FilterDraft::new("")],
+        // Shows the sort direction, as a table with a primary key does.
+        order: Some(OrderSpec {
+            column: String::new(),
+            descending: false,
+        }),
+        ..TableState::default()
+    };
+    let filters_h = filter_panel_height(ui, cx, &placeholder, rect.width());
+    let (filters_rect, rest) = rect.split_top(filters_h);
+    bar(ui, filters_rect, true);
+    {
+        let mut c = ui.child(filters_rect, Dir::Down);
+        c.set_enabled(false);
+        filter_panel(
+            &mut c,
+            filters_rect.inset(12.0, 7.0, 14.0, 7.0),
+            cx,
+            &mut placeholder,
+            &page,
+            &mut Vec::new(),
+        );
+    }
+    let (status_rect, rest) = rest.split_bottom(theme::STATUS_BAR_HEIGHT);
+    bar(ui, status_rect, false);
+    ui.painter().text_mid(
+        status_rect.left() + 14.0,
+        status_rect.center().y,
+        "Loading rows…",
+        theme::ui(11.5),
+        Color32::from_rgb(0x8e, 0x8e, 0x93),
+    );
+    let rest = {
+        let mut c = ui.child(rest, Dir::Down);
+        message_panel(&mut c, state);
+        c.available_rect()
+    };
+    let area = if state.inspector_open {
+        let (inspector_rect, left) = rest.split_right(theme::INSPECTOR_WIDTH);
+        ui.painter().rect_filled(inspector_rect, 0.0, theme::CHROME);
+        ui.painter().vline(
+            inspector_rect.left() + 0.5,
+            inspector_rect.top()..=inspector_rect.bottom(),
+            Stroke::new(1.0, theme::BORDER),
+        );
+        let mut c = ui.child(inspector_rect, Dir::Down);
+        c.set_clip(inspector_rect);
+        c.set_enabled(false);
+        inspector(
+            &mut c,
+            inspector_rect.with_min_x(inspector_rect.left() + 1.0),
+            cx,
+            &mut placeholder,
+            &page,
+        );
+        left
+    } else {
+        rest
+    };
+    loading_skeleton(&mut ui.child(area, Dir::Down), area);
 }
 
 fn toolbar(
@@ -747,7 +831,7 @@ fn query_controls(
         .as_ref()
         .is_some_and(|o| o.descending != descending);
     if changed_column || changed_direction {
-        state.order = Some(dbm_core::models::OrderSpec {
+        state.order = Some(OrderSpec {
             column,
             descending: descending && !changed_column,
         });

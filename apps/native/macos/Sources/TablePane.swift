@@ -382,29 +382,45 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
         addFilterButton?.isEnabled = loaded
         applyButton.isEnabled = loaded
         clearButton.isEnabled = loaded
-        guard let page = state.page else { return }
-        let names = page.columns.map(\.name)
-        let effective = state.effectiveOrder
-        var sortItems = names.map { page.primaryKey.contains($0) ? "\($0) (primary key)" : $0 }
-        if page.primaryKey.isEmpty { sortItems.insert("Choose a sort column", at: 0) }
-        if sortColumn.itemTitles != sortItems { sortColumn.setItems(sortItems) }
-        if let effective, let index = names.firstIndex(of: effective.column) {
-            sortColumn.selectItem(at: index + (page.primaryKey.isEmpty ? 1 : 0))
+        sortColumn.isEnabled = loaded
+        sortDirection.isEnabled = loaded
+        let names: [String]
+        let filters: [FilterDraft]
+        if let page = state.page {
+            names = page.columns.map(\.name)
+            filters = state.filters
+            let effective = state.effectiveOrder
+            var sortItems = names.map { page.primaryKey.contains($0) ? "\($0) (primary key)" : $0 }
+            if page.primaryKey.isEmpty { sortItems.insert("Choose a sort column", at: 0) }
+            if sortColumn.itemTitles != sortItems { sortColumn.setItems(sortItems) }
+            if let effective, let index = names.firstIndex(of: effective.column) {
+                sortColumn.selectItem(at: index + (page.primaryKey.isEmpty ? 1 : 0))
+            } else {
+                sortColumn.selectItem(at: 0)
+            }
+            sortDirection.selectItem(at: effective?.descending == true ? 1 : 0)
+            sortDirection.isHidden = effective == nil
+            directionLabel.isHidden = effective == nil
+            resetColumnsButton.isHidden = !state.columnsResized && state.collapsedColumns.isEmpty
+            clearButton.isHidden = !(!state.applied.isEmpty || state.filters.count > 1
+                || state.filters.contains { !filterNeedsValue($0.operatorName) || !$0.value.trimmingCharacters(in: .whitespaces).isEmpty })
         } else {
-            sortColumn.selectItem(at: 0)
+            // Until the first page arrives, hold the layout a loaded table
+            // opens with (one disabled filter row, a sort direction, no Clear
+            // or Reset columns) so the page doesn't push the grid down.
+            names = [""]
+            filters = [FilterDraft(column: "")]
+            sortDirection.isHidden = false
+            directionLabel.isHidden = false
+            resetColumnsButton.isHidden = true
+            clearButton.isHidden = true
         }
-        sortDirection.selectItem(at: effective?.descending == true ? 1 : 0)
-        sortDirection.isHidden = effective == nil
-        directionLabel.isHidden = effective == nil
-        resetColumnsButton.isHidden = !state.columnsResized && state.collapsedColumns.isEmpty
-        clearButton.isHidden = !(!state.applied.isEmpty || state.filters.count > 1
-            || state.filters.contains { !filterNeedsValue($0.operatorName) || !$0.value.trimmingCharacters(in: .whitespaces).isEmpty })
 
-        let signature = "\(names)|\(state.filters.count)|\(state.filters.map(\.operatorName))"
+        let signature = "\(loaded)|\(names)|\(filters.count)|\(filters.map(\.operatorName))"
         guard signature != filterSignature else { return }
         filterSignature = signature
         filterRows.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        for (index, filter) in state.filters.enumerated() {
+        for (index, filter) in filters.enumerated() {
             let column = GPopUp(items: names, width: 170)
             column.selectItem(withTitle: filter.column)
             column.onSelect = { [weak self] selected in
@@ -443,6 +459,7 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
                 self.reload()
             }
             let row = hstack([column, operatorPopup, value, remove], spacing: 8)
+            if !loaded { [column, operatorPopup, value, remove].compactMap { $0 as? NSControl }.forEach { $0.isEnabled = false } }
             value.setContentHuggingPriority(.init(1), for: .horizontal)
             filterRows.addArrangedSubview(row)
             row.widthAnchor.constraint(equalTo: filterRows.widthAnchor).isActive = true

@@ -6,9 +6,10 @@
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeSet;
 use std::rc::Rc;
+use std::sync::{Arc, LazyLock};
 
 use dbm_core::cell_values::{editable_text, numeric_column};
-use dbm_core::models::{FilterOperator, OrderSpec, TablePage};
+use dbm_core::models::{FilterOperator, OrderSpec, TableColumn, TableMetadata, TablePage};
 use dbm_core::sql_text::{display_value, inline_diff};
 use gtk::glib::{self, BoxedAnyObject};
 use gtk::prelude::*;
@@ -835,13 +836,19 @@ impl TableView {
                 });
             });
         let Some(page) = table.page.clone() else {
-            self.filters.set_visible(false);
-            self.inspector.set_visible(false);
             self.pending_bar.set_visible(false);
-            self.status.set_visible(false);
-            self.show(if table.loading { "skeleton" } else { "retry" });
+            if table.loading {
+                self.refresh_first_load(table);
+                self.show("skeleton");
+            } else {
+                self.filters.set_visible(false);
+                self.inspector.set_visible(false);
+                self.status.set_visible(false);
+                self.show("retry");
+            }
             return;
         };
+        self.filters.set_sensitive(true);
         self.filters.set_visible(true);
         self.status.set_visible(true);
         self.refresh_filters(table, &page);
@@ -861,6 +868,66 @@ impl TableView {
         self.refresh_pending(table, read_only, saving);
         self.refresh_status(table, &page);
         self.refresh_preview(table, &page);
+    }
+
+    /// Until the first page arrives, shows the filters, inspector and status
+    /// bar a loaded table opens with, disabled and empty, so the page doesn't
+    /// push the grid down when it lands.
+    fn refresh_first_load(self: &Rc<Self>, table: &TableState) {
+        static PAGE: LazyLock<Arc<TablePage>> = LazyLock::new(|| {
+            Arc::new(TablePage {
+                metadata: TableMetadata {
+                    schema: String::new(),
+                    table: String::new(),
+                    // One blank column, so the dropdowns show nothing
+                    // rather than GTK's "(None)".
+                    columns: vec![TableColumn {
+                        name: String::new(),
+                        data_type: String::new(),
+                        nullable: true,
+                        default_value: None,
+                        ordinal: 0,
+                    }],
+                    primary_key: vec![],
+                    has_xmin: false,
+                },
+                columns: vec![],
+                rows: vec![],
+                total_rows: None,
+                total_is_estimate: false,
+                offset: 0,
+                limit: MAX_PREVIEW_ROWS,
+                has_more: false,
+            })
+        });
+        let placeholder = TableState {
+            limit: table.limit,
+            filters: vec![FilterDraft::new("")],
+            // Shows the sort direction, as a table with a primary key does.
+            order: Some(OrderSpec {
+                column: String::new(),
+                descending: false,
+            }),
+            ..TableState::default()
+        };
+        self.filters.set_sensitive(false);
+        self.filters.set_visible(true);
+        self.refresh_filters(&placeholder, &PAGE);
+        (self.reflow_filters)();
+        self.inspector.set_visible(table.inspector_open);
+        if table.inspector_open {
+            self.refresh_inspector(&placeholder, &PAGE, true, false);
+        }
+        self.status.set_visible(true);
+        set_text(&self.rows_label, "Loading rows…");
+        set_text(&self.per_page, &format!("{} per page", table.limit));
+        for widget in [
+            self.previous.upcast_ref::<gtk::Widget>(),
+            self.page_label.upcast_ref(),
+            self.next.upcast_ref(),
+        ] {
+            widget.set_visible(false);
+        }
     }
 
     fn show(&self, name: &str) {
