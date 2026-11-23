@@ -144,7 +144,11 @@ class PanelView: NSView {
         let path = CGMutablePath()
         if insetFill, let fill {
             backgroundLayer.fillColor = fill.cgColor
-            path.addRoundedRect(in: layer.bounds.insetBy(dx: 0.5, dy: 0.5), cornerWidth: radius, cornerHeight: radius)
+            let rect = layer.bounds.insetBy(dx: 0.5, dy: 0.5)
+            if rect.width > 0 && rect.height > 0 {
+                let corner = max(0, min(radius, min(rect.width, rect.height) / 2))
+                path.addRoundedRect(in: rect, cornerWidth: corner, cornerHeight: corner)
+            }
         } else {
             backgroundLayer.fillColor = edgeColor.cgColor
         }
