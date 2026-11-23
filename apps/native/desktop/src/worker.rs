@@ -311,15 +311,7 @@ async fn execute_live(state: &AppState, command: Command) -> Result<Payload, Str
             if profile.read_only {
                 return Err("This connection is read-only.".into());
             }
-            Payload::Mutation(
-                state
-                    .session(batch.profile_id)
-                    .await
-                    .map_err(string_error)?
-                    .apply_mutations(&batch)
-                    .await
-                    .map_err(string_error)?,
-            )
+            Payload::Mutation(state.apply_mutations(&batch).await.map_err(string_error)?)
         }
         Command::ExportCsv(request) => {
             let progress = |rows: u64| request.progress.store(rows, Ordering::Relaxed);

@@ -9,8 +9,8 @@ use uuid::Uuid;
 use crate::error::{AppError, AppResult};
 use crate::keyring_store::CredentialStore;
 use crate::models::{
-    ConnectionProfile, ProfileSummary, QueryHistoryEntry, QueryRequest, QueryResponse,
-    SaveProfileInput,
+    ConnectionProfile, MutationBatch, MutationResult, ProfileSummary, QueryHistoryEntry,
+    QueryRequest, QueryResponse, SaveProfileInput,
 };
 use crate::session::DbSession;
 use crate::sql_text::history_text;
@@ -169,32 +169,12 @@ impl AppState {
         // History follows the active database, not the saved default.
         let session = self.session(request.profile_id).await?;
         let database = session.profile().default_database.clone();
-        // Only the harmless preflight is retried. Once SQL or a Redis command
-        // is submitted, a lost response cannot prove it did not execute.
-        let ready = self
-            .with_session_retry(request.profile_id, |session| async move {
-                tokio::time::timeout(PREFLIGHT_TIMEOUT, session.check_connection())
-                    .await
-                    .map_err(|_| {
-                        AppError::connection_lost(
-                            "the server did not answer a connection check in time",
-                        )
-                    })??;
-                Ok(session)
+        let response = self
+            .run_once(request.profile_id, |session| {
+                let (sql, max_rows) = (&request.sql, request.max_rows);
+                async move { session.run_query(sql, max_rows).await }
             })
             .await;
-        let response = match ready {
-            Ok(session) => {
-                let response = session.run_query(&request.sql, request.max_rows).await;
-                if response.as_ref().is_err_and(AppError::is_connection_lost) {
-                    // Prepare for the next explicit run, never replay the command
-                    // or hide its original error if reconnecting also fails.
-                    let _ = self.connect(session.profile().clone()).await;
-                }
-                response
-            }
-            Err(error) => Err(error),
-        };
         // Passwords never reach the SQLite file: credential statements are
         // saved with their literals redacted, or not at all.
         if let Some(sql) = history_text(session.profile().engine, &request.sql) {
@@ -213,6 +193,45 @@ impl AppState {
             }
         }
         response
+    }
+
+    /// Saves staged grid edits on a live connection, like `run_query`: a
+    /// connection that dropped while the table sat open, such as during a
+    /// server restart or failover, is reopened before the edits are sent.
+    pub async fn apply_mutations(&self, batch: &MutationBatch) -> AppResult<MutationResult> {
+        self.run_once(batch.profile_id, |session| async move {
+            session.apply_mutations(batch).await
+        })
+        .await
+    }
+
+    /// Runs a user command that may write. Only the harmless preflight is
+    /// retried: once SQL or a Redis command is submitted, a lost response
+    /// cannot prove it did not execute, so the command never runs twice.
+    async fn run_once<T, F, Fut>(&self, profile_id: Uuid, operation: F) -> AppResult<T>
+    where
+        F: FnOnce(Arc<DbSession>) -> Fut,
+        Fut: Future<Output = AppResult<T>>,
+    {
+        let session = self
+            .with_session_retry(profile_id, |session| async move {
+                tokio::time::timeout(PREFLIGHT_TIMEOUT, session.check_connection())
+                    .await
+                    .map_err(|_| {
+                        AppError::connection_lost(
+                            "the server did not answer a connection check in time",
+                        )
+                    })??;
+                Ok(session)
+            })
+            .await?;
+        let result = operation(session.clone()).await;
+        if result.as_ref().is_err_and(AppError::is_connection_lost) {
+            // Prepare for the next explicit run, never replay the command
+            // or hide its original error if reconnecting also fails.
+            let _ = self.connect(session.profile().clone()).await;
+        }
+        result
     }
 }
 
@@ -410,6 +429,40 @@ mod tests {
         let history = state.store.list_history(id, &database, 10).unwrap();
         assert_eq!(history.len(), 3);
         assert!(history.iter().all(|entry| entry.success));
+
+        // Saving grid edits also recovers a connection that dropped while the
+        // table sat open, as on a server restart or failover.
+        run("CREATE TABLE grid_edits (id INT PRIMARY KEY, label TEXT); INSERT INTO grid_edits VALUES (1, 'before')")
+            .await
+            .unwrap();
+        let pid = run("SELECT pg_backend_pid()").await.unwrap().rows[0][0]
+            .as_i64()
+            .unwrap();
+        observer
+            .run_query(&format!("SELECT pg_terminate_backend({pid})"), None)
+            .await
+            .unwrap();
+        let saved = state
+            .apply_mutations(&crate::models::MutationBatch {
+                profile_id: id,
+                database: database.clone(),
+                schema: "public".into(),
+                table: "grid_edits".into(),
+                mutations: vec![crate::models::RowMutation {
+                    original: vec![json!(1), json!("before")],
+                    changes: vec![json!(1), json!("after")],
+                    primary_key: vec![json!(1)],
+                    xmin: None,
+                    deleted: false,
+                }],
+            })
+            .await
+            .unwrap();
+        assert_eq!(saved.applied, 1);
+        assert_eq!(
+            run("SELECT label FROM grid_edits").await.unwrap().rows,
+            vec![vec![json!("after")]]
+        );
 
         // If the reconnect is rejected, surface the error without executing
         // the pending write. The same profile works once the database is back.

@@ -394,15 +394,9 @@ async fn dispatch(state: &AppState, request: Request) -> Result<Value, String> {
                 .list_history(profile_id, &database, limit.unwrap_or(100).clamp(1, 500))
                 .map_err(message)?,
         ),
-        Request::ApplyTableMutations { batch } => serde_json::to_value(
-            state
-                .session(batch.profile_id)
-                .await
-                .map_err(message)?
-                .apply_mutations(&batch)
-                .await
-                .map_err(message)?,
-        ),
+        Request::ApplyTableMutations { batch } => {
+            serde_json::to_value(state.apply_mutations(&batch).await.map_err(message)?)
+        }
         Request::ExportCsv {
             request,
             columns,

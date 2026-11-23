@@ -166,7 +166,7 @@ What the app does today, what is deliberately not built yet, and what it stores 
   or network transfer; add SQL `LIMIT` when you need to bound those too.
 - Automatically reconnects once after an idle connection closes, staying on the
   selected database, then retries read-only schema and table browsing. Before
-  submitting SQL or a Redis command, the workbench checks the connection and
+  submitting SQL, a Redis command, or staged table edits, Anybase checks the connection and
   reconnects once if it has closed, so the requested command can run without an
   initial error. A server that does not answer the check within 10 seconds
   (after sleep or a dropped VPN, for example) counts as closed too. This adds
@@ -175,7 +175,8 @@ What the app does today, what is deliberately not built yet, and what it stores 
   session variables. Submitted commands are never replayed automatically: even
   `SELECT` can have side effects. A connection error after submission attempts
   reconnection for the next explicit run but still reports the failed command;
-  check its effects before running it again. Table writes are not retried.
+  check its effects before running it again. Table writes get the same check
+  but are never retried once sent.
 - On Windows and Linux, connections work independently: a long query, a large
   export, or an unreachable host on one connection does not hold up browsing,
   queries, or connecting on another, and **Open on startup** connections open
