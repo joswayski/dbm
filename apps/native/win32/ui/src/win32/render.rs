@@ -3,7 +3,7 @@
 //! One D3D11 device (hardware, else WARP on machines without a GPU) backs a
 //! flip-model composition swap chain that a DirectComposition visual shows
 //! in the window. Each frame replays the toolkit's display list with
-//! Direct2D in DIPs (`SetDpi`), text through DirectWrite with Space Mono
+//! Direct2D in DIPs (`SetDpi`), text through DirectWrite with Red Hat Mono
 //! loaded from memory. Text layouts are cached between frames.
 
 use std::cell::RefCell;
@@ -28,11 +28,11 @@ use crate::geom::{Color32, Pos2, Radius, Rect};
 use crate::paint::{DisplayList, Shape};
 use crate::text::{Font, FontBackend};
 
-const SPACE_MONO: [&[u8]; 4] = [
-    include_bytes!("../../../../fonts/SpaceMono-Regular.ttf"),
-    include_bytes!("../../../../fonts/SpaceMono-Bold.ttf"),
-    include_bytes!("../../../../fonts/SpaceMono-Italic.ttf"),
-    include_bytes!("../../../../fonts/SpaceMono-BoldItalic.ttf"),
+const RED_HAT_MONO: [&[u8]; 4] = [
+    include_bytes!("../../../../fonts/RedHatMono-Regular.ttf"),
+    include_bytes!("../../../../fonts/RedHatMono-Bold.ttf"),
+    include_bytes!("../../../../fonts/RedHatMono-Italic.ttf"),
+    include_bytes!("../../../../fonts/RedHatMono-BoldItalic.ttf"),
 ];
 
 fn color(c: Color32) -> D2D1_COLOR_F {
@@ -57,7 +57,7 @@ pub fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().collect()
 }
 
-/// DirectWrite: the Space Mono collection, text formats and glyph advances.
+/// DirectWrite: the Red Hat Mono collection, text formats and glyph advances.
 pub struct Text {
     pub dwrite: IDWriteFactory5,
     fonts: IDWriteFontCollection1,
@@ -85,7 +85,7 @@ impl Text {
             let loader = dwrite.CreateInMemoryFontFileLoader()?;
             dwrite.RegisterFontFileLoader(&loader)?;
             let builder = dwrite.CreateFontSetBuilder()?;
-            for data in SPACE_MONO {
+            for data in RED_HAT_MONO {
                 let file = loader.CreateInMemoryFontFileReference(
                     &dwrite,
                     data.as_ptr().cast(),
@@ -128,7 +128,7 @@ impl Text {
         }
         let f = unsafe {
             let f = self.dwrite.CreateTextFormat(
-                w!("Space Mono"),
+                w!("Red Hat Mono"),
                 &self.fonts,
                 Self::weight(font),
                 Self::style(font),
@@ -137,7 +137,7 @@ impl Text {
                 w!("en-us"),
             )?;
             f.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP)?;
-            // Every line box is Space Mono's, whatever fallback font a run uses.
+            // Every line box is Red Hat Mono's, whatever fallback font a run uses.
             f.SetLineSpacing(
                 DWRITE_LINE_SPACING_METHOD_UNIFORM,
                 font.line_height(),
@@ -227,7 +227,7 @@ impl Text {
     }
 }
 
-/// Glyph advances from Space Mono's design metrics; characters it lacks
+/// Glyph advances from Red Hat Mono's design metrics; characters it lacks
 /// are measured through DirectWrite's system fallback.
 pub struct DWriteMetrics(pub Rc<Text>);
 
@@ -254,7 +254,7 @@ impl FontBackend for DWriteMetrics {
                 let _ = l.GetMetrics(&mut m);
                 m.widthIncludingTrailingWhitespace
             })
-            .unwrap_or(font.size * 0.612)
+            .unwrap_or(font.size * 0.600)
     }
 }
 

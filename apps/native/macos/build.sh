@@ -53,8 +53,8 @@ xcrun lipo -create "${dylibs[@]}" -output "$output/Contents/Frameworks/libdbm_na
 xcrun lipo -create "${executables[@]}" -output "$output/Contents/MacOS/dbm"
 cp "$root/apps/native/macos/Info.plist" "$output/Contents/Info.plist"
 cp "$root/apps/native/icons/icon.icns" "$output/Contents/Resources/icon.icns"
-# Space Mono is bundled (OFL 1.1) and registered at launch; nothing is fetched.
-cp "$root"/apps/native/fonts/SpaceMono-*.ttf "$root/apps/native/fonts/SpaceMono-LICENSE" "$output/Contents/Resources/"
+# Red Hat Mono is bundled (OFL 1.1) and registered at launch; nothing is fetched.
+cp "$root"/apps/native/fonts/RedHatMono-*.ttf "$root/apps/native/fonts/RedHatMono-LICENSE" "$output/Contents/Resources/"
 # Release builds carry their number in the bundle version (DBM_NATIVE_BUILD is
 # also compiled into the bridge for the updater).
 if [[ -n "${DBM_NATIVE_BUILD:-}" ]]; then

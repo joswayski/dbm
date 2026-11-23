@@ -440,7 +440,7 @@ final class GSecureField: NSSecureTextField {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 }
 
-/// Graphite pop-up: control fill, chevron, Space Mono title.
+/// Graphite pop-up: control fill, chevron, Red Hat Mono title.
 final class GPopUpCell: NSPopUpButtonCell {
     override func drawBezel(withFrame frame: NSRect, in controlView: NSView) {
         drawFieldBezel(frame, focused: false, enabled: isEnabled)

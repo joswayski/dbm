@@ -12,7 +12,7 @@ enum Graphite {
     static let palette = ["#4c9aff", "#ff9f43", "#3dd6c6", "#b48cff", "#ff6b8a", "#7ed957", "#f0b14c", "#8e8e93"]
 
     static func font(_ size: CGFloat, bold: Bool = false) -> UIFont {
-        UIFont(name: bold ? "SpaceMono-Bold" : "SpaceMono-Regular", size: size) ?? .monospacedSystemFont(ofSize: size, weight: bold ? .bold : .regular)
+        UIFont(name: bold ? "RedHatMono-Bold" : "RedHatMono-Regular", size: size) ?? .monospacedSystemFont(ofSize: size, weight: bold ? .bold : .regular)
     }
 }
 

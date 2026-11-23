@@ -55,12 +55,12 @@ pub fn parse_color(hex: &str) -> Color32 {
     ACCENT
 }
 
-/// Space Mono Regular: all UI, code and grid text.
+/// Red Hat Mono Regular: all UI, code and grid text.
 pub const fn ui(size: f32) -> Font {
     Font::regular(size)
 }
 
-/// Space Mono Bold, for headings and primary buttons.
+/// Red Hat Mono Bold, for headings and primary buttons.
 pub const fn bold(size: f32) -> Font {
     Font::bold(size)
 }

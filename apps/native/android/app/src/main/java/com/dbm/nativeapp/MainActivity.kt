@@ -77,10 +77,10 @@ private val Accent = Color(0xff4c9aff); private val AccentStrong = Color(0xff3b7
 private val Success = Color(0xff5ad394); private val Danger = Color(0xffff8a80)
 private val Palette = listOf("#4c9aff", "#ff9f43", "#3dd6c6", "#b48cff", "#ff6b8a", "#7ed957", "#f0b14c", "#8e8e93")
 private val UiFont = FontFamily(
-    Font(R.font.space_mono_regular, FontWeight.Normal),
-    Font(R.font.space_mono_bold, FontWeight.Bold),
-    Font(R.font.space_mono_italic, FontWeight.Normal, FontStyle.Italic),
-    Font(R.font.space_mono_bold_italic, FontWeight.Bold, FontStyle.Italic),
+    Font(R.font.red_hat_mono_regular, FontWeight.Normal),
+    Font(R.font.red_hat_mono_bold, FontWeight.Bold),
+    Font(R.font.red_hat_mono_italic, FontWeight.Normal, FontStyle.Italic),
+    Font(R.font.red_hat_mono_bold_italic, FontWeight.Bold, FontStyle.Italic),
 )
 private val MonoFont = UiFont
 private fun profileColor(value: String?) = runCatching { Color(android.graphics.Color.parseColor(value ?: "#4c9aff")) }.getOrDefault(Accent)

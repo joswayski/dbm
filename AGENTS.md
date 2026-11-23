@@ -16,7 +16,7 @@
 - `apps/native/macos` is the macOS app (Swift/AppKit), built by `build.sh`; it calls Rust through the C ABI in `apps/native/bridge`.
 - `apps/native/win32` is the Windows app (Rust Win32: Direct2D/DirectWrite, DirectComposition, UI Automation) with its own Cargo workspace (`dbm-ui` toolkit + `dbm-win32` app); `apps/native/windows` holds its installer, `apps/native/icons` the app icons. It can't run on Linux: cross-lint with `cargo xwin`, preview with its `raster` feature or the `Win32 preview` workflow.
 - `apps/native/gtk` is the Linux app (Rust gtk4-rs, GTK 4.12+ from the host) with its own Cargo workspace. It ships under the egui app's Linux names (`DBM-Linux-x64`, the AppImage's `dbm-workbench`) and settings file so installs update onto it.
-- `apps/native/desktop` (`dbm-desktop`) is the UI-free worker and updater the Win32 and GTK apps share. They replaced an egui app, removed after its last release (v2026.11.11.5); benchmarks compare against that release. `apps/native/fonts` holds the bundled Space Mono files.
+- `apps/native/desktop` (`dbm-desktop`) is the UI-free worker and updater the Win32 and GTK apps share. They replaced an egui app, removed after its last release (v2026.11.11.5); benchmarks compare against that release. `apps/native/fonts` holds the bundled Red Hat Mono files.
 - `apps/native/android` and `apps/native/ios` are development clients. Both call
   the mobile C ABI in-process; there is no hosted proxy. Their contract and
   validation status live in `docs/mobile.md`.
@@ -40,7 +40,7 @@
 
 ## Visual design
 
-- Anybase uses the Graphite design system (`docs/design-system.md`): neutral graphite surfaces, hairline borders, Space Mono for UI and code (bundled, never fetched from a font service at runtime), and a system-blue accent for focus, selection, and the single primary action. Use real regular/bold faces; keep all clients, the website, and the doc in sync.
+- Anybase uses the Graphite design system (`docs/design-system.md`): neutral graphite surfaces, hairline borders, Red Hat Mono for UI and code (bundled, never fetched from a font service at runtime), and a system-blue accent for focus, selection, and the single primary action. Use real regular/bold faces; keep all clients, the website, and the doc in sync.
 - Connection identity is multi-color: each profile has its own color for sidebar, tabs, and main-pane theming. Do not force a single accent across all connections.
 - Establish hierarchy with typography, spacing, and dense-but-readable layout before adding color. Prefer restrained shadows, small corner radii, and concise UI copy.
 - Preserve accessible contrast on dark surfaces. State colors keep stable meanings: `--modified` for staged edits, `--danger` for staged deletes and destructive actions, `--success` for success (and future inserts).

@@ -34,7 +34,7 @@ mobile contract, and [releases](releases.md) for desktop packaging and updates.
   --snapshot-dir DIR` from `apps/native/win32`).
 - `apps/native/gtk` (`dbm-gtk`) is the Linux app, which replaced egui there:
   Rust with gtk4-rs, GTK 4 widgets (`ColumnView` grids, `TextView` editor,
-  popovers) styled with the Graphite CSS and the bundled Space Mono fonts,
+  popovers) styled with the Graphite CSS and the bundled Red Hat Mono fonts,
   which it registers with fontconfig at startup. It is its own Cargo workspace
   and needs GTK 4.12 or newer on the host. It keeps the egui app's settings
   file (`app.ron` under the eframe `DBM` data directory), profile store, and
@@ -72,7 +72,7 @@ discarded with that session.
   for the current architecture and signs ad hoc; `DBM_UNIVERSAL=1` builds for
   Apple Silicon and Intel, and `DBM_SIGNING_IDENTITY` signs with a Developer ID
   and the hardened runtime. It bundles the bridge dylib, the icon, and the
-  Space Mono fonts, and records `DBM_NATIVE_BUILD`, `DBM_APP_VERSION`, and
+  Red Hat Mono fonts, and records `DBM_NATIVE_BUILD`, `DBM_APP_VERSION`, and
   `DBM_NATIVE_VERSION` in `Info.plist` when they are set.
 - `cargo build --manifest-path apps/native/win32/Cargo.toml --locked --release`
   produces `apps/native/win32/target/release/dbm-win32.exe` with the icon
@@ -137,7 +137,7 @@ browsed.
 
 | Area | Win32 (Windows) | GTK 4 (Linux) | AppKit (macOS) |
 | --- | --- | --- | --- |
-| Graphite layout: sidebar, top bar, connection-colored tab strip, toolbars, cards, Space Mono fonts | Done | Done | Done |
+| Graphite layout: sidebar, top bar, connection-colored tab strip, toolbars, cards, Red Hat Mono fonts | Done | Done | Done |
 | Welcome screen, sidebar collapse and resize (persisted) | Done | Done | Done |
 | Profiles: engine picker, URL import, colors, TLS/CA, read-only, test before save | Done | Done | Done |
 | Sidebar: connection subtitles, database picker, filterable schema/keyspace tree, refresh summary toast | Done | Done | Done |

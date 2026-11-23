@@ -47,9 +47,9 @@ enum Graphite {
     static let string = NSColor(hex: 0x9fd88a)
     static let number = NSColor(hex: 0xf0b14c)
 
-    /// Registers the bundled Space Mono faces at launch.
+    /// Registers the bundled Red Hat Mono faces at launch.
     static func registerFonts() {
-        for name in ["SpaceMono-Regular", "SpaceMono-Bold", "SpaceMono-Italic", "SpaceMono-BoldItalic"] {
+        for name in ["RedHatMono-Regular", "RedHatMono-Bold", "RedHatMono-Italic", "RedHatMono-BoldItalic"] {
             if let url = Bundle.main.url(forResource: name, withExtension: "ttf") {
                 CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
             }
@@ -57,7 +57,7 @@ enum Graphite {
     }
 
     static func ui(_ size: CGFloat, _ weight: NSFont.Weight = .regular) -> NSFont {
-        let name = weight.rawValue >= NSFont.Weight.semibold.rawValue ? "SpaceMono-Bold" : "SpaceMono-Regular"
+        let name = weight.rawValue >= NSFont.Weight.semibold.rawValue ? "RedHatMono-Bold" : "RedHatMono-Regular"
         return NSFont(name: name, size: size) ?? .monospacedSystemFont(ofSize: size, weight: weight)
     }
 

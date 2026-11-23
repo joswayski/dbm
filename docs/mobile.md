@@ -54,7 +54,7 @@ verified-TLS database validation; both remain outstanding.
   schema/key exploration and read-only table/key pages use 25 rows per page.
   The mobile Rust bridge clamps larger requests to these caps.
 - Database selection, refresh, loading/errors, and explicit local demo fixtures.
-- The desktop Graphite workbench layout and bundled Space Mono fonts:
+- The desktop Graphite workbench layout and bundled Red Hat Mono fonts:
   connection identity, colored tab edges, compact controls and dense grids.
   The source list opens as a drawer/sheet on portrait phones and stays visible
   at widths of 700 dp/pt or more. Orientation changes keep the workbench open;

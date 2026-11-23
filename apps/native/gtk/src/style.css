@@ -36,7 +36,7 @@
 @define-color theme_selected_bg_color @accent_strong;
 
 * {
-  font-family: "Space Mono", monospace;
+  font-family: "Red Hat Mono", monospace;
   font-size: 13px;
   outline-color: alpha(@accent, 0.35);
 }

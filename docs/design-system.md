@@ -62,14 +62,14 @@ Connection palette offered in the profile editor: `#4c9aff`, `#ff9f43`,
 
 ## Typography
 
-- UI, data, and code: **Space Mono** (OFL 1.1), with monospaced numerals in grids.
+- UI, data, and code: **Red Hat Mono** (OFL 1.1), with monospaced numerals in grids.
 - Use the real regular (400) and bold (700) faces: former medium roles use
   regular, and semibold roles use bold. Keep the existing size scale.
 - Desktop font files live in `apps/native/fonts`; macOS `build.sh`
   copies them into its bundle, the GTK app embeds them and registers them
   with fontconfig, and the Win32 app embeds them and loads them
   into DirectWrite as an in-memory font collection. Android and iPhone bundle the same TTFs in their
-  resources, and the website bundles WOFF2 faces from `@fontsource/space-mono`.
+  resources, and the website bundles WOFF2 faces from `@fontsource/red-hat-mono`.
   No client fetches fonts from an external service at runtime.
 - Native system dialogs, menus, and SF Symbol icons retain platform rendering.
 

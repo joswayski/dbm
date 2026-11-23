@@ -27,7 +27,7 @@ available for [early-access testing](#mobile-status).
 ## Features
 
 - Released desktop apps are native: AppKit on macOS, Win32 (Direct2D) on
-  Windows, and GTK 4 on Linux, with bundled Space Mono typography for UI, SQL,
+  Windows, and GTK 4 on Linux, with bundled Red Hat Mono typography for UI, SQL,
   and data.
 - Browse databases, schemas, tables, and Redis keys, with filters, sorting, and
   CSV export.

@@ -1,5 +1,5 @@
 //! A software renderer for the display list (feature `raster`): tiny-skia
-//! for shapes and ab_glyph for Space Mono, so screens can be snapshot off
+//! for shapes and ab_glyph for Red Hat Mono, so screens can be snapshot off
 //! Windows. It approximates Direct2D closely enough to check layout; the
 //! Windows renderer stays the reference for how text looks.
 
@@ -11,15 +11,15 @@ use crate::paint::{DisplayList, Shape};
 use crate::text::{ASCENT, Font, FontBackend};
 
 static FACES: [&[u8]; 4] = [
-    include_bytes!("../../../fonts/SpaceMono-Regular.ttf"),
-    include_bytes!("../../../fonts/SpaceMono-Bold.ttf"),
-    include_bytes!("../../../fonts/SpaceMono-Italic.ttf"),
-    include_bytes!("../../../fonts/SpaceMono-BoldItalic.ttf"),
+    include_bytes!("../../../fonts/RedHatMono-Regular.ttf"),
+    include_bytes!("../../../fonts/RedHatMono-Bold.ttf"),
+    include_bytes!("../../../fonts/RedHatMono-Italic.ttf"),
+    include_bytes!("../../../fonts/RedHatMono-BoldItalic.ttf"),
 ];
 
 fn face(font: Font) -> FontRef<'static> {
     let i = usize::from(font.bold) | usize::from(font.italic) << 1;
-    FontRef::try_from_slice(FACES[i]).expect("bundled Space Mono parses")
+    FontRef::try_from_slice(FACES[i]).expect("bundled Red Hat Mono parses")
 }
 
 /// Glyph advances from the bundled faces.
@@ -30,7 +30,7 @@ impl FontBackend for RasterMetrics {
         let f = face(font);
         let id = f.glyph_id(ch);
         if id.0 == 0 && !ch.is_ascii() {
-            return font.size * 0.612;
+            return font.size * 0.600;
         }
         f.as_scaled(PxScale::from(font.size * em_to_px(&f)))
             .h_advance(id)

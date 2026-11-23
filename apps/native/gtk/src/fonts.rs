@@ -1,4 +1,4 @@
-//! Bundled Space Mono for Pango, through fontconfig.
+//! Bundled Red Hat Mono for Pango, through fontconfig.
 //!
 //! The Pango in Ubuntu 24.04 (1.52) cannot add a font file to its font map,
 //! so the bundled faces are written to the cache directory and added to the
@@ -9,31 +9,31 @@ use std::path::{Path, PathBuf};
 
 const FONTS: [(&str, &[u8]); 4] = [
     (
-        "SpaceMono-Regular.ttf",
-        include_bytes!("../../fonts/SpaceMono-Regular.ttf"),
+        "RedHatMono-Regular.ttf",
+        include_bytes!("../../fonts/RedHatMono-Regular.ttf"),
     ),
     (
-        "SpaceMono-Bold.ttf",
-        include_bytes!("../../fonts/SpaceMono-Bold.ttf"),
+        "RedHatMono-Bold.ttf",
+        include_bytes!("../../fonts/RedHatMono-Bold.ttf"),
     ),
     (
-        "SpaceMono-Italic.ttf",
-        include_bytes!("../../fonts/SpaceMono-Italic.ttf"),
+        "RedHatMono-Italic.ttf",
+        include_bytes!("../../fonts/RedHatMono-Italic.ttf"),
     ),
     (
-        "SpaceMono-BoldItalic.ttf",
-        include_bytes!("../../fonts/SpaceMono-BoldItalic.ttf"),
+        "RedHatMono-BoldItalic.ttf",
+        include_bytes!("../../fonts/RedHatMono-BoldItalic.ttf"),
     ),
 ];
 
-/// Makes Space Mono available to this process. When it cannot, the app
+/// Makes Red Hat Mono available to this process. When it cannot, the app
 /// falls back to the system monospace font.
 pub fn prepare() {
     let Some(directory) = directory() else {
         return;
     };
     if let Err(error) = install(&directory) {
-        eprintln!("Space Mono is unavailable: {error}");
+        eprintln!("Red Hat Mono is unavailable: {error}");
         return;
     }
     for (name, _) in FONTS {
@@ -94,7 +94,7 @@ fn add_app_font(path: &Path) {
     let added = unsafe { ffi::FcConfigAppFontAddFile(std::ptr::null_mut(), file.as_ptr()) };
     if added == 0 {
         eprintln!(
-            "Space Mono is unavailable: fontconfig rejected {}",
+            "Red Hat Mono is unavailable: fontconfig rejected {}",
             path.display()
         );
     }

@@ -1,4 +1,4 @@
-//! Text measurement and line layout. Every Anybase face is Space Mono, so
+//! Text measurement and line layout. Every Anybase face is Red Hat Mono, so
 //! advances are almost always the same per character; the backend still
 //! reports each one (fallback fonts for CJK or emoji are wider), and the
 //! layout here is what both the renderer and hit testing use.
@@ -7,10 +7,10 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ops::Range;
 
-/// Space Mono's line box (hhea ascender 1120 + descender 361 per 1000 em).
-pub const LINE_HEIGHT: f32 = 1.481;
+/// Red Hat Mono's line box (hhea ascender 1018 + descender 305 per 1000 em).
+pub const LINE_HEIGHT: f32 = 1.323;
 /// The baseline below the top of the line box, in em.
-pub const ASCENT: f32 = 1.12;
+pub const ASCENT: f32 = 1.018;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Font {
@@ -51,7 +51,7 @@ pub trait FontBackend {
     fn advance(&self, ch: char, font: Font) -> f32;
 }
 
-/// A fixed-pitch stand-in for tests: Space Mono's 0.612 em everywhere and
+/// A fixed-pitch stand-in for tests: Red Hat Mono's 0.600 em everywhere and
 /// 1 em for wide (CJK and emoji) characters.
 pub struct MonoMetrics;
 
@@ -63,7 +63,7 @@ impl FontBackend for MonoMetrics {
         } else if wide {
             font.size
         } else {
-            font.size * 0.612
+            font.size * 0.600
         }
     }
 }
@@ -238,11 +238,11 @@ mod tests {
     fn truncation_keeps_whole_characters_and_reports_cuts() {
         let f = fonts();
         let font = Font::regular(10.0);
-        // 6.12 px per character.
+        // 6.0 px per character.
         assert_eq!(f.truncate("abc", font, 30.0), ("abc".into(), false));
         let (text, cut) = f.truncate("abcdefghij", font, 30.0);
         assert!(cut);
-        assert_eq!(text, "abc…");
+        assert_eq!(text, "abcd…");
         assert!(f.width(&text, font) <= 30.0);
         // A second line counts as cut even when the first fits.
         assert_eq!(f.truncate("ab\ncd", font, 100.0), ("ab…".into(), true));
@@ -253,7 +253,7 @@ mod tests {
         let f = fonts();
         let font = Font::regular(10.0);
         let text = "hello world foo";
-        // 7 characters per line (42.8 px).
+        // 7 characters per line (42.0 px).
         let lines = f.wrap(text, font, 45.0);
         let parts: Vec<&str> = lines.iter().map(|l| &text[l.range.clone()]).collect();
         assert_eq!(parts, ["hello", "world", "foo"]);

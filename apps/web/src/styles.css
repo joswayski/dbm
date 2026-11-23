@@ -1,36 +1,36 @@
 @import "tailwindcss";
 
-/* Space Mono is bundled with the site, never fetched from a font CDN. */
+/* Red Hat Mono is bundled with the site, never fetched from a font CDN. */
 @font-face {
-  font-family: "Space Mono";
+  font-family: "Red Hat Mono";
   font-style: normal;
   font-display: swap;
   font-weight: 400;
-  src: url("@fontsource/space-mono/files/space-mono-latin-400-normal.woff2") format("woff2");
+  src: url("@fontsource/red-hat-mono/files/red-hat-mono-latin-400-normal.woff2") format("woff2");
 }
 
 @font-face {
-  font-family: "Space Mono";
+  font-family: "Red Hat Mono";
   font-style: normal;
   font-display: swap;
   font-weight: 700;
-  src: url("@fontsource/space-mono/files/space-mono-latin-700-normal.woff2") format("woff2");
+  src: url("@fontsource/red-hat-mono/files/red-hat-mono-latin-700-normal.woff2") format("woff2");
 }
 
 @font-face {
-  font-family: "Space Mono";
+  font-family: "Red Hat Mono";
   font-style: italic;
   font-display: swap;
   font-weight: 400;
-  src: url("@fontsource/space-mono/files/space-mono-latin-400-italic.woff2") format("woff2");
+  src: url("@fontsource/red-hat-mono/files/red-hat-mono-latin-400-italic.woff2") format("woff2");
 }
 
 @font-face {
-  font-family: "Space Mono";
+  font-family: "Red Hat Mono";
   font-style: italic;
   font-display: swap;
   font-weight: 700;
-  src: url("@fontsource/space-mono/files/space-mono-latin-700-italic.woff2") format("woff2");
+  src: url("@fontsource/red-hat-mono/files/red-hat-mono-latin-700-italic.woff2") format("woff2");
 }
 
 /* Graphite tokens, from docs/design-system.md. */
@@ -56,8 +56,8 @@
 }
 
 @theme {
-  --font-sans: "Space Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  --font-mono: "Space Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --font-sans: "Red Hat Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --font-mono: "Red Hat Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --font-weight-medium: 400;
   --font-weight-semibold: 700;
   --color-canvas: var(--bg);

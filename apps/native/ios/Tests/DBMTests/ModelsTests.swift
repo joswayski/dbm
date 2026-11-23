@@ -4,8 +4,8 @@ import UIKit
 
 final class ModelsTests: XCTestCase {
     func testBundledFontsUseRegisteredPostScriptNames() {
-        for name in ["SpaceMono-Regular", "SpaceMono-Bold", "SpaceMono-Italic", "SpaceMono-BoldItalic"] {
-            XCTAssertEqual(UIFont(name: name, size: 15)?.familyName, "Space Mono", name)
+        for name in ["RedHatMono-Regular", "RedHatMono-Bold", "RedHatMono-Italic", "RedHatMono-BoldItalic"] {
+            XCTAssertEqual(UIFont(name: name, size: 15)?.familyName, "Red Hat Mono", name)
         }
     }
     func testAppMetadataPreservesNativeDisplayAndPrivateNetworkUsage() {
