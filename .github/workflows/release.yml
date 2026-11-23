@@ -166,6 +166,12 @@ jobs:
         with:
           shared-key: appkit-universal
           save-if: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: '0.12.23'
       - name: Prepare Apple signing and notarization credentials
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -249,13 +255,10 @@ jobs:
           outside="$(tar -tzf "$out/DBM.app.tar.gz" | grep -cv '^DBM\.app/' || true)"
           [[ "$outside" == 0 ]] || { echo "DBM.app.tar.gz has entries outside DBM.app/" >&2; exit 1; }
 
-          # A drag-to-Applications disk image for first installs.
-          staging="$RUNNER_TEMP/dmg"
-          mkdir -p "$staging"
-          cp -R "$app" "$staging/"
-          ln -s /Applications "$staging/Applications"
-          hdiutil create -volname "Anybase" -srcfolder "$staging" -ov \
-            -format UDZO "$out/DBM-macOS.dmg"
+          # A drag-to-Applications disk image for first installs, with a custom
+          # Finder window layout and Retina background art.
+          uv run --locked --python 3.12 --script scripts/macos_dmg.py \
+            --verify "$app" "$out/DBM-macOS.dmg"
           codesign --force --timestamp --sign "$DBM_SIGNING_IDENTITY" "$out/DBM-macOS.dmg"
           notarize "$out/DBM-macOS.dmg"
           xcrun stapler staple -v "$out/DBM-macOS.dmg"

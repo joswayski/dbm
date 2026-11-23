@@ -59,6 +59,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, NS
     func applicationDidFinishLaunching(_ notification: Notification) {
         Graphite.registerFonts()
         NSApp.appearance = NSAppearance(named: .darkAqua)
+        if !demo, !CommandLine.arguments.contains("--snapshot-dir"), !updater.confirmInstallLocation() {
+            return
+        }
         installMenu()
         buildWindow()
         if !demo, let saved = Session.take() {

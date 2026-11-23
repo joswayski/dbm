@@ -141,7 +141,7 @@ install_python_dependencies() {
     fi
   done
   # Syncing installs dependencies without executing the distribution scripts.
-  for file in scripts/play-upload.py scripts/testflight-distribute.py scripts/test_mobile_release.py; do
+  for file in scripts/macos_dmg.py scripts/play-upload.py scripts/testflight-distribute.py scripts/test_mobile_release.py; do
     uv sync --locked --python 3.12 --script "$file"
   done
   uvx ruff==0.16.10 --version

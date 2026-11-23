@@ -40,6 +40,63 @@ final class Updater {
 
     var enabled: Bool { currentBuild != nil }
 
+    /// True when a signed release build was opened directly from a mounted disk
+    /// image or macOS App Translocation instead of an Applications folder.
+    /// Finder owns moving the bundle and clearing Gatekeeper translocation, so
+    /// we guide the user instead of copying ourselves.
+    static func launchedFromDiskImage(
+        bundle: URL = Bundle.main.bundleURL,
+        home: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) -> Bool {
+        let resolved = bundle.standardizedFileURL.resolvingSymlinksInPath()
+        let components = resolved.pathComponents
+        let locations = [
+            URL(fileURLWithPath: "/Applications", isDirectory: true),
+            home.appendingPathComponent("Applications", isDirectory: true),
+        ]
+        let inApplications = locations.contains { location in
+            let root = location.standardizedFileURL.resolvingSymlinksInPath().pathComponents
+            return components.count > root.count && Array(components.prefix(root.count)) == root
+        }
+        if inApplications { return false }
+        let path = resolved.path
+        if path.contains("/AppTranslocation/") || path.hasPrefix("/Volumes/") {
+            return true
+        }
+        return !FileManager.default.isWritableFile(atPath: resolved.deletingLastPathComponent().path)
+    }
+
+    /// Prompts the user to install Anybase in Applications when a release build
+    /// is opened straight from the disk image. Returns false when the user
+    /// chose to quit and install it first.
+    func confirmInstallLocation() -> Bool {
+        guard enabled, Self.launchedFromDiskImage() else { return true }
+        let alert = NSAlert()
+        alert.messageText = "Move Anybase to Applications"
+        alert.informativeText = "Anybase is running from the disk image, so automatic updates can’t install.\n\nDrag Anybase onto the Applications folder in the disk image, eject the disk image, then open Anybase from Applications."
+        alert.addButton(withTitle: "Quit")
+        alert.addButton(withTitle: "Open Applications")
+        alert.addButton(withTitle: "Continue Anyway")
+        NSApp.activate(ignoringOtherApps: true)
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            NSApp.terminate(nil)
+            return false
+        case .alertSecondButtonReturn:
+            let manager = FileManager.default
+            var destination = URL(fileURLWithPath: "/Applications", isDirectory: true)
+            if !manager.isWritableFile(atPath: destination.path) {
+                destination = manager.homeDirectoryForCurrentUser.appendingPathComponent("Applications", isDirectory: true)
+                try? manager.createDirectory(at: destination, withIntermediateDirectories: true)
+            }
+            NSWorkspace.shared.open(destination)
+            NSApp.terminate(nil)
+            return false
+        default:
+            return true
+        }
+    }
+
     /// Checks shortly after launch and every 30 minutes, quietly.
     func start() {
         guard enabled else { return }

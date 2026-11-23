@@ -34,7 +34,10 @@ promoted to a wider audience.
 2. **macOS** builds the universal app with `apps/native/macos/build.sh`
    (`DBM_UNIVERSAL=1`), signs it with the Developer ID and the hardened
    runtime, notarizes and staples it, and packages it three ways. The DMG is
-   signed, notarized, and stapled too.
+   assembled headlessly by `scripts/macos_dmg.py` (`dmgbuild`) with a custom
+   drag-to-Applications Finder layout (`apps/native/macos/dmg/`), verified, and
+   then signed, notarized, and stapled too. Release builds also prompt the user
+   to install into Applications if opened directly from the disk image.
 3. **workbench** builds the Win32 app (`apps/native/win32`) on Windows and the
    GTK app (`apps/native/gtk`) on Linux. Linux is also packaged as an AppImage
    (`apps/native/gtk/appimage.sh`). Both replaced egui under its asset names
