@@ -212,7 +212,7 @@ private fun engineTitle(value: String) = when(value) { "postgres" -> "PostgreSQL
             }
         }
         }
-        SecondaryButton("New connection", Icon.Plus, Modifier.fillMaxWidth().padding(10.dp), !s.busy, vm::add)
+        SecondaryButton("New connection", Icon.Plus, Modifier.fillMaxWidth().padding(10.dp), !s.busy, action = vm::add)
     }
 }
 
@@ -244,7 +244,7 @@ private fun matches(node: SchemaNode, filter: String): Boolean = node.name.conta
 
 @Composable private fun QueryPane(vm: DbmViewModel) { val s = vm.state
     Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().height(42.dp).background(Chrome).padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) { Text(if(s.active?.engine == "redis") "Command" else "SQL editor", color = Secondary, fontSize = 12.sp, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis); SecondaryButton("Refresh", Icon.Refresh, Modifier.testTag("refresh-query"), !s.busy && s.lastExecuted != null, vm::refreshQuery); Spacer(Modifier.width(6.dp)); PrimaryButton("Run", Icon.Play, Modifier.testTag("run"), !s.busy && s.sql.isNotBlank(), vm::query) }
+        Row(Modifier.fillMaxWidth().height(42.dp).background(Chrome).padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) { Text(if(s.active?.engine == "redis") "Command" else "SQL editor", color = Secondary, fontSize = 12.sp, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis); SecondaryButton("Refresh", Icon.Refresh, Modifier.testTag("refresh-query"), !s.busy && s.lastExecuted != null, action = vm::refreshQuery); Spacer(Modifier.width(6.dp)); PrimaryButton("Run", Icon.Play, Modifier.testTag("run"), !s.busy && s.sql.isNotBlank(), vm::query) }
         GEditor(s.sql, vm::setSql, Modifier.fillMaxWidth().height(150.dp).testTag("editor"))
         Divider(); DataGrid(s.queryColumns, s.queryRows, Modifier.weight(1f))
         StatusFooter(if(s.queryColumns.isEmpty()) "Ready" else "${s.queryRows.size} rows", s.message)
