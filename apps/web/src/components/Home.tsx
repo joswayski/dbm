@@ -237,6 +237,7 @@ function AndroidBetaSteps() {
             1
           </span>
           Join the testers group
+          <ExternalLinkIcon className="h-4 w-4 shrink-0" />
         </a>
         <p>
           Tap <strong>Join group</strong>, then come back here.
@@ -248,6 +249,7 @@ function AndroidBetaSteps() {
             2
           </span>
           Install from Google Play
+          <ExternalLinkIcon className="h-4 w-4 shrink-0" />
         </a>
         <p>
           Tap <strong>Become a tester</strong>, then install {PRODUCT_NAME}.

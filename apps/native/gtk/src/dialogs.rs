@@ -626,7 +626,7 @@ fn form_dialog(app: &App, state: &State, form: &ProfileForm) -> gtk::Box {
     let text = url_preview_text(form);
     preview.set_text(&text);
     preview.set_tooltip_text(Some(&text));
-    let copy_url = ui::button("secondary-button", None, "Copy URL", "");
+    let copy_url = ui::button("secondary-button", Some(Icon::Copy), "Copy URL", "");
     let handle = app.clone();
     copy_url.connect_clicked(move |_| handle.update(State::copy_profile_url));
     // As on macOS: the URL with Import beside it, then Copy URL and the
@@ -650,7 +650,7 @@ fn form_dialog(app: &App, state: &State, form: &ProfileForm) -> gtk::Box {
         if form.importing_url {
             "Cancel import"
         } else {
-            "Import URL"
+            "Import URL…"
         },
         "",
     );

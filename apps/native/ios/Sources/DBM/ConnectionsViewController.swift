@@ -85,7 +85,7 @@ final class ConnectionsViewController: UIViewController {
         connect.accessibilityIdentifier = "connect-\(profile.id)"
         let more = button(nil, image: "ellipsis") {}
         more.menu = UIMenu(children: [
-            UIAction(title: "Edit connection") { [weak self] _ in self?.edit(ProfileDraft(profile)) },
+            UIAction(title: "Edit connection…") { [weak self] _ in self?.edit(ProfileDraft(profile)) },
             UIAction(title: "Delete connection", attributes: .destructive) { [weak self] _ in self?.confirmDelete(profile) },
         ])
         more.showsMenuAsPrimaryAction = true; more.accessibilityLabel = "Actions for \(profile.name)"; more.size(34, 44)

@@ -990,7 +990,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate, NS
         appMenu.addItem(withTitle: "About Anybase", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         appMenu.addItem(withTitle: "What’s new", action: #selector(menuWhatsNew), keyEquivalent: "").target = self
         appMenu.addItem(withTitle: "Check for updates…", action: #selector(menuCheckUpdates), keyEquivalent: "").target = self
-        appMenu.addItem(withTitle: "Download the latest version…", action: #selector(menuDownloadLatest), keyEquivalent: "").target = self
+        appMenu.addItem(withTitle: "Download the latest version", action: #selector(menuDownloadLatest), keyEquivalent: "").target = self
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Hide Anybase", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         appMenu.addItem(withTitle: "Quit Anybase", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")

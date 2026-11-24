@@ -244,7 +244,7 @@ final class SidebarView: PanelView {
             more.handler = { [weak app, weak more] in
                 guard let app, let more else { return }
                 let menu = NSMenu()
-                menu.addItem(ClosureMenuItem("Edit connection") { app.editProfile(id) })
+                menu.addItem(ClosureMenuItem("Edit connection…") { app.editProfile(id) })
                 if workspace != nil {
                     let item = ClosureMenuItem("Disconnect") { app.disconnect(id) }
                     item.toolTip = "Close this connection and its tabs"

@@ -14,7 +14,7 @@ use gtk::glib;
 use gtk::prelude::*;
 use uuid::Uuid;
 
-use crate::icons::Icon;
+use crate::icons::{self, Icon};
 use crate::settings::{self, Settings};
 use crate::state::{Effect, State, TabKind};
 use crate::ui;
@@ -692,9 +692,13 @@ impl App {
         column.append(&version);
         let busy = matches!(updates.state, Update::Checking | Update::Installing);
         let app = self.clone();
+        // A trailing chevron: it opens a menu.
+        let help_content = ui::hbox(5);
+        help_content.append(&gtk::Label::new(Some("Help")));
+        help_content.append(&icons::image(Icon::ChevronDown, 12));
         let help = ui::menu_button(
             "toolbar-button",
-            &gtk::Label::new(Some("Help")),
+            &help_content,
             "Help",
             move || {
                 let whats_new = app.clone();
@@ -713,7 +717,7 @@ impl App {
                 }
                 let download = app.clone();
                 items.push((
-                    "Download the latest version…".into(),
+                    "Download the latest version".into(),
                     false,
                     Box::new(move || crate::dialogs::open_download_page(&download)),
                 ));
@@ -855,7 +859,7 @@ impl App {
     pub fn profile_menu(&self, id: Uuid, connected: bool) -> Vec<ui::MenuItem> {
         let edit = self.clone();
         let mut items: Vec<ui::MenuItem> = vec![(
-            "Edit connection".into(),
+            "Edit connection…".into(),
             false,
             Box::new(move || edit.update(|state| state.edit_profile(id))),
         )];

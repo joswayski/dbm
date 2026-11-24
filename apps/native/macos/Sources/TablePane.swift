@@ -68,7 +68,7 @@ final class TablePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMen
     let grid = GridTableView()
     private lazy var gridScrollView = gridScroll(grid)
     private let emptyLabel = label("No rows match this view.", font: Graphite.ui(13), color: Graphite.muted)
-    private lazy var retryButton = GButton("Couldn't load rows · Retry", style: .secondary) { [weak self] in self?.refresh() }
+    private lazy var retryButton = GButton("Couldn't load rows · Retry", icon: .refresh, style: .secondary) { [weak self] in self?.refresh() }
     private let inspector = InspectorView()
     private var inspectorWidth: NSLayoutConstraint!
     private var pendingHeight: NSLayoutConstraint!

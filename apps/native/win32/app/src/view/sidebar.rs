@@ -246,7 +246,7 @@ impl Workbench {
         let mut edit = false;
         let mut disconnect = false;
         widgets::menu(ui, &more, 200.0, |ui| {
-            if widgets::menu_item(ui, "Edit connection", false).clicked {
+            if widgets::menu_item(ui, "Edit connection…", false).clicked {
                 edit = true;
                 return true;
             }

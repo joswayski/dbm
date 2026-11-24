@@ -127,7 +127,7 @@ If an install fails, Anybase opens a dialog with the error, **Try again**,
 and **Download from anyba.se**, the same fallback Captures uses: the user can
 install the latest release over the old one, and profiles and history stay.
 Clicking the **Retry update** button it leaves behind reopens it.
-**Download the latest version…** sits beside **Check for updates…** in the
+**Download the latest version** sits beside **Check for updates…** in the
 same menu.
 
 - **macOS:** the new bundle must also pass `codesign --verify`, and is swapped

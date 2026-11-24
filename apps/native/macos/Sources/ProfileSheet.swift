@@ -167,7 +167,7 @@ final class ProfileSheet: NSWindowController {
         header.alignment = .top
 
         engineSegment.onSelect = { [weak self] engine in self?.setEngine(engine) }
-        let importButton = GButton("Import URL", style: .secondary) { [weak self] in self?.toggleImportURL() }
+        let importButton = GButton("Import URL…", style: .secondary) { [weak self] in self?.toggleImportURL() }
         let applyImportButton = GButton("Apply", style: .secondary) { [weak self] in self?.importURL() }
         applyImportButton.isEnabled = false
         urlField.isEditable = false
@@ -198,7 +198,7 @@ final class ProfileSheet: NSWindowController {
         let importEntry = hstack([importURLField, applyImportButton], spacing: 8)
         importEntry.isHidden = true
         importRow = importEntry
-        let copyButton = GButton("Copy URL", style: .secondary) { [weak self] in self?.copyURL() }
+        let copyButton = GButton("Copy URL", icon: .copy, style: .secondary) { [weak self] in self?.copyURL() }
         copyButton.toolTip = "Copy the current connection fields as a URL"
         showURLPassword.target = self
         showURLPassword.action = #selector(showURLPasswordChanged)

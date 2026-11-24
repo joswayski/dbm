@@ -93,7 +93,9 @@ impl Workbench {
             updates::State::Checking | updates::State::Installing
         );
         let font = theme::ui(12.5);
-        let w = ui.ctx.fonts.width("Help", font) + 18.0;
+        let tw = ui.ctx.fonts.width("Help", font);
+        // A trailing chevron, as on `menu_trigger`: it opens a menu.
+        let w = tw + 35.0;
         let rect = ui.allocate(vec2(w, 26.0));
         let id = ui.make_id("help-menu");
         let r = ui.interact(rect, id, Sense::CLICK);
@@ -113,6 +115,15 @@ impl Workbench {
                 font,
                 theme::TEXT,
             );
+            icons::paint(
+                &mut p,
+                Rect::from_center_size(
+                    pos2(rect.left() + 9.0 + tw + 11.0, rect.center().y),
+                    Vec2::splat(12.0),
+                ),
+                Icon::ChevronDown,
+                theme::TEXT,
+            );
         }
         let mut open = false;
         let mut check = false;
@@ -126,7 +137,7 @@ impl Workbench {
                 check = true;
                 return true;
             }
-            if widgets::menu_item(ui, "Download the latest version…", false).clicked {
+            if widgets::menu_item(ui, "Download the latest version", false).clicked {
                 download = true;
                 return true;
             }

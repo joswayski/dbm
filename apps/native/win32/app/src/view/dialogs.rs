@@ -7,6 +7,7 @@ use dbm_core::connection_url::{display_connection_url, format_connection_url};
 use dbm_core::models::{DatabaseEngine, TlsMode};
 use dbm_desktop::updates::{self, WhatsNew};
 use dbm_desktop::worker::Command;
+use dbm_ui::icons::Icon;
 use dbm_ui::input::{Key, Modifiers};
 use dbm_ui::text_edit::{EditState, TextEdit};
 use dbm_ui::widgets::{
@@ -536,7 +537,7 @@ impl Workbench {
                 let import = secondary_button(if form.importing_url {
                     "Cancel import"
                 } else {
-                    "Import URL"
+                    "Import URL…"
                 })
                 .min_width(112.0);
                 let w = (ui.available_width() - import.width(ui) - ui.spacing.x).max(1.0);
@@ -578,7 +579,11 @@ impl Workbench {
                 });
             }
             ui.horizontal(32.0, |ui| {
-                if secondary_button("Copy URL").show(ui).clicked {
+                if secondary_button("Copy URL")
+                    .icon(Icon::Copy)
+                    .show(ui)
+                    .clicked
+                {
                     copy_url = true;
                 }
                 ui.add_space(4.0);
