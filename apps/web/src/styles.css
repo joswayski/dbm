@@ -33,6 +33,29 @@
   src: url("@fontsource/red-hat-mono/files/red-hat-mono-latin-700-italic.woff2") format("woff2");
 }
 
+/* Metric-matched fallback: local Courier New (or a metric clone) given Red Hat Mono's width and
+   line box, so swapping the web font in moves nothing. */
+@font-face {
+  font-family: "Red Hat Mono Fallback";
+  font-weight: 100 550;
+  src:
+    local("Courier New"), local("CourierNewPSMT"), local("Liberation Mono"), local("Cousine"), local("Droid Sans Mono");
+  ascent-override: 101.82%;
+  descent-override: 30.5%;
+  line-gap-override: 0%;
+  size-adjust: 99.984%;
+}
+
+@font-face {
+  font-family: "Red Hat Mono Fallback";
+  font-weight: 551 1000;
+  src: local("Courier New Bold"), local("CourierNewPS-BoldMT"), local("Liberation Mono Bold"), local("Cousine Bold");
+  ascent-override: 101.82%;
+  descent-override: 30.5%;
+  line-gap-override: 0%;
+  size-adjust: 99.984%;
+}
+
 /* Graphite tokens, from docs/design-system.md. */
 :root {
   color-scheme: dark;
@@ -56,8 +79,8 @@
 }
 
 @theme {
-  --font-sans: "Red Hat Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  --font-mono: "Red Hat Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --font-sans: "Red Hat Mono", "Red Hat Mono Fallback", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --font-mono: "Red Hat Mono", "Red Hat Mono Fallback", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --font-weight-medium: 400;
   --font-weight-semibold: 700;
   --color-canvas: var(--bg);
